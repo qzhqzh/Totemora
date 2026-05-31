@@ -28,6 +28,12 @@
     "packages/tui": {
       "name": "@totemora/tui",
       "version": "0.0.0",
+      "bin": {
+        "totemora": "./src/cli.ts",
+      },
+      "dependencies": {
+        "@totemora/core": "workspace:*",
+      },
     },
     "packages/web": {
       "name": "@totemora/web",
