@@ -4,6 +4,9 @@
   "workspaces": {
     "": {
       "name": "totemora",
+      "devDependencies": {
+        "typescript": "^6.0.3",
+      },
     },
     "packages/core": {
       "name": "@totemora/core",
@@ -36,5 +39,7 @@
     "@totemora/tui": ["@totemora/tui@workspace:packages/tui"],
 
     "@totemora/web": ["@totemora/web@workspace:packages/web"],
+
+    "typescript": ["typescript@6.0.3", "https://registry.npmmirror.com/typescript/-/typescript-6.0.3.tgz", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw=="],
   }
 }
