@@ -1,0 +1,64 @@
+agents:
+  - id: gpt_strategist
+    provider: openai
+    model: gpt-5
+    profile:
+      reasoning: 0.95
+      coding: 0.85
+      review: 0.9
+      reading: 0.85
+      speed: 0.6
+      cost: 0.3
+      context: 0.9
+      reliability: 0.8
+      obedience: 0.85
+    eligible_roles:
+      - chief
+      - shaman
+      - reviewer
+    tools:
+      - file_read
+      - web_search
+      - code_review
+
+  - id: qwen_executor
+    provider: qwen
+    model: qwen-plus
+    profile:
+      reasoning: 0.75
+      coding: 0.8
+      review: 0.65
+      reading: 0.7
+      speed: 0.85
+      cost: 0.75
+      context: 0.7
+      reliability: 0.7
+      obedience: 0.75
+      tool_use: 0.75
+    eligible_roles:
+      - warrior
+      - worker
+    tools:
+      - file_read
+      - shell
+      - file_edit
+
+  - id: kimi_scout
+    provider: kimi
+    model: kimi-k2
+    profile:
+      reasoning: 0.8
+      coding: 0.55
+      review: 0.75
+      reading: 0.95
+      speed: 0.65
+      cost: 0.6
+      context: 0.95
+      reliability: 0.72
+      obedience: 0.78
+    eligible_roles:
+      - shaman
+      - scout
+    tools:
+      - file_read
+      - web_search
