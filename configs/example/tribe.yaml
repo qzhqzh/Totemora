@@ -1,0 +1,28 @@
+tribe:
+  id: default
+  name: Default Tribe
+
+  election:
+    strategy: weighted_score
+    required_roles:
+      - chief
+      - shaman
+      - warrior
+
+  council:
+    proposal_count: 3
+    chief_must_choose_one: true
+
+  execution:
+    max_retry_before_help: 2
+    help_targets:
+      - shaman
+      - chief
+
+  review:
+    required: true
+    reviewer: chief
+
+  manual:
+    allow_agent_proposals: true
+    auto_apply: false

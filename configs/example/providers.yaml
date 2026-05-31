@@ -1,0 +1,15 @@
+providers:
+  openai:
+    type: openai_compatible
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_API_KEY
+
+  qwen:
+    type: openai_compatible
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    api_key_env: DASHSCOPE_API_KEY
+
+  kimi:
+    type: openai_compatible
+    base_url: https://api.moonshot.cn/v1
+    api_key_env: MOONSHOT_API_KEY

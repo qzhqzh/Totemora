@@ -1,0 +1,71 @@
+roles:
+  chief:
+    required_capabilities:
+      reasoning: 0.35
+      review: 0.25
+      reliability: 0.25
+      obedience: 0.15
+    max_agents: 1
+    permissions:
+      - decide_plan
+      - accept_result
+      - propose_manual_entry
+
+  shaman:
+    required_capabilities:
+      reasoning: 0.4
+      reading: 0.25
+      review: 0.15
+      context: 0.2
+    max_agents: 1
+    permissions:
+      - propose_plan
+      - advise
+      - answer_help_request
+
+  warrior:
+    required_capabilities:
+      coding: 0.35
+      reasoning: 0.2
+      tool_use: 0.2
+      reliability: 0.25
+    max_agents: 3
+    permissions:
+      - execute_task
+      - request_help
+
+  worker:
+    required_capabilities:
+      speed: 0.3
+      cost: 0.25
+      obedience: 0.25
+      reliability: 0.2
+    max_agents: 5
+    permissions:
+      - summarize
+      - run_check
+      - transfer_context
+      - request_help
+
+  scout:
+    required_capabilities:
+      reading: 0.45
+      context: 0.25
+      reasoning: 0.2
+      reliability: 0.1
+    max_agents: 2
+    permissions:
+      - research
+      - summarize
+      - request_help
+
+  reviewer:
+    required_capabilities:
+      review: 0.45
+      reasoning: 0.25
+      reliability: 0.2
+      obedience: 0.1
+    max_agents: 1
+    permissions:
+      - review_result
+      - request_revision
