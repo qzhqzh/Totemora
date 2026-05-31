@@ -1,0 +1,40 @@
+{
+  "lockfileVersion": 1,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "totemora",
+    },
+    "packages/core": {
+      "name": "@totemora/core",
+      "version": "0.0.0",
+    },
+    "packages/providers": {
+      "name": "@totemora/providers",
+      "version": "0.0.0",
+    },
+    "packages/server": {
+      "name": "@totemora/server",
+      "version": "0.0.0",
+    },
+    "packages/tui": {
+      "name": "@totemora/tui",
+      "version": "0.0.0",
+    },
+    "packages/web": {
+      "name": "@totemora/web",
+      "version": "0.0.0",
+    },
+  },
+  "packages": {
+    "@totemora/core": ["@totemora/core@workspace:packages/core"],
+
+    "@totemora/providers": ["@totemora/providers@workspace:packages/providers"],
+
+    "@totemora/server": ["@totemora/server@workspace:packages/server"],
+
+    "@totemora/tui": ["@totemora/tui@workspace:packages/tui"],
+
+    "@totemora/web": ["@totemora/web@workspace:packages/web"],
+  }
+}
