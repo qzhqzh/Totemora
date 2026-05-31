@@ -1,1 +1,1 @@
-export type * from "./config/types";
+export * from "./config";
