@@ -1,0 +1,14 @@
+{
+  "name": "totemora",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.3.14",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "lint": "bun run scripts/check-workspace.mjs lint",
+    "typecheck": "bun run scripts/check-workspace.mjs typecheck",
+    "test": "bun run scripts/check-workspace.mjs test"
+  }
+}
