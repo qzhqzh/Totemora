@@ -5,6 +5,9 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./config": "./src/config/types.ts"
+    "./config": "./src/config/index.ts"
+  },
+  "dependencies": {
+    "yaml": "^2.9.0"
   }
 }
