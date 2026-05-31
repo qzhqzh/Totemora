@@ -1,352 +1,619 @@
 # Totemora Execution Plan
 
-This document breaks the MVP into implementation-sized work items. Each item should usually become one Issue and one PR.
+This document turns the MVP into executable GitHub-sized work items.
+
+Each numbered item should usually become one Issue and one PR. If an item touches too many files or introduces unclear behavior, split it before implementation.
+
+## Route Alignment
+
+The plan is aligned with the current Totemora goal:
+
+- **Core product form**: TUI-first control plane, not web-first.
+- **Web role**: read-heavy observability and replay, not the early primary operation surface.
+- **Runtime role**: tribe orchestration engine for election, council planning, task dispatch, help escalation, review, trace, and manual proposals.
+- **AI extensibility**: providers are adapters; the tribe schedules agents, not raw model vendors.
+- **Collaboration model**: structured messages and trace records are required before complex autonomous behavior.
+- **Autonomy limit**: agents can propose new rules, but early versions do not silently mutate the tribe manual.
+
+Do not accept changes that move the product toward a generic chatbot, a pure web admin panel, or a hard-coded `planner -> executor -> reviewer` pipeline.
+
+## Development Workflow
+
+Use this workflow for new features:
+
+```text
+Issue -> feat/* branch -> implementation + checks -> conventional commit -> PR
+```
+
+Issue titles should follow this style:
+
+```text
+[M1.1] Define provider config schema
+```
+
+PR titles should stay under 70 characters and use conventional commit style where possible:
+
+```text
+feat(config): define provider schema
+```
+
+Every PR description should include:
+
+- what changed
+- why it changed
+- how it was tested
+- linked Issue
+
+## Cross-Cutting Guardrails
+
+- No committed API keys, tokens, or local secrets.
+- API keys are referenced by environment variable name only.
+- Do not add runtime dependencies without explaining why in the PR.
+- Keep each PR focused on one behavior change.
+- Prefer local files for MVP trace/config storage; do not introduce a database until a later decision.
+- Do not build Web Observatory features before the runtime can produce useful traces.
+- Do not add agent memory evolution before trace, review, and manual proposal flows exist.
 
 ## Milestone 0: Repository Baseline
 
 Goal: make the repository ready for feature development without implementing product behavior.
 
-### 0.1 Initialize Workspace
+### M0.1 Initialize Bun Workspace
 
-- **Goal**: create the minimal project workspace for core, providers, TUI, server, and web packages.
-- **Deliverables**:
-  - package workspace structure
-  - root README entrypoint
-  - root scripts for test, lint, and type check
-  - basic ignore files
+- **Issue**: `[M0.1] Initialize Bun workspace`
+- **Goal**: create a minimal monorepo workspace.
+- **Scope**:
+  - root `package.json`
+  - Bun lockfile if generated
+  - root scripts: `lint`, `typecheck`, `test`
+  - package directories with placeholder package manifests
+- **Packages**:
+  - `packages/core`
+  - `packages/providers`
+  - `packages/tui`
+  - `packages/server`
+  - `packages/web`
 - **Acceptance**:
-  - fresh clone can install dependencies
-  - root checks run without product code
-  - no API keys or local secrets are committed
-- **Notes**:
-  - Use `bun` for frontend/package scripts.
-  - Do not introduce runtime dependencies until a package needs them.
+  - `bun install` succeeds
+  - `bun run lint`, `bun run typecheck`, and `bun run test` exist
+  - checks can pass with placeholder packages
+- **Depends on**: none
 
-### 0.2 Add Development Conventions
+### M0.2 Add Repository Hygiene Files
 
-- **Goal**: document how contributors run, test, and submit changes.
-- **Deliverables**:
-  - development guide
-  - PR checklist
+- **Issue**: `[M0.2] Add repository hygiene files`
+- **Goal**: prevent accidental local or secret files from entering the repo.
+- **Scope**:
+  - `.gitignore`
+  - `.env.example`
+  - optional `.editorconfig`
+- **Acceptance**:
+  - `.env` and local trace output paths are ignored
+  - `.env.example` contains variable names only
+  - no real secrets exist in the repo
+- **Depends on**: none
+
+### M0.3 Add Development Guide
+
+- **Issue**: `[M0.3] Add development guide`
+- **Goal**: document the contributor workflow.
+- **Scope**:
+  - `docs/development.md`
   - command reference
+  - PR checklist
+  - Issue/branch/commit conventions
 - **Acceptance**:
-  - a contributor can set up the repo from docs alone
-  - PR workflow matches Issue -> feature branch -> conventional commit -> PR
+  - a contributor can install, run checks, and open a PR from docs alone
+  - guide matches `Issue -> feat/* -> conventional commit -> PR`
+- **Depends on**: M0.1
 
 ## Milestone 1: Configuration Foundation
 
-Goal: load a local tribe definition without calling any AI provider.
+Goal: load and validate a local tribe definition without calling any AI provider.
 
-### 1.1 Define Config Schema
+### M1.1 Define Config Types
 
-- **Goal**: convert `docs/config-model.md` into concrete typed config objects.
-- **Deliverables**:
+- **Issue**: `[M1.1] Define config types`
+- **Goal**: turn `docs/config-model.md` into typed runtime objects.
+- **Scope**:
   - provider config type
   - agent config type
   - role config type
   - tribe config type
-  - config validation errors with actionable messages
+  - capability score type
 - **Acceptance**:
-  - valid sample config loads successfully
-  - missing provider, missing model, invalid capability score, and unknown role produce clear errors
-  - API keys are referenced by env var name only
+  - types represent all examples in `docs/config-model.md`
+  - no provider-specific code enters `packages/core`
+- **Depends on**: M0.1
 
-### 1.2 Add Sample Local Tribe
+### M1.2 Implement Config Loader
 
-- **Goal**: provide a non-secret local example tribe.
-- **Deliverables**:
-  - example provider config
-  - example agent config
-  - example role config
-  - example tribe config
+- **Issue**: `[M1.2] Implement config loader`
+- **Goal**: load config files from a local config directory.
+- **Scope**:
+  - default config path resolution
+  - explicit `--config-dir` support if CLI exists
+  - parse provider, agent, role, and tribe files
 - **Acceptance**:
-  - sample config has no real secrets
-  - config loader can load the sample
-  - README explains required environment variables
+  - valid config files load into typed objects
+  - missing files produce actionable errors
+  - loader performs no provider network calls
+- **Depends on**: M1.1
 
-### 1.3 Add Config CLI Commands
+### M1.3 Implement Config Validation
 
-- **Goal**: let users inspect local configuration from the terminal.
-- **Deliverables**:
+- **Issue**: `[M1.3] Implement config validation`
+- **Goal**: fail early on invalid local tribe definitions.
+- **Scope**:
+  - missing provider reference
+  - missing model
+  - duplicate agent id
+  - unknown role
+  - invalid capability score outside `0..1`
+  - secret values stored directly instead of env var names
+- **Acceptance**:
+  - each invalid sample has a focused test
+  - validation errors name the bad field and file
+- **Depends on**: M1.2
+
+### M1.4 Add Sample Local Tribe Config
+
+- **Issue**: `[M1.4] Add sample local tribe config`
+- **Goal**: provide a non-secret example tribe.
+- **Scope**:
+  - `configs/example/providers.yaml`
+  - `configs/example/agents.yaml`
+  - `configs/example/roles.yaml`
+  - `configs/example/tribe.yaml`
+- **Acceptance**:
+  - sample config validates
+  - sample includes at least two provider ids
+  - sample contains no real API keys
+- **Depends on**: M1.3
+
+### M1.5 Add Config Inspection Commands
+
+- **Issue**: `[M1.5] Add config inspection commands`
+- **Goal**: let users inspect config from the terminal.
+- **Scope**:
   - `totemora providers list`
   - `totemora agents list`
   - `totemora tribe inspect`
 - **Acceptance**:
-  - commands print provider, agent, role, and tribe summaries
-  - commands fail clearly when config is missing or invalid
-  - no provider network calls happen during inspection
+  - commands show provider ids, agent ids, eligible roles, and tools
+  - invalid config exits non-zero with clear output
+  - commands make no model API requests
+- **Depends on**: M1.4
 
 ## Milestone 2: Provider Layer
 
-Goal: call heterogeneous models through one adapter shape.
+Goal: call heterogeneous model APIs through one adapter shape.
 
-### 2.1 Implement Provider Interface
+### M2.1 Define Provider Contract
 
-- **Goal**: define the runtime-facing provider contract.
-- **Deliverables**:
+- **Issue**: `[M2.1] Define provider contract`
+- **Goal**: define the only interface the runtime uses to call models.
+- **Scope**:
   - `AgentProvider.generate()`
   - `AgentRequest`
   - `AgentResponse`
-  - usage metadata shape
+  - usage metadata
+  - normalized provider error type
 - **Acceptance**:
-  - core runtime can depend on the interface without provider-specific imports
-  - responses can carry raw provider payloads for trace/debug use
+  - `packages/core` can depend on the contract without importing concrete providers
+  - response can carry raw provider payload for trace/debug use
+- **Depends on**: M1.1
 
-### 2.2 Implement OpenAI-Compatible Provider
+### M2.2 Implement OpenAI-Compatible Adapter
 
-- **Goal**: support OpenAI-compatible APIs as the first provider adapter.
-- **Deliverables**:
-  - base URL support
+- **Issue**: `[M2.2] Implement OpenAI-compatible provider`
+- **Goal**: support OpenAI, Qwen, Kimi, GLM, and similar APIs through one adapter.
+- **Scope**:
+  - base URL
   - API key env lookup
   - model selection
-  - text response support
-  - JSON response mode support when available
+  - text response
+  - JSON response mode when available
+  - timeout configuration
 - **Acceptance**:
-  - OpenAI, Qwen, Kimi, and GLM can be configured through the same adapter type
-  - missing env var fails before making a request
-  - provider errors are normalized for the runtime
+  - missing env var fails before request
+  - provider errors are normalized
+  - adapter has tests using mocked HTTP responses
+- **Depends on**: M2.1
 
-### 2.3 Add Provider Smoke Command
+### M2.3 Add Provider Registry
 
-- **Goal**: verify one provider/agent can answer a small prompt.
-- **Deliverables**:
+- **Issue**: `[M2.3] Add provider registry`
+- **Goal**: instantiate provider adapters from config.
+- **Scope**:
+  - adapter lookup by provider type
+  - provider instance lookup by provider id
+  - unsupported provider type error
+- **Acceptance**:
+  - configured `openai_compatible` providers instantiate
+  - unsupported provider type exits with actionable error
+- **Depends on**: M2.2
+
+### M2.4 Add Provider Smoke Command
+
+- **Issue**: `[M2.4] Add provider smoke command`
+- **Goal**: verify provider configuration manually.
+- **Scope**:
   - `totemora providers smoke <provider_id>`
   - optional `--agent <agent_id>`
+  - latency and model output summary
 - **Acceptance**:
-  - command prints model, latency, and short response
-  - command does not write run traces
-  - failed auth or invalid base URL has clear output
+  - success prints provider id, model, latency, and short response
+  - auth/base URL failures are clear
+  - smoke command does not create run traces
+- **Depends on**: M2.3
 
 ## Milestone 3: Agent Registry and Election
 
 Goal: turn configured models into selectable tribe members.
 
-### 3.1 Implement Agent Registry
+### M3.1 Implement Agent Registry
 
-- **Goal**: load agents with provider bindings, capability profiles, role eligibility, and tools.
-- **Deliverables**:
-  - registry query by id
-  - registry query by eligible role
-  - validation that every agent references an existing provider
+- **Issue**: `[M3.1] Implement agent registry`
+- **Goal**: make configured agents queryable by id, role, and tool capability.
+- **Scope**:
+  - lookup by id
+  - list by eligible role
+  - list by tool permission
+  - validation against provider and role configs
 - **Acceptance**:
-  - duplicate agent ids fail
+  - duplicate ids fail
   - unknown providers fail
   - unknown roles fail
+- **Depends on**: M1.4
 
-### 3.2 Implement Role Fitness Scoring
+### M3.2 Implement Role Fitness Scoring
 
-- **Goal**: rank agents for roles using configured capability weights.
-- **Deliverables**:
+- **Issue**: `[M3.2] Implement role fitness scoring`
+- **Goal**: rank agents for roles using capability weights.
+- **Scope**:
   - weighted score calculation
-  - role-specific ranking
   - deterministic tie-breaker
+  - explanation object for selected score
 - **Acceptance**:
-  - Chief favors reasoning, review, reliability, and obedience
-  - Worker favors speed, cost, obedience, and reliability
-  - output explains why each selected agent was chosen
+  - Chief ranking favors reasoning, review, reliability, and obedience
+  - Worker ranking favors speed, cost, obedience, and reliability
+  - tests cover ranking and tie-break behavior
+- **Depends on**: M3.1
 
-### 3.3 Implement Election Engine
+### M3.3 Implement Election Engine
 
-- **Goal**: select required roles for a run.
-- **Deliverables**:
-  - Chief selection
-  - Shaman selection
-  - Warrior selection
-  - optional Worker/Scout/Reviewer selection
+- **Issue**: `[M3.3] Implement election engine`
+- **Goal**: select run roles from the agent registry.
+- **Scope**:
+  - required roles
+  - max agents per role
+  - incompatible duplicate assignments
+  - election explanation
 - **Acceptance**:
-  - required roles must be filled or the run fails before provider calls
+  - required roles must be filled or run preparation fails
   - same agent is not assigned incompatible roles in one run
-  - election result is traceable
+  - election result includes why each agent was selected
+- **Depends on**: M3.2
 
-## Milestone 4: Run Trace and Message Protocol
+### M3.4 Add Election Preview Command
 
-Goal: make every run auditable before execution becomes complex.
+- **Issue**: `[M3.4] Add election preview command`
+- **Goal**: inspect likely role assignment before a real run.
+- **Scope**:
+  - `totemora tribe elect --goal "<goal>"`
+  - display role, agent, score, and reason
+- **Acceptance**:
+  - command does not call model providers
+  - output shows Chief, Shaman, and at least one Warrior when available
+  - missing role capacity exits non-zero
+- **Depends on**: M3.3
 
-### 4.1 Define Run Data Model
+## Milestone 4: Trace and Message Foundation
 
+Goal: make runs auditable before complex autonomy exists.
+
+### M4.1 Define Run Data Model
+
+- **Issue**: `[M4.1] Define run data model`
 - **Goal**: persist one run from command input to final report.
-- **Deliverables**:
+- **Scope**:
   - run id
   - user goal
+  - status
   - role assignments
-  - task list
-  - message events
+  - tasks
+  - messages
   - provider calls
   - review result
   - final report
 - **Acceptance**:
-  - run data can be written and read locally
-  - incomplete and failed runs are still inspectable
+  - model can represent pending, running, succeeded, failed, and cancelled runs
+  - incomplete runs remain inspectable
+- **Depends on**: M3.3
 
-### 4.2 Implement Structured Messages
+### M4.2 Implement Local Trace Store
 
-- **Goal**: prevent agent collaboration from becoming free-form chat.
-- **Deliverables**:
-  - proposal
-  - decision
-  - task_assignment
-  - progress
-  - blocker
-  - help_request
-  - review
-  - final_report
+- **Issue**: `[M4.2] Implement local trace store`
+- **Goal**: save run data locally without a database.
+- **Scope**:
+  - create run
+  - append event
+  - list runs
+  - read run
+  - handle partial writes defensively
 - **Acceptance**:
-  - every agent-to-agent communication has a message type
-  - messages include sender, optional recipient, run id, and timestamp
+  - trace files are ignored by git by default
+  - failed and incomplete runs can be read
+  - tests cover append/read/list
+- **Depends on**: M4.1
+
+### M4.3 Implement Structured Message Validation
+
+- **Issue**: `[M4.3] Implement structured message validation`
+- **Goal**: prevent agent collaboration from becoming free-form chat.
+- **Scope**:
+  - `proposal`
+  - `decision`
+  - `task_assignment`
+  - `progress`
+  - `blocker`
+  - `help_request`
+  - `review`
+  - `final_report`
+- **Acceptance**:
+  - every agent-to-agent message has type, sender, run id, timestamp, and content
   - invalid message types fail validation
+  - messages can link artifacts
+- **Depends on**: M4.1
 
-### 4.3 Add Trace Inspection Commands
+### M4.4 Add Run Inspection Commands
 
+- **Issue**: `[M4.4] Add run inspection commands`
 - **Goal**: inspect saved runs from terminal.
-- **Deliverables**:
+- **Scope**:
   - `totemora runs`
   - `totemora runs show <run_id>`
   - `totemora runs messages <run_id>`
 - **Acceptance**:
   - user can identify where a failed run stopped
   - output includes role assignment, task state, and final status
+- **Depends on**: M4.2, M4.3
 
 ## Milestone 5: Council Planning
 
 Goal: complete the first meaningful multi-agent collaboration loop.
 
-### 5.1 Implement Task Analyzer
+### M5.1 Implement Rule-Based Task Analyzer
 
-- **Goal**: classify a user command into a lightweight task profile.
-- **Deliverables**:
+- **Issue**: `[M5.1] Implement rule-based task analyzer`
+- **Goal**: classify a user command without requiring a model call.
+- **Scope**:
   - task type
   - needed capabilities
   - expected output type
   - acceptance criteria draft
 - **Acceptance**:
   - coding, research, review, and planning commands produce different profiles
-  - analyzer can run with rules first and model fallback later
+  - analyzer output can feed election scoring
+- **Depends on**: M3.3
 
-### 5.2 Implement Council Proposal Step
+### M5.2 Define Council Prompt Contracts
 
-- **Goal**: ask selected high-capability agents for solution options.
-- **Deliverables**:
-  - Chief prompt
-  - Shaman prompt
-  - optional Scout prompt
-  - 2-3 structured proposals
+- **Issue**: `[M5.2] Define council prompt contracts`
+- **Goal**: standardize proposal and decision outputs.
+- **Scope**:
+  - proposal schema
+  - Chief decision schema
+  - task list schema
+  - failure schema for invalid model output
 - **Acceptance**:
+  - prompts require structured output
+  - invalid output can be rejected and traced
+  - schemas include validation method for each proposal
+- **Depends on**: M4.3
+
+### M5.3 Implement Council Proposal Step
+
+- **Issue**: `[M5.3] Implement council proposal step`
+- **Goal**: ask selected high-capability agents for solution options.
+- **Scope**:
+  - Chief proposal request
+  - Shaman proposal request
+  - optional Scout request
+  - provider call trace
+- **Acceptance**:
+  - produces 2-3 structured proposals when configured agents are available
   - proposals include approach, risks, expected tasks, and validation method
-  - proposals are persisted as trace messages
+  - proposals are persisted as typed messages
+- **Depends on**: M2.3, M5.2
 
-### 5.3 Implement Chief Decision Step
+### M5.4 Implement Chief Decision Step
 
+- **Issue**: `[M5.4] Implement Chief decision step`
 - **Goal**: choose one plan before execution starts.
-- **Deliverables**:
-  - decision prompt
+- **Scope**:
   - selected plan
   - rejection reasons for alternatives
-  - task list
+  - executable task list
+  - task owner roles
 - **Acceptance**:
   - only one plan enters execution
   - decision is persisted as a typed message
   - task list has owner role and acceptance criteria
+- **Depends on**: M5.3
+
+### M5.5 Add Planning-Only Run Command
+
+- **Issue**: `[M5.5] Add planning-only run command`
+- **Goal**: prove the council loop before task execution.
+- **Scope**:
+  - `totemora run --plan-only "<goal>"`
+  - election
+  - proposals
+  - Chief decision
+  - trace output
+- **Acceptance**:
+  - command produces a reviewed plan without executing tasks
+  - run trace contains election, proposals, decision, and final plan
+- **Depends on**: M5.4
 
 ## Milestone 6: Execution Loop
 
 Goal: execute a simple task graph with bounded autonomy.
 
-### 6.1 Implement Task Dispatch
+### M6.1 Define Task State Machine
 
-- **Goal**: assign tasks to agents by role.
-- **Deliverables**:
-  - pending/running/succeeded/failed task states
-  - task owner
+- **Issue**: `[M6.1] Define task state machine`
+- **Goal**: make task execution explicit and traceable.
+- **Scope**:
+  - `pending`
+  - `running`
+  - `succeeded`
+  - `failed`
+  - `blocked`
+  - `cancelled`
+- **Acceptance**:
+  - invalid transitions fail
+  - every transition writes a trace event
+- **Depends on**: M4.2
+
+### M6.2 Implement Deterministic Task Dispatch
+
+- **Issue**: `[M6.2] Implement deterministic task dispatch`
+- **Goal**: assign and run tasks in a simple predictable order.
+- **Scope**:
+  - owner role resolution
+  - agent assignment
+  - sequential execution for MVP
   - task result artifact
 - **Acceptance**:
-  - tasks run in a deterministic order for MVP
+  - tasks run in deterministic order
   - each task result is traceable
-  - failed task can stop the run cleanly
+  - failed task stops or blocks the run cleanly
+- **Depends on**: M5.4, M6.1
 
-### 6.2 Implement Help Escalation
+### M6.3 Implement Help Escalation
 
+- **Issue**: `[M6.3] Implement help escalation`
 - **Goal**: make executors ask for advice after repeated failure.
-- **Deliverables**:
+- **Scope**:
   - retry counter
   - help request message
   - Shaman or Chief advice response
+  - retry with advice
 - **Acceptance**:
   - after configured retry limit, executor asks for help
   - advisor gives guidance rather than taking over execution
   - help interaction is visible in trace
+- **Depends on**: M6.2
 
-### 6.3 Implement Review Gate
+### M6.4 Implement Review Gate
 
+- **Issue**: `[M6.4] Implement review gate`
 - **Goal**: require acceptance before final report.
-- **Deliverables**:
-  - review prompt
+- **Scope**:
+  - review request
   - pass/fail result
-  - revision request on failure
+  - revision request
+  - explicit failure report
 - **Acceptance**:
   - Chief can accept or reject result
   - final report is produced only after acceptance or explicit failure
   - review result is persisted
+- **Depends on**: M6.2
 
-## Milestone 7: TUI MVP
+### M6.5 Add End-to-End Local Run Command
 
-Goal: make the runtime usable from a terminal-native interface.
+- **Issue**: `[M6.5] Add end-to-end local run command`
+- **Goal**: run a complete local tribe workflow from the terminal.
+- **Scope**:
+  - `totemora run "<goal>"`
+  - election
+  - council planning
+  - task execution
+  - help escalation if needed
+  - review
+  - final report
+- **Acceptance**:
+  - command exits zero on accepted result
+  - command exits non-zero on failed run
+  - output includes run id and trace inspection command
+- **Depends on**: M6.3, M6.4
 
-### 7.1 Add Minimal Interactive Shell
+## Milestone 7: TUI Control Plane
 
+Goal: make the runtime usable as a terminal-native product.
+
+### M7.1 Add Minimal Interactive TUI Shell
+
+- **Issue**: `[M7.1] Add minimal interactive TUI shell`
 - **Goal**: provide the first `totemora` interactive entry.
-- **Deliverables**:
+- **Scope**:
   - command input area
   - current tribe summary
   - current run summary
   - live message stream
 - **Acceptance**:
   - user can start a run from TUI
-  - user can see selected roles and task progress
+  - selected roles and task progress are visible
   - user can interrupt a run
+- **Depends on**: M6.5
 
-### 7.2 Add Run Command
+### M7.2 Add TUI Provider and Agent Views
 
-- **Goal**: support direct one-shot command usage.
-- **Deliverables**:
-  - `totemora run "<goal>"`
-  - final report output
-  - run id output
+- **Issue**: `[M7.2] Add TUI provider and agent views`
+- **Goal**: make local tribe composition visible.
+- **Scope**:
+  - provider list
+  - agent list
+  - role eligibility
+  - tool permissions
 - **Acceptance**:
-  - command returns non-zero on failed run
-  - command prints where to inspect trace
-  - command works without launching full-screen UI
+  - TUI can inspect configured providers and agents
+  - no provider network calls happen during inspection
+- **Depends on**: M1.5, M7.1
 
-### 7.3 Add Human Approval Points
+### M7.3 Add Human Approval Points
 
+- **Issue**: `[M7.3] Add human approval points`
 - **Goal**: prevent unsafe or expensive actions from running silently.
-- **Deliverables**:
-  - approval for shell/file edit tools
-  - approval for expensive provider calls when configured
+- **Scope**:
+  - shell tool approval
+  - file edit approval
+  - expensive provider call approval when configured
   - run cancellation
 - **Acceptance**:
   - user can approve, reject, or cancel
   - rejected action is captured in trace
+  - cancelled run remains inspectable
+- **Depends on**: M7.1
 
 ## Milestone 8: Web Observatory
 
-Goal: visualize runs after the TUI workflow is usable.
+Goal: visualize runs after the TUI workflow can produce useful traces.
 
-### 8.1 Add Trace API
+### M8.1 Add Read-Only Trace API
 
+- **Issue**: `[M8.1] Add read-only trace API`
 - **Goal**: expose local run data through a small API.
-- **Deliverables**:
+- **Scope**:
   - list runs
   - get run summary
   - get messages
   - get provider calls
+  - get task timeline
 - **Acceptance**:
   - API is read-only for MVP
-  - failed runs and partial traces are visible
+  - failed and partial runs are visible
+  - API reads from the same local trace store as TUI commands
+- **Depends on**: M4.2, M6.5
 
-### 8.2 Add Run Detail Page
+### M8.2 Add Run Detail Page
 
+- **Issue**: `[M8.2] Add run detail page`
 - **Goal**: show one run's collaboration process.
-- **Deliverables**:
+- **Scope**:
   - role assignments
   - task timeline
   - message timeline
@@ -355,29 +622,102 @@ Goal: visualize runs after the TUI workflow is usable.
 - **Acceptance**:
   - TUI can print a URL for a run
   - user can understand who decided, who executed, and why the run passed or failed
+- **Depends on**: M8.1
 
-## Suggested Order
+### M8.3 Add Manual Proposal View
+
+- **Issue**: `[M8.3] Add manual proposal view`
+- **Goal**: show proposed tribe manual entries without auto-applying them.
+- **Scope**:
+  - list manual proposals from runs
+  - show proposer, reason, and target rule
+  - display accepted/rejected/pending status if available
+- **Acceptance**:
+  - manual proposals are observable
+  - no web action mutates active rules in MVP
+- **Depends on**: M8.2
+
+## Milestone 9: Learning Loop
+
+Goal: improve future elections from recorded outcomes without uncontrolled self-mutation.
+
+### M9.1 Record Agent Performance Outcomes
+
+- **Issue**: `[M9.1] Record agent performance outcomes`
+- **Goal**: capture per-agent run outcomes for future ranking.
+- **Scope**:
+  - role assignment outcome
+  - task success/failure
+  - review pass/fail
+  - latency and token usage
+- **Acceptance**:
+  - outcome data is stored in trace or local profile data
+  - raw provider output is not required for scoring
+- **Depends on**: M6.5
+
+### M9.2 Apply Bounded Reliability Scoring
+
+- **Issue**: `[M9.2] Apply bounded reliability scoring`
+- **Goal**: let historical outcomes influence elections safely.
+- **Scope**:
+  - reliability score calculation
+  - score bounds
+  - decay or minimum sample handling
+- **Acceptance**:
+  - unreliable agents rank lower over time
+  - small sample sizes do not dominate configured capability scores
+  - scoring explanation shows history contribution
+- **Depends on**: M9.1
+
+### M9.3 Add Manual Proposal Acceptance Flow
+
+- **Issue**: `[M9.3] Add manual proposal acceptance flow`
+- **Goal**: allow proposed tribe rules to become active through approval.
+- **Scope**:
+  - pending proposal
+  - accept/reject action
+  - active manual entry
+  - trace link to source run
+- **Acceptance**:
+  - no proposal becomes active without explicit approval
+  - accepted entries are visible to future runs
+- **Depends on**: M8.3
+
+## Recommended Build Order
 
 ```text
-0.1 -> 0.2
-1.1 -> 1.2 -> 1.3
-2.1 -> 2.2 -> 2.3
-3.1 -> 3.2 -> 3.3
-4.1 -> 4.2 -> 4.3
-5.1 -> 5.2 -> 5.3
-6.1 -> 6.2 -> 6.3
-7.1 -> 7.2 -> 7.3
-8.1 -> 8.2
+M0.1 -> M0.2 -> M0.3
+M1.1 -> M1.2 -> M1.3 -> M1.4 -> M1.5
+M2.1 -> M2.2 -> M2.3 -> M2.4
+M3.1 -> M3.2 -> M3.3 -> M3.4
+M4.1 -> M4.2 -> M4.3 -> M4.4
+M5.1 -> M5.2 -> M5.3 -> M5.4 -> M5.5
+M6.1 -> M6.2 -> M6.3 -> M6.4 -> M6.5
+M7.1 -> M7.2 -> M7.3
+M8.1 -> M8.2 -> M8.3
+M9.1 -> M9.2 -> M9.3
 ```
 
-## Release Criteria
+## MVP Release Criteria
 
 The MVP can be tagged when:
 
 - a user can configure at least two agents from different providers
 - `totemora run "<goal>"` completes one council-planned run
 - Chief, Shaman, and Warrior roles are selected automatically
-- the run records proposals, decision, tasks, messages, provider calls, review, and final report
-- failed runs are inspectable from TUI commands
+- the run records election, proposals, decision, tasks, messages, provider calls, review, and final report
+- failed runs are inspectable from terminal commands
+- TUI is the main operation surface
 - Web Observatory can open a run and show the collaboration timeline
 
+## Stop-and-Recheck Points
+
+Pause and review the product direction after:
+
+- **M1.5**: config model is real; check whether provider/agent/role separation still feels correct.
+- **M3.4**: election is visible; check whether role assignment matches the tribe metaphor and practical task needs.
+- **M5.5**: council planning works; check whether Totemora is more than a single-agent planner.
+- **M6.5**: full run works; check whether execution is traceable and bounded.
+- **M8.2**: web view exists; check whether Web Observatory remains observability-first.
+
+At each checkpoint, compare the implementation against `docs/README.md` and `docs/mvp.md`. If the implementation contradicts those documents, update the decision explicitly before continuing.
