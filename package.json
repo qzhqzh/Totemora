@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "lint": "bun run scripts/check-workspace.mjs lint",
+    "totemora": "bun run packages/tui/src/cli.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test"
   },

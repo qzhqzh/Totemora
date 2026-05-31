@@ -2,5 +2,11 @@
   "name": "@totemora/tui",
   "version": "0.0.0",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "bin": {
+    "totemora": "./src/cli.ts"
+  },
+  "dependencies": {
+    "@totemora/core": "workspace:*"
+  }
 }
