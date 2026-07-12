@@ -1,0 +1,10 @@
+id: git-change-management
+name: Git 变更提交管理
+version: 1
+status: active
+owner_member_id: qwen_worker
+capabilities:
+  - inspect-git-diff
+  - plan-validation
+  - conventional-commit
+  - secret-path-screening

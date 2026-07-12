@@ -1,16 +1,15 @@
 tribe:
-  id: default
-  name: Default Tribe
+  id: first_tribe
+  name: 初火部落
+  chief: deepseek_reasoner
 
   election:
     strategy: weighted_score
     required_roles:
       - chief
-      - shaman
-      - warrior
 
   council:
-    proposal_count: 3
+    proposal_count: 1
     chief_must_choose_one: true
 
   execution:

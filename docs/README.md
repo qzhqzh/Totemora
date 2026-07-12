@@ -1,107 +1,32 @@
-# Totemora Design
+# Totemora 项目宗旨
 
-Totemora is a terminal-native multi-agent tribe runtime with a web observability console.
+Totemora 是一个**预算约束下的异构智能部落**，不是通用聊天产品，也不是把多个模型串成固定流水线的编排框架。
 
-Its core idea is not a fixed `planner -> executor -> reviewer` chain. Totemora treats different AI models as tribe members, selects them into temporary roles for each run, and records how they plan, delegate, ask for help, execute, review, and improve the tribe manual.
+现实中最强模型、上下文和 Token 都是稀缺资源，但用户往往同时拥有多个能力、价格和性格不同的模型。Totemora 要让少量高智能成员负责理解目标、拆解任务、选择人选和验收结果，让成本更低或能力更专门的成员完成边界清晰的工作包，并用运行证据持续改善下一次派工。
 
-## Product Positioning
+## 核心承诺
 
-Totemora has three product surfaces:
+- **火种与成员分离**：火种是可调用的基础模型；人物由火种、人格、Skills、工具权限、能力画像、经验、历史表现、信任等级和版本共同构成。同一火种可以形成多个成员。
+- **按任务组队**：每次 Run 都应说明为何需要这些成员、为何他们适合、实际花费多少，以及结果是否通过验收。
+- **智能预算优先**：目标不是调用更多模型，而是在质量、成本和时延约束内使用最小但足够的团队。
+- **成长来自证据**：成员成长必须基于可追踪 Run 的评价，经过提案、批准、版本化和回滚；不能让提示词静默自我改写。
+- **资产来自实践**：资产包含资产卡、采用图纸和有 Run 证据的部落经验。发现某个工具不等于自动安装或信任它。
+- **核心自主可控**：复用 AG-UI、A2A、MCP、OpenTelemetry 等边界协议，但成员、派工、评估、成长和治理属于 Totemora 自己的领域模型。
 
-- **TUI Control Plane**: the main user entry. Users create tribes, configure AI providers, start tasks, approve actions, and inspect live progress from the terminal.
-- **Runtime Core**: the multi-agent orchestration engine. It handles election, council planning, task dispatch, structured messaging, help escalation, review, and trace recording.
-- **Web Observatory**: a read-heavy console for traces, role graphs, task timelines, cost, latency, and tribe manual review.
+## 当前产品形态
 
-The first product should be TUI-first. The web UI is important, but mainly for observability and replay.
+当前提供 CLI 和本地 Web Playground 两个入口，共用同一个只读 Runtime。CLI 适合自动化和诊断；Web 用于浏览成员、提交任务、观察派工与验收。完整的治理控制台仍需在运行数据足够后建设。
 
-## Core Concepts
+当前实现与使用方式见 [quickstart.md](quickstart.md)，领域结构见 [architecture-v2.md](architecture-v2.md)，产品定位见 [ADR-0001](adr/0001-product-positioning-and-delivery-order.md)，驻扎地见 [ADR-0002](adr/0002-settlement-and-continuous-task-intake.md)，技术复用边界见 [ADR-0003](adr/0003-adopt-standards-own-the-domain.md)。推进顺序见 [execution-plan.md](execution-plan.md)。
 
-### Provider
+当前稳定验收节点为 `v0.3.0-development-steward`。Gateway 设计见 [gateway-architecture.md](gateway-architecture.md)，开发提交案例见 [development-commit-steward.md](development-commit-steward.md)，操作步骤见 [v0.3-development-steward-test-guide.md](v0.3-development-steward-test-guide.md)。
 
-A provider is a model API integration, such as OpenAI, Qwen, Kimi, GLM, Claude, Gemini, or a local model.
+## 当前成功标准
 
-The tribe runtime should not depend on provider-specific APIs. Providers are hidden behind adapters.
+Totemora 的早期成功不是“多个模型成功回答了一次”，而是用一组真实任务证明：
 
-### Agent
+1. 部落相对单一模型基线，在可接受质量下减少强模型 Token 或总成本；或在同等预算下提高验收通过率。
+2. 每次选人、调用、失败和验收都有足够证据解释。
+3. 历史表现确实能改善后续派工，而不是只累积更多提示词。
 
-An agent is a tribe member created from a provider model plus a capability profile, tool permissions, and historical performance.
-
-The tribe collaborates through agents, not raw models.
-
-### Role
-
-A role is a temporary responsibility assigned during one run.
-
-Initial roles:
-
-- **Chief**: final decision maker and acceptance owner.
-- **Shaman**: advisor that gives strategy, risks, and alternatives.
-- **Warrior**: high-skill executor for hard implementation or reasoning work.
-- **Worker**: low-cost executor for routine work, checks, formatting, transfer, and summarization.
-- **Scout**: researcher that reads docs, searches context, and gathers evidence.
-- **Reviewer**: validates output against the acceptance criteria.
-
-Roles are not static identities. The same agent may become Chief in one run and Shaman in another.
-
-### Run
-
-A run is one user task from command input to final acceptance.
-
-A run contains:
-
-- user goal
-- selected tribe
-- elected roles
-- council proposals
-- chief decision
-- task graph
-- structured messages
-- tool calls
-- artifacts
-- review result
-- trace and cost data
-- optional manual entries
-
-### Tribe Manual
-
-The tribe manual stores reusable experience learned from previous runs.
-
-Manual entries should be proposed by agents and accepted by the Chief or the user before becoming active rules. Totemora should not silently mutate its operating rules in early versions.
-
-## Runtime Flow
-
-```text
-User Command
-  -> Task Analyzer
-  -> Agent Registry
-  -> Election Engine
-  -> Tribal Council
-  -> Chief Decision
-  -> Task Dispatcher
-  -> Execution Loop
-  -> Help Escalation
-  -> Review Gate
-  -> Final Report
-  -> Manual Proposal
-```
-
-## Design Principles
-
-- **TUI-first**: terminal is the primary control surface for developer workflows.
-- **Provider-agnostic**: Kimi, Qwen, GLM, GPT, Claude, and local models are provider adapters, not orchestration concepts.
-- **Structured messages over free chat**: agents communicate through typed events, not unconstrained conversations.
-- **Trace everything**: every election, decision, task, message, tool call, and review result should be observable.
-- **Bounded autonomy**: agents may propose new rules, but early Totemora requires acceptance before applying them.
-- **Minimal first version**: start with config files and local runtime, then add richer management UI after behavior stabilizes.
-
-## Suggested Package Layout
-
-```text
-packages/core        tribe runtime, roles, election, task dispatch
-packages/providers   provider adapters
-packages/tui         terminal control plane
-packages/server      API and trace server
-packages/web         observability console
-configs              local tribe/provider/agent config
-docs                 design documents
-```
+在这些证据成立之前，不优先建设模型市场、复杂 Web、分布式集群、自动微调或无限自治。

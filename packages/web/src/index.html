@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Totemora 部落试炼场</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header>
+    <div><span class="eyebrow">TOTEMORA / LOCAL TRIBE</span><h1>部落试炼场</h1></div>
+    <div class="operator"><div id="tribe-status" class="status">正在唤醒部落…</div><input id="operator-token" type="password" placeholder="操作员 Token（开发提交必需）"></div>
+  </header>
+  <main>
+    <section class="panel roster-panel">
+      <div class="section-title"><span>01</span><h2>部落成员</h2></div>
+      <div id="roster" class="roster"></div>
+      <h3>任务队列</h3><div id="history" class="history"></div>
+    </section>
+    <section class="panel task-panel">
+      <div class="section-title"><span>02</span><h2>任务大厅</h2></div>
+      <form id="task-form">
+        <label>现在想让部落做什么？<textarea id="goal" required>分析这个 demo 项目的订单折扣实现，找出风险并给出有文件证据的建议</textarea></label>
+        <div id="intake-analysis" class="intake-analysis">正在判断任务模式…</div>
+        <div class="grid-two">
+          <label>工作地<select id="workplace"><option value="">临时路径</option></select></label>
+          <label>首领<select id="chief"></select></label>
+        </div>
+        <label id="workspace-label">临时 Workspace 路径<input id="workspace" value="examples/demo-project"></label>
+        <label>继续已有 Mission（可选）<select id="mission"><option value="">创建新 Mission</option></select></label>
+        <details><summary>登记常用工作地</summary><div class="grid-two">
+          <label>名称<input id="workplace-name" placeholder="例如 Totemora"></label>
+          <label>服务器路径<input id="workplace-path" placeholder="/home/user/project"></label>
+        </div><button id="add-workplace" type="button" class="secondary">保存工作地</button></details>
+        <details><summary>安装 / 更新开发提交规范</summary>
+          <label>项目规范<textarea id="policy-instructions" placeholder="例如：只提交当前目标相关改动；使用 Conventional Commits；先测试再提交"></textarea></label>
+          <label>验证命令（每行一条）<textarea id="policy-validations" placeholder="bun test&#10;bun run typecheck"></textarea></label>
+          <label>禁止路径（每行一条）<textarea id="policy-forbidden">.env
+*.pem
+*.key
+credentials/
+secrets/</textarea></label>
+          <button id="save-policy" type="button" class="secondary">保存规范</button>
+          <small id="policy-status"></small>
+          <div id="development-history" class="history"></div>
+          <div id="skill-proposal-history" class="history"></div>
+        </details>
+        <details><summary>高级设置：验收与智能预算</summary>
+          <label>验收标准（每行一条）<textarea id="acceptance">逐条比较 README 业务规则与当前实现
+每个关键结论引用真实文件路径
+给出按优先级排序的建议</textarea></label>
+          <div class="grid-three">
+          <label>最多成员<input id="max-members" type="number" value="2" min="1"></label>
+          <label>最多文件<input id="max-files" type="number" value="80" min="1"></label>
+          <label>上下文字节<input id="max-context" type="number" value="120000" min="1000"></label>
+          <label>单次输出 Token<input id="max-output" type="number" value="6000" min="100"><small>DeepSeek 推理模型建议不少于 6000</small></label>
+          <label>Run 总 Token<input id="max-total-tokens" type="number" value="24000" min="1000"></label>
+        </div></details>
+        <button type="submit">召集部落</button>
+      </form>
+    </section>
+    <section class="panel ember-panel">
+      <div class="section-title"><span>03</span><h2>火种</h2></div>
+      <p class="section-note">基础模型能力。火种与人格、Skills、工具和经历结合后，成为部落人物。</p>
+      <div id="embers" class="embers"></div>
+    </section>
+    <section class="panel codex-panel">
+      <div class="section-title"><span>04</span><h2>人物图鉴</h2></div>
+      <div id="codex" class="codex"></div>
+    </section>
+    <section id="run-panel" class="panel run-panel hidden">
+      <div class="section-title"><span>05</span><h2>Run 现场</h2></div>
+      <div class="run-head"><div><small>当前阶段</small><strong id="phase">QUEUED</strong></div><div id="run-message"></div></div>
+      <button id="cancel-run" type="button" class="secondary hidden">取消 Run</button>
+      <button id="retry-run" type="button" class="secondary hidden">重试 Run</button>
+      <div class="progress"><i id="progress-bar"></i></div>
+      <div id="activity" class="activity"></div>
+      <div id="staffing"></div>
+      <div id="report"></div>
+      <div id="development-proposal"></div>
+      <details id="trace-wrap" class="hidden"><summary>查看完整 Trace</summary><pre id="trace"></pre></details>
+    </section>
+  </main>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

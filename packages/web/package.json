@@ -2,5 +2,8 @@
   "name": "@totemora/web",
   "version": "0.0.0",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "scripts": {
+    "check": "bun build src/app.js --target browser --outdir /tmp/totemora-web-check"
+  }
 }

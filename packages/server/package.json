@@ -2,5 +2,9 @@
   "name": "@totemora/server",
   "version": "0.0.0",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "@totemora/core": "workspace:*",
+    "@totemora/providers": "workspace:*"
+  }
 }
