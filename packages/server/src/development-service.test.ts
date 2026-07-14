@@ -176,6 +176,7 @@ test("one durable workflow reaches Issue, reviewed PR, merge and Chief report", 
     expect(executable).toBe("gh");
     const operation = `${args[0]} ${args[1]}`;
     if (operation === "issue create") return { stdout: "https://github.com/example/repo/issues/7\n", stderr: "" };
+    if (operation === "pr list") return { stdout: "[]", stderr: "" };
     if (operation === "pr create") return { stdout: "https://github.com/example/repo/pull/9\n", stderr: "" };
     if (operation === "pr diff") return { stdout: "diff --git a/src.ts b/src.ts\n+export const greeting = 'hello';\n", stderr: "" };
     if (operation === "pr merge") {
@@ -187,6 +188,7 @@ test("one durable workflow reaches Issue, reviewed PR, merge and Chief report", 
       merged = true;
       return { stdout: "", stderr: "" };
     }
+    if (operation === "pr view" && args.includes("files")) return { stdout: JSON.stringify({ files: [{ path: "src.ts" }] }), stderr: "" };
     if (operation === "pr view") return {
       stdout: JSON.stringify(merged
         ? { state: "MERGED", mergedAt: new Date().toISOString(), mergeCommit: { oid: "a".repeat(40) }, url: "https://github.com/example/repo/pull/9" }

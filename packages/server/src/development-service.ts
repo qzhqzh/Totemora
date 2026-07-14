@@ -395,24 +395,44 @@ export class DevelopmentCommitService {
       await this.saveProposal(proposal);
       if (!proposal.pr_number) {
         const closing = proposal.issue_number ? `\n\nCloses #${proposal.issue_number}` : "";
-        const pullRequest = await this.externalCommand(workplace.path, "gh", [
-          "pr", "create", "--base", proposal.remote_plan.target_branch,
-          "--head", branch, "--title", proposal.remote_plan.pr_title,
-          "--body", `${proposal.remote_plan.pr_body}${closing}`,
-        ]);
-        proposal.pr_url = lastNonEmptyLine(pullRequest.stdout);
-        proposal.pr_number = parseGitHubNumber(proposal.pr_url, "pull");
-        recordActivity(proposal, "pr_created", `PR #${proposal.pr_number} 已创建`);
+        const openPullRequests = JSON.parse((await this.externalCommand(workplace.path, "gh", [
+          "pr", "list", "--head", branch, "--base", proposal.remote_plan.target_branch,
+          "--state", "open", "--limit", "1", "--json", "number,url",
+        ])).stdout) as Array<{ number: number; url: string }>;
+        const existing = openPullRequests[0];
+        if (existing) {
+          proposal.pr_number = existing.number;
+          proposal.pr_url = existing.url;
+          await this.externalCommand(workplace.path, "gh", [
+            "pr", "edit", String(existing.number), "--title", proposal.remote_plan.pr_title,
+            "--body", `${proposal.remote_plan.pr_body}${closing}`,
+          ]);
+          recordActivity(proposal, "pr_reused", `PR #${proposal.pr_number} 已复用并更新说明`);
+        } else {
+          const pullRequest = await this.externalCommand(workplace.path, "gh", [
+            "pr", "create", "--base", proposal.remote_plan.target_branch,
+            "--head", branch, "--title", proposal.remote_plan.pr_title,
+            "--body", `${proposal.remote_plan.pr_body}${closing}`,
+          ]);
+          proposal.pr_url = lastNonEmptyLine(pullRequest.stdout);
+          proposal.pr_number = parseGitHubNumber(proposal.pr_url, "pull");
+          recordActivity(proposal, "pr_created", `PR #${proposal.pr_number} 已创建`);
+        }
         await this.saveProposal(proposal);
       }
       const prDiff = await this.externalCommand(workplace.path, "gh", ["pr", "diff", String(proposal.pr_number)]);
+      const prFileData = JSON.parse((await this.externalCommand(workplace.path, "gh", [
+        "pr", "view", String(proposal.pr_number), "--json", "files",
+      ])).stdout) as { files?: Array<{ path: string }> };
+      const prFiles = (prFileData.files ?? []).map((file) => file.path);
       await this.assetRegistry.assertCanUse(specialist, "git-flow-engine", "review_pr");
       proposal.pr_review = await this.callJson(specialist, [
         "你是负责该流程的 Git 流程专员。代码由其他成员或用户编写；现在评审真实 PR Diff，检查目标、范围、风险和验证证据。",
         `目标：${proposal.goal}`,
         `Policy：${JSON.stringify(policy)}`,
         `本地验证：${JSON.stringify(proposal.validation_results)}`,
-        `PR Diff：\n${prDiff.stdout.slice(0, 60_000)}`,
+        `PR 完整文件清单：${JSON.stringify(prFiles)}`,
+        `PR Diff（最多 60000 字节；缺少某文件内容只代表预览截断，范围以完整文件清单为准）：\n${prDiff.stdout.slice(0, 60_000)}`,
         '只输出严格 JSON，例如 {"outcome":"accepted","rationale":"...","issues":[]}，不要输出解释或 Markdown。',
       ].join("\n")) as DevelopmentProposal["pr_review"];
       validatePrReview(proposal.pr_review);
