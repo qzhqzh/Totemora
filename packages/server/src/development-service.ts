@@ -502,8 +502,7 @@ export class DevelopmentCommitService {
         await this.externalCommand(workplace.path, "gh", ["pr", "merge", String(proposal.pr_number), "--squash", "--delete-branch"]);
       }
       await git(workplace.path, ["checkout", proposal.remote_plan.target_branch]);
-      await git(workplace.path, ["pull", "--ff-only", "origin", proposal.remote_plan.target_branch]);
-      await git(workplace.path, ["fetch", "--prune", "origin"]);
+      const syncTransport = await this.syncTargetBranch(workplace.path, proposal.remote_plan.target_branch);
       const merged = JSON.parse((await this.externalCommand(workplace.path, "gh", [
         "pr", "view", String(proposal.pr_number), "--json", "state,mergedAt,mergeCommit,url",
       ])).stdout) as { state: string; mergedAt?: string; mergeCommit?: { oid?: string }; url: string };
@@ -521,7 +520,7 @@ export class DevelopmentCommitService {
       validateChiefReport(proposal.chief_report);
       proposal.status = proposal.chief_report.acceptance === "passed" ? "completed" : "failed";
       proposal.updated_at = new Date().toISOString();
-      recordActivity(proposal, "merged", `PR #${proposal.pr_number} 已合并到 ${proposal.remote_plan.target_branch}`);
+      recordActivity(proposal, "merged", `PR #${proposal.pr_number} 已合并到 ${proposal.remote_plan.target_branch}，本地通过 ${syncTransport} 同步`);
       await this.saveProposal(proposal);
       await this.recordAssetUse(proposal, "git-flow-engine", "execute_merge", "completed", `PR ${proposal.pr_url ?? proposal.pr_number} merged to ${proposal.remote_plan.target_branch}`);
       if (proposal.status === "completed") await this.recordExperience(proposal);
@@ -597,16 +596,37 @@ export class DevelopmentCommitService {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (!/(port 22|Could not read from remote repository|ssh:)/i.test(message)) throw error;
-      const repository = JSON.parse((await this.externalCommand(cwd, "gh", ["repo", "view", "--json", "url"])).stdout) as { url?: string };
-      if (!repository.url || !/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository.url)) {
-        throw new Error("GitHub HTTPS fallback could not resolve a safe repository URL", { cause: error });
-      }
+      const repositoryUrl = await this.githubRepositoryUrl(cwd, error);
       await git(cwd, [
         "-c", "credential.helper=!gh auth git-credential",
-        "push", `${repository.url}.git`, branch,
+        "push", `${repositoryUrl}.git`, branch,
       ]);
       return "GitHub HTTPS fallback";
     }
+  }
+
+  private async syncTargetBranch(cwd: string, branch: string): Promise<"configured origin" | "GitHub HTTPS fallback"> {
+    try {
+      await git(cwd, ["pull", "--ff-only", "origin", branch]);
+      await git(cwd, ["fetch", "--prune", "origin"]);
+      return "configured origin";
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/(port 22|Could not read from remote repository|ssh:)/i.test(message)) throw error;
+      const repositoryUrl = await this.githubRepositoryUrl(cwd, error);
+      const authenticated = ["-c", "credential.helper=!gh auth git-credential"];
+      await git(cwd, [...authenticated, "pull", "--ff-only", `${repositoryUrl}.git`, branch]);
+      await git(cwd, [...authenticated, "fetch", "--prune", `${repositoryUrl}.git`]);
+      return "GitHub HTTPS fallback";
+    }
+  }
+
+  private async githubRepositoryUrl(cwd: string, cause: unknown): Promise<string> {
+    const repository = JSON.parse((await this.externalCommand(cwd, "gh", ["repo", "view", "--json", "url"])).stdout) as { url?: string };
+    if (!repository.url || !/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository.url)) {
+      throw new Error("GitHub HTTPS fallback could not resolve a safe repository URL", { cause });
+    }
+    return repository.url;
   }
 
   private async recordAssetUse(
