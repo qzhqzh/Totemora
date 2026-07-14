@@ -390,8 +390,8 @@ export class DevelopmentCommitService {
         recordActivity(proposal, "issue_created", `Issue #${proposal.issue_number} 已创建`);
         await this.saveProposal(proposal);
       }
-      await git(workplace.path, ["push", "-u", "origin", branch]);
-      recordActivity(proposal, "pushed", `分支 ${branch} 已推送到 origin`);
+      const pushTransport = await this.pushBranch(workplace.path, branch);
+      recordActivity(proposal, "pushed", `分支 ${branch} 已通过 ${pushTransport} 推送到 origin`);
       await this.saveProposal(proposal);
       if (!proposal.pr_number) {
         const closing = proposal.issue_number ? `\n\nCloses #${proposal.issue_number}` : "";
@@ -568,6 +568,26 @@ export class DevelopmentCommitService {
   private async saveProposal(proposal: DevelopmentProposal): Promise<void> {
     await mkdir(this.proposalsDir, { recursive: true });
     await atomicWrite(join(this.proposalsDir, `${proposal.id}.json`), proposal);
+  }
+
+  private async pushBranch(cwd: string, branch: string): Promise<"configured origin" | "GitHub HTTPS fallback"> {
+    try {
+      await git(cwd, ["push", "-u", "origin", branch]);
+      return "configured origin";
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/(port 22|Could not read from remote repository|ssh:)/i.test(message)) throw error;
+      const repository = JSON.parse((await this.externalCommand(cwd, "gh", ["repo", "view", "--json", "url"])).stdout) as { url?: string };
+      if (!repository.url || !/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository.url)) {
+        throw new Error("GitHub HTTPS fallback could not resolve a safe repository URL", { cause: error });
+      }
+      await git(cwd, [
+        "-c", "credential.helper=!gh auth git-credential",
+        "-c", `remote.origin.url=${repository.url}.git`,
+        "push", "-u", "origin", branch,
+      ]);
+      return "GitHub HTTPS fallback";
+    }
   }
 
   private async recordAssetUse(
