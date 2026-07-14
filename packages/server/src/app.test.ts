@@ -17,16 +17,16 @@ test("exposes tribe and completes a playground run", async () => {
   expect(tribe.status).toBe(200);
   expect((await tribe.json()).members.length).toBeGreaterThan(1);
   expect(await (await app.fetch(new Request("http://local/api/status"))).json()).toMatchObject({
-    version: "0.3.0-development-steward", active_members: 3,
-    capabilities: { inspect: "enabled", change: "commit_existing_only", independent_review: "enabled" },
+    version: "0.5.0-git-flow-steward", active_members: 4,
+    capabilities: { inspect: "enabled", change: "git_flow_existing_changes", specialist_self_review: "enabled" },
   });
   const tribeData = await (await app.fetch(new Request("http://local/api/tribe"))).json();
-  expect(tribeData.members.filter((member: any) => !["inactive", "retired"].includes(member.status))).toHaveLength(3);
+  expect(tribeData.members.filter((member: any) => !["inactive", "retired"].includes(member.status))).toHaveLength(4);
   expect(tribeData.members.find((member: any) => member.id === "deepseek_reasoner").persona).toContain("深思");
   const embers = await (await app.fetch(new Request("http://local/api/embers"))).json();
   expect(embers.embers).toHaveLength(4);
   expect(embers.embers.find((ember: any) => ember.provider_id === "deepseek")).toMatchObject({
-    id: "deepseek/deepseek-v4-pro[1m]", status: "available", member_ids: ["deepseek_reasoner"],
+    id: "deepseek/deepseek-v4-pro[1m]", status: "available", member_ids: ["deepseek_reasoner", "deepseek_git_steward"],
   });
 
   const workplaceResponse = await app.fetch(new Request("http://local/api/workplaces", {
@@ -59,7 +59,7 @@ test("exposes tribe and completes a playground run", async () => {
   expect(job.status).toBe("completed");
   expect(job.run.schema_version).toBe(2);
   expect(job.run.plan.assignments[0].assignment_reason).toContain("匹配");
-  expect(job.run.plan.candidate_ranking).toHaveLength(2);
+  expect(job.run.plan.candidate_ranking).toHaveLength(3);
   expect(job.run.independent_review).toMatchObject({ reviewer_member_id: "qwen_worker", outcome: "accepted" });
   expect(job.run.final_report.findings[0].evidence[0]).toContain("README.md");
   const history = await app.fetch(new Request("http://local/api/runs"));
@@ -121,6 +121,31 @@ test("protects development policy mutations with the operator token", async () =
   }));
   expect(allowed.status).toBe(200);
   expect(await allowed.json()).toMatchObject({ version: 1, instructions: "按规范提交" });
+
+  const taskBody = JSON.stringify({ workplace_id: workplace.id, goal: "按规范提交当前改动" });
+  const deniedTask = await app.fetch(new Request("http://local/api/development/tasks", {
+    method: "POST", headers: { "content-type": "application/json" }, body: taskBody,
+  }));
+  expect(deniedTask.status).toBe(400);
+  const startedTask = await app.fetch(new Request("http://local/api/development/tasks", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: "Bearer operator-secret" },
+    body: taskBody,
+  }));
+  expect(startedTask.status).toBe(202);
+  const taskId = (await startedTask.json()).id as string;
+  const failedTask = await waitForDevelopmentTask(app, taskId, "operator-secret");
+  expect(failedTask).toMatchObject({ kind: "git_flow", status: "failed", retryable: true });
+
+  const restoredApp = createPlaygroundApp({
+    configDir: resolve(import.meta.dir, "../../../configs/example"), dataDir,
+    operatorToken: "operator-secret",
+    createProviderRegistry: () => ({ get: () => new PlaygroundProvider() }),
+  });
+  const restored = await restoredApp.fetch(new Request(`http://local/api/development/tasks/${taskId}`, {
+    headers: { authorization: "Bearer operator-secret" },
+  }));
+  expect(await restored.json()).toMatchObject({ id: taskId, status: "failed" });
   await rm(dataDir, { recursive: true, force: true });
 });
 
@@ -131,6 +156,17 @@ async function waitForJob(app: ReturnType<typeof createPlaygroundApp>, id: strin
     await Bun.sleep(5);
   }
   throw new Error("Job did not finish");
+}
+
+async function waitForDevelopmentTask(app: ReturnType<typeof createPlaygroundApp>, id: string, token: string) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const task = await (await app.fetch(new Request(`http://local/api/development/tasks/${id}`, {
+      headers: { authorization: `Bearer ${token}` },
+    }))).json();
+    if (["completed", "failed"].includes(task.status)) return task;
+    await Bun.sleep(5);
+  }
+  throw new Error("Development task did not finish");
 }
 
 class PlaygroundProvider implements AgentProvider {

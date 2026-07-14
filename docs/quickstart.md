@@ -2,6 +2,8 @@
 
 Totemora 提供 Web Playground 和 CLI，所有命令从仓库根目录执行。
 
+外部 AI 也可以通过 MCP 调用同一个常驻 Gateway。完整配置见 [mcp-gateway.md](mcp-gateway.md)。
+
 ## 启动 Web Playground
 
 安装依赖后运行：

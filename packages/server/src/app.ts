@@ -21,6 +21,7 @@ import { timingSafeEqual } from "node:crypto";
 import { SettlementStore } from "./settlement-store";
 import { JobStore } from "./job-store";
 import { DevelopmentCommitService } from "./development-service";
+import { ToolAssetRegistry } from "./tool-asset-registry";
 
 export interface PlaygroundOptions {
   configDir: string;
@@ -60,13 +61,38 @@ interface RunInput {
   mission_context?: string[];
 }
 
+interface DevelopmentTask {
+  id: string;
+  kind: "git_flow";
+  status: "queued" | "running" | "completed" | "failed";
+  created_at: string;
+  updated_at: string;
+  workplace_id: string;
+  goal: string;
+  mode: "commit" | "pull_request" | "merge";
+  issue_mode: "auto" | "none";
+  proposal_id?: string;
+  result?: Awaited<ReturnType<DevelopmentCommitService["prepare"]>>;
+  error?: string;
+  retryable?: boolean;
+}
+
+interface DevelopmentTaskInput {
+  workplace_id: string;
+  goal: string;
+  mode?: "commit" | "pull_request" | "merge";
+  issue_mode?: "auto" | "none";
+}
+
 export function createPlaygroundApp(options: PlaygroundOptions) {
   const jobs = new Map<string, RunJob>();
   const controllers = new Map<string, AbortController>();
   const jobInputs = new Map<string, RunInput>();
   const settlement = new SettlementStore(options.dataDir);
   const jobStore = new JobStore<RunJob, RunInput>(options.dataDir);
-  const hydration = jobStore.list().then(async (records) => {
+  const developmentTasks = new Map<string, DevelopmentTask>();
+  const developmentTaskStore = new JobStore<DevelopmentTask, DevelopmentTaskInput>(options.dataDir, "development-tasks");
+  const runHydration = jobStore.list().then(async (records) => {
     for (const record of records) {
       const job = record.job;
       if (["queued", "running"].includes(job.status)) {
@@ -85,6 +111,20 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
       jobInputs.set(job.id, record.input);
     }
   });
+  const developmentHydration = developmentTaskStore.list().then(async (records) => {
+    for (const record of records) {
+      const task = record.job;
+      if (["queued", "running"].includes(task.status)) {
+        task.status = "failed";
+        task.error = "Gateway restarted while the specialist task was running; start a new preparation task";
+        task.retryable = true;
+        task.updated_at = new Date().toISOString();
+        await developmentTaskStore.save(task, record.input);
+      }
+      developmentTasks.set(task.id, task);
+    }
+  });
+  const hydration = Promise.all([runHydration, developmentHydration]);
   let configPromise: Promise<LocalConfigSet> | undefined;
   const getConfig = async () => {
     configPromise ??= loadLocalConfig({ configDir: options.configDir }).then((config) => {
@@ -100,6 +140,43 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
       config, registry, settlement, options.dataDir,
       options.projectRoot ?? resolve(import.meta.dir, "../../.."),
     );
+  };
+  const getAssetRegistry = () => new ToolAssetRegistry(
+    options.projectRoot ?? resolve(import.meta.dir, "../../.."),
+    options.dataDir,
+  );
+  const enqueueDevelopmentTask = async (input: DevelopmentTaskInput): Promise<DevelopmentTask> => {
+    if (!input.workplace_id || !input.goal?.trim()) throw new Error("workplace_id and goal are required");
+    const now = new Date().toISOString();
+    const task: DevelopmentTask = {
+      id: crypto.randomUUID(), kind: "git_flow", status: "queued",
+      created_at: now, updated_at: now, workplace_id: input.workplace_id, goal: input.goal.trim(),
+      mode: input.mode ?? "commit", issue_mode: input.issue_mode ?? (input.mode === "commit" || !input.mode ? "none" : "auto"),
+    };
+    developmentTasks.set(task.id, task);
+    await developmentTaskStore.save(task, input);
+    void (async () => {
+      task.status = "running";
+      task.updated_at = new Date().toISOString();
+      await developmentTaskStore.save(task, input);
+      try {
+        task.result = await (await getDevelopmentService()).prepare(input.workplace_id, input.goal.trim(), {
+          mode: task.mode, issue_mode: task.issue_mode,
+        });
+        task.proposal_id = task.result.id;
+      } catch (error) {
+        task.error = error instanceof Error ? error.message : String(error);
+        task.retryable = true;
+      }
+      const terminalTask: DevelopmentTask = {
+        ...task,
+        status: task.error ? "failed" : "completed",
+        updated_at: new Date().toISOString(),
+      };
+      await developmentTaskStore.save(terminalTask, input);
+      Object.assign(task, terminalTask);
+    })();
+    return task;
   };
 
   const enqueueRun = async (input: RunInput): Promise<RunJob> => {
@@ -174,18 +251,24 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
         if (request.method === "GET" && url.pathname === "/api/status") {
           const config = await getConfig();
           return json({
-            version: "0.3.0-development-steward",
+            version: "0.5.0-git-flow-steward",
             settlement: "ready",
             active_members: config.agents.agents.filter((member) => !["inactive", "retired"].includes(member.status ?? "active")).length,
             capabilities: {
               inspect: "enabled", continue: "enabled", answer: "gated",
-              change: "commit_existing_only", operate: "gated", cancellation: "enabled",
+              change: "git_flow_existing_changes", operate: "policy_gated", cancellation: "enabled",
               persistent_jobs: "enabled", safe_retry: "enabled",
-              budget_staffing: "evidence_v1", independent_review: "enabled",
+              budget_staffing: "evidence_v1", specialist_self_review: "enabled",
               member_growth: "verified_experience_context_v1",
-              development_commit: options.operatorToken ? "enabled" : "needs_operator_token",
+              development_git_flow: options.operatorToken ? "enabled" : "needs_operator_token",
+              mcp: "streamable_http_and_stdio",
+              tribe_assets: "catalog_permissions_evidence_v1",
             },
           });
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/assets") {
+          return json({ assets: await getAssetRegistry().list(await getConfig()) });
         }
 
         if (request.method === "GET" && url.pathname === "/api/embers") {
@@ -231,20 +314,53 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
             validation_commands?: string[];
             allowed_commit_types?: string[];
             forbidden_paths?: string[];
+            git_flow?: {
+              remote_provider: "none" | "github";
+              target_branch: string;
+              allow_issue: boolean;
+              allow_push: boolean;
+              allow_pull_request: boolean;
+              allow_merge: boolean;
+              allow_opencode_fix: boolean;
+            };
           };
           return json(await settlement.setWorkplacePolicy(policyMatch[1]!, {
             instructions: input.instructions ?? "",
             validation_commands: input.validation_commands ?? [],
             allowed_commit_types: input.allowed_commit_types ?? [],
             forbidden_paths: input.forbidden_paths ?? [],
+            git_flow: input.git_flow,
           }));
         }
 
         if (request.method === "POST" && url.pathname === "/api/development/prepare") {
           requireOperator(request, options.operatorToken);
-          const input = await request.json() as { workplace_id?: string; goal?: string };
+          const input = await request.json() as {
+            workplace_id?: string; goal?: string;
+            mode?: "commit" | "pull_request" | "merge"; issue_mode?: "auto" | "none";
+          };
           if (!input.workplace_id || !input.goal?.trim()) throw new Error("workplace_id and goal are required");
-          return json(await (await getDevelopmentService()).prepare(input.workplace_id, input.goal.trim()), 201);
+          return json(await (await getDevelopmentService()).prepare(input.workplace_id, input.goal.trim(), {
+            mode: input.mode, issue_mode: input.issue_mode,
+          }), 201);
+        }
+
+        if (request.method === "POST" && url.pathname === "/api/development/tasks") {
+          requireOperator(request, options.operatorToken);
+          const input = await request.json() as Partial<DevelopmentTaskInput>;
+          return json(await enqueueDevelopmentTask({
+            workplace_id: input.workplace_id ?? "",
+            goal: input.goal ?? "",
+            mode: input.mode,
+            issue_mode: input.issue_mode,
+          }), 202);
+        }
+
+        const developmentTaskMatch = url.pathname.match(/^\/api\/development\/tasks\/([^/]+)$/);
+        if (request.method === "GET" && developmentTaskMatch) {
+          requireOperator(request, options.operatorToken);
+          const task = developmentTasks.get(developmentTaskMatch[1]!);
+          return task ? json(task) : json({ error: "Development task not found" }, 404);
         }
 
         if (request.method === "GET" && url.pathname === "/api/development/proposals") {
@@ -273,6 +389,17 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
         if (request.method === "POST" && approveMatch) {
           requireOperator(request, options.operatorToken);
           return json(await (await getDevelopmentService()).approve(approveMatch[1]!));
+        }
+
+        const advanceMatch = url.pathname.match(/^\/api\/development\/proposals\/([^/]+)\/advance$/);
+        if (request.method === "POST" && advanceMatch) {
+          requireOperator(request, options.operatorToken);
+          const input = await request.json() as { gate?: "local" | "remote" | "merge" };
+          const service = await getDevelopmentService();
+          if (input.gate === "local") return json(await service.approve(advanceMatch[1]!));
+          if (input.gate === "remote") return json(await service.publish(advanceMatch[1]!));
+          if (input.gate === "merge") return json(await service.merge(advanceMatch[1]!));
+          throw new Error("gate must be local, remote, or merge");
         }
 
         if (request.method === "POST" && url.pathname === "/api/missions") {
@@ -395,8 +522,9 @@ async function executeRun(
       outcome: "completed",
       result_summary: job.run.final_report?.summary ?? "任务已完成",
     });
-    job.status = "completed";
-    await jobStore.save(job, input);
+    const completedJob: RunJob = { ...job, status: "completed" };
+    await jobStore.save(completedJob, input);
+    Object.assign(job, completedJob);
   } catch (error) {
     const terminalStatus = controller.signal.aborted ? "cancelled" : "failed";
     job.phase = terminalStatus;
@@ -409,8 +537,9 @@ async function executeRun(
         outcome: "failed", error: job.message,
       });
     }
-    job.status = terminalStatus;
-    await jobStore.save(job, input);
+    const failedJob: RunJob = { ...job, status: terminalStatus };
+    await jobStore.save(failedJob, input);
+    Object.assign(job, failedJob);
   } finally {
     controller.abort();
   }

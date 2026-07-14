@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "assets": [
+    {
+      "id": "git-flow-engine",
+      "name": "Git Flow Engine",
+      "kind": "tool_service",
+      "maturity": "verified",
+      "version": 1,
+      "summary": "受控执行 Branch、Validation、Commit、Issue、Push、PR Review 和 Squash Merge 的确定性状态机。",
+      "executor": "builtin:DevelopmentCommitService",
+      "actions": ["plan", "execute_local", "execute_remote", "review_pr", "execute_merge"],
+      "risk": "high",
+      "default_access": "deny",
+      "policy_requirements": ["registered_workplace", "versioned_policy", "operator_gate", "snapshot_match"],
+      "blueprint": {
+        "source": "docs/adr/0004-development-commit-steward.md",
+        "notes": "模型负责结构化判断；程序负责固定命令、状态恢复和安全校验。"
+      }
+    },
+    {
+      "id": "opencode-correction",
+      "name": "OpenCode Correction Runner",
+      "kind": "tool_adapter",
+      "maturity": "experimental",
+      "version": 1,
+      "summary": "验证失败后，在批准文件和命令白名单内启动 OpenCode 的受限修复会话。",
+      "executor": "binary:opencode",
+      "actions": ["correct_code"],
+      "risk": "high",
+      "default_access": "deny",
+      "policy_requirements": ["allow_opencode_fix", "approved_file_scope", "validation_failure"],
+      "blueprint": {
+        "source": "https://opencode.ai/docs/agents/",
+        "notes": "默认拒绝权限；禁止 --auto、外部目录和 Git 远端操作。尚无真实修复 Run 证据。"
+      }
+    },
+    {
+      "id": "zvec",
+      "name": "Zvec",
+      "kind": "infrastructure",
+      "maturity": "candidate",
+      "version": 1,
+      "summary": "候选的开源进程内向量数据库；当前仅作为资产图纸，不自动安装或调用。",
+      "executor": "uninstalled",
+      "actions": [],
+      "risk": "medium",
+      "default_access": "deny",
+      "policy_requirements": ["evaluation_required"],
+      "blueprint": {
+        "source": "https://github.com/alibaba/zvec",
+        "notes": "需要真实检索任务、资源占用和维护成本证据后再决定是否采用。"
+      }
+    }
+  ]
+}

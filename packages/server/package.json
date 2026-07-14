@@ -5,6 +5,7 @@
   "type": "module",
   "dependencies": {
     "@totemora/core": "workspace:*",
+    "@totemora/mcp": "workspace:*",
     "@totemora/providers": "workspace:*"
   }
 }

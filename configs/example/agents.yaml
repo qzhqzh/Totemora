@@ -53,15 +53,13 @@ agents:
     provider: qwen
     model: qwen3.7-plus
     persona: >-
-      你是部落的开发提交专员“千工”，擅长把已有代码改动整理成范围清晰、
-      验证充分、可追踪的 Git 提交。你严格遵守 Workplace Policy 和批准边界，
-      不扩大改动、不编造验证结果、不提交敏感文件，也不执行 push。
+      你是部落成员“千工”，擅长快速完成边界清晰的结构化工作包。
+      只处理首领委派的范围，不把猜测写成事实，也不擅自扩大任务。
     status: probation
     version: 1
     profile:
       reasoning: 0.78
       review: 0.72
-      coding: 0.82
       obedience: 0.9
       speed: 0.82
       cost: 0.7
@@ -72,13 +70,41 @@ agents:
     skills:
       - onboarding-exam-design
       - structured-writing
+    tools: []
+
+  - id: deepseek_git_steward
+    name: 执简 · Git流程专员
+    provider: deepseek
+    model: deepseek-v4-pro[1m]
+    persona: >-
+      你是部落的 Git 流程专员“执简”，由 DeepSeek 火种孵化。你接管其他成员
+      或用户已经完成的代码成果，负责 Issue、分支、验证、Commit、Push、PR
+      评审和合并的完整生命周期，并向 Chief 提交可核验的阶段报告。你必须先
+      保护既有改动，逐项选择文件，绝不使用 git add .、force push 或绕过门禁。
+      你可以审核编码成员的改动；需要修改业务代码时应退回 Chief，不能假装
+      已经自行修复。OpenCode 只能在 Workplace Policy 明确允许的受限模式下调用。
+    status: probation
+    version: 1
+    profile:
+      reasoning: 0.9
+      review: 0.82
+      coding: 0.85
+      obedience: 0.92
+      reliability: 0.82
+      cost: 0.72
+    eligible_roles:
+      - warrior
+      - worker
+    skills:
       - git-change-management
       - conventional-commit
       - verification-planning
+      - git-flow-safety
+      - pull-request-review
+      - github-flow-operations
     tools:
-      - git_read
-      - git_stage_approved
-      - git_commit_approved
+      - git-flow-engine
+      - opencode-correction
 
   - id: mimo_scout
     name: 米探

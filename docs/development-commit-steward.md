@@ -1,48 +1,33 @@
-# 开发提交专员 v1 规范
+# Git 流程专员
 
-## 验收场景
+“执简 · Git流程专员”是 DeepSeek 火种孵化的长期成员，负责接管用户或编码成员已经完成的改动。
+他不是主要代码作者，因此可以在 PR 阶段评审真实实现；需要修改代码时退回 Chief，或在 Policy
+允许时请求受限 OpenCode 工具。
 
-在一个已登记的 Git Workplace 中存在未提交改动。用户只需在统一入口说“按这个项目的规范检查并提交当前改动”。系统必须自动加载该项目保存的规范，由 Chief 委派提交专员，生成可审查计划；用户批准后运行固定验证、创建一个合规提交，并保存可供下一次复用的经验。
+## 三种终点
 
-## Workplace Policy
+- `commit`：验证、精确 stage、本地 Commit。
+- `pull_request`：继续创建 Issue、Push、PR，读取真实 PR Diff 自审并由 Chief 验收。
+- `merge`：继续检查 PR 状态、squash merge 到 Policy 目标分支并输出 Chief 最终报告。
 
-每个项目保存：
+## 成员协作
 
-- 提交规范说明；
-- 允许的验证命令；
-- Conventional Commit 类型；
-- 禁止暂存的路径模式；
-- 是否允许在当前分支提交。
+Chief 收到 MCP 目标后按 `git-flow-safety` 能力路由。只有一个合格成员时直接选择；多个候选时
+才运行模型选人。执简生成计划和自检，Chief 使用真实 Diff 验收。Qwen 不再固定参与；安全、
+数据库、权限或大范围重构等高风险任务可以动态增加另一成员。
 
-Policy 属于 Workplace，不属于聊天 Session。修改 Policy 是显式管理动作并提升版本。
+## 失败与恢复
 
-## Commit Proposal
+- 模型输出允许从 fenced JSON 或带说明文本中的平衡 JSON 对象恢复；无法恢复时记录成员 ID 和摘要。
+- 远端 Issue/PR 编号在每次副作用后立即保存，重试不会重复创建。
+- Snapshot 或 Policy 改变后旧批准失效。
+- 验证失败默认停止；`allow_opencode_fix` 开启时，可以在批准文件和验证命令白名单内启动 OpenCode。
+  修复后必须重新审阅，不能沿用旧批准。
 
-Proposal 必须包含：
+## 经验
 
-- 变更摘要；
-- 明确文件列表；
-- Conventional Commit message；
-- 风险说明；
-- 将执行的验证命令；
-- Chief 派工理由；
-- 专员引用的 Skill 与经验版本；
-- 独立 Reviewer 结论；
-- Git Snapshot 指纹。
+成功工作流会记录模式、分支、验证命令、Commit SHA、Issue/PR、专员自检、Chief 验收和结果。
+Skill v3 的改进仍然需要治理提案，不会静默修改成员人格。
 
-## 批准语义
-
-批准绑定 Proposal ID 和 Snapshot 指纹。批准后如果工作树变化，批准自动失效，必须重新生成 Proposal。批准不包含 push、部署或其他外部动作。
-
-## 成功条件
-
-- 所有验证命令退出码为 0；
-- 仅暂存批准文件；
-- 提交信息符合 Conventional Commits；
-- Git commit 成功且 SHA 被记录；
-- 工作流生成可追踪经验；
-- 不包含被禁止路径。
-
-## 经验与 Skill 演化
-
-每次成功提交都会为千工写入一条带 Commit SHA 和 Reviewer 结论的验证经验。专员可以基于本次证据提出一条通用 Skill 改进，但不会自动生效。用户在 Web 批准后，Skill 版本提升，改进规则进入下一次全新的专员上下文。若 Skill 在提案后已经升级，旧提案自动失效，避免覆盖新版本。
+外部调用见 [MCP Gateway](mcp-gateway.md)，真实合并案例见
+[v0.5 MCP Git Flow E2E](v0.5-mcp-git-flow-e2e.md)。

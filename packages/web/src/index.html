@@ -40,6 +40,13 @@
 *.key
 credentials/
 secrets/</textarea></label>
+          <div class="grid-two">
+            <label>Git Flow 目标<select id="git-flow-mode"><option value="commit">本地 Commit</option><option value="pull_request">Issue + PR</option><option value="merge">Issue + PR + Merge</option></select></label>
+            <label>目标分支<input id="policy-target-branch" value="main"></label>
+          </div>
+          <label><input id="policy-remote-enabled" type="checkbox">允许 GitHub Issue、Push 和 PR</label>
+          <label><input id="policy-merge-enabled" type="checkbox">允许经过独立门禁后 Merge</label>
+          <label><input id="policy-opencode-enabled" type="checkbox">验证失败时允许受限 OpenCode 修复</label>
           <button id="save-policy" type="button" class="secondary">保存规范</button>
           <small id="policy-status"></small>
           <div id="development-history" class="history"></div>
@@ -64,12 +71,17 @@ secrets/</textarea></label>
       <p class="section-note">基础模型能力。火种与人格、Skills、工具和经历结合后，成为部落人物。</p>
       <div id="embers" class="embers"></div>
     </section>
+    <section class="panel asset-panel">
+      <div class="section-title"><span>04</span><h2>部落资产</h2></div>
+      <p class="section-note">确定性工具、适配器、基础设施和经验图纸归部落所有；成员按授权取用，每次调用留下证据。</p>
+      <div id="assets" class="assets"></div>
+    </section>
     <section class="panel codex-panel">
-      <div class="section-title"><span>04</span><h2>人物图鉴</h2></div>
+      <div class="section-title"><span>05</span><h2>人物图鉴</h2></div>
       <div id="codex" class="codex"></div>
     </section>
     <section id="run-panel" class="panel run-panel hidden">
-      <div class="section-title"><span>05</span><h2>Run 现场</h2></div>
+      <div class="section-title"><span>06</span><h2>Run 现场</h2></div>
       <div class="run-head"><div><small>当前阶段</small><strong id="phase">QUEUED</strong></div><div id="run-message"></div></div>
       <button id="cancel-run" type="button" class="secondary hidden">取消 Run</button>
       <button id="retry-run" type="button" class="secondary hidden">重试 Run</button>

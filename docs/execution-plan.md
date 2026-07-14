@@ -52,9 +52,9 @@
 
 检查点：若部落没有稳定收益，停止扩功能，调整 Task Analyzer、Staffing 或产品假设。
 
-## M3 Skills 与资产运行时
+## M3 Skills 与资产运行时（骨架已落地）
 
-仅在 M2.4 通过后进入。Skill 从标签升级为有版本、输入输出契约和运行证据的可挂载能力；资产支持发现、图纸引用和 Run 证据回写。Zvec 继续作为候选资产，不预设为基础设施。
+Skill 已有版本和治理提案；共享资产目录已支持发现、成员授权、动作校验、图纸引用、调用审计和已完成 Git Flow 证据。Zvec 继续作为候选资产，不预设为基础设施。下一步不是扩充资产数量，而是补统一命令策略入口、pre/post hooks、OS sandbox 和 action journal，并用真实 Run 证明资产可靠性。
 
 ## M4 成员成长
 
@@ -62,10 +62,12 @@
 
 ## M5 受控执行
 
-第一项受控执行已经完成：`commit_existing` 由 Chief 委派千工，使用版本化 Git Skill、Workplace Policy、独立 Reviewer、Snapshot 批准、固定验证命令和 Operator Token 提交已有改动。下一步才是隔离 worktree 中的模型写代码；Shell、push、部署和外部系统仍保持门禁。
+第一项受控执行已经完成并扩展为持久 Git Flow：Chief 按能力路由 DeepSeek 火种孵化的“执简 · Git流程专员”，使用 Skill v3、Workplace Policy、Snapshot、固定验证和 local/remote/merge 门禁，把已有改动推进到 Commit、真实 PR Diff 自审和 squash merge。固定 Qwen Reviewer 已移除；第二成员只在风险触发时动态加入。OpenCode 已作为默认拒绝权限的可选修复工具资产接入，代码修复后必须重新审阅。部署和通用外部系统仍保持门禁。
 
 ## M6 控制面与生态
 
 在 Trace 和治理模型稳定后建设本地控制面，可用 AG-UI 表达实时事件，通过 MCP/A2A 接入工具或外部 Agent。Web 主要承载观察、审批、回放和成员治理。
 
 Gateway 的平台无关入口边界已形成：Web 与 CLI 共用常驻服务。后续按单一 Adapter 逐步加入聊天、Cron、Webhook 和 IDE，不在每个入口复制 Runtime。
+
+MCP Adapter 的第一个纵向闭环已进入 v0.4：外部 AI 可发现部落、工作地和 Git 提交专员，通过 Streamable HTTP 或 stdio 生成、检查并批准受控 Proposal。Proposal 准备已使用 durable task id + 状态查询，避免受 MCP Host 单次 tool timeout 限制；下一步补充进度事件、任务取消和异步批准。

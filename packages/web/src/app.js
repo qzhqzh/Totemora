@@ -22,12 +22,31 @@ async function loadTribe() {
       <small>${member.skills.map(escapeHtml).join(" · ") || "暂无 Skill"}</small>
     </article>`).join("");
   renderCodex();
-  await loadEmbers();
+  await Promise.all([loadEmbers(), loadAssets()]);
   $("chief").innerHTML = tribe.members.filter((m) => m.roles.includes("chief") && !["inactive", "retired"].includes(m.status))
     .map((m) => `<option value="${escapeHtml(m.id)}" ${m.id === tribe.tribe.chief ? "selected" : ""}>${escapeHtml(m.name)} · ${escapeHtml(m.model)}</option>`).join("");
   await loadHistory();
   await loadSettlement();
   await loadDevelopmentHistory();
+}
+
+async function loadAssets() {
+  const { assets } = await api("/api/assets");
+  $("assets").innerHTML = assets.map((asset) => {
+    const grants = asset.authorized_members.map((member) => escapeHtml(member.name)).join(" · ") || "尚未授予成员";
+    const evidence = asset.evidence.length
+      ? `${asset.evidence.length} 条已验证流程 · 最近 ${escapeHtml(asset.evidence[0].workflow_id)}`
+      : `${asset.usage_count} 次调用 · 尚无完成态流程证据`;
+    return `<article class="asset-card ${escapeHtml(asset.maturity)}">
+      <div class="asset-meta"><span>${escapeHtml(asset.kind)}</span><b>${escapeHtml(asset.maturity)}</b></div>
+      <h3>${escapeHtml(asset.name)} <small>v${asset.version}</small></h3>
+      <p>${escapeHtml(asset.summary)}</p>
+      <dl><dt>执行器</dt><dd>${escapeHtml(asset.executor)}</dd><dt>风险 / 默认</dt><dd>${escapeHtml(asset.risk)} / ${escapeHtml(asset.default_access)}</dd><dt>授权成员</dt><dd>${grants}</dd></dl>
+      <div class="chips">能力 / ${asset.actions.map(escapeHtml).join(" · ") || "仅候选图纸"}<br>策略 / ${asset.policy_requirements.map(escapeHtml).join(" · ")}</div>
+      <div class="asset-evidence">${evidence}</div>
+      <small>图纸：${escapeHtml(asset.blueprint.source)} · ${escapeHtml(asset.blueprint.notes)}</small>
+    </article>`;
+  }).join("");
 }
 
 async function loadEmbers() {
@@ -74,6 +93,10 @@ function toggleWorkspacePath() {
   $("policy-instructions").value = workplace?.policy?.instructions || "";
   $("policy-validations").value = (workplace?.policy?.validation_commands || []).join("\n");
   if (workplace?.policy?.forbidden_paths?.length) $("policy-forbidden").value = workplace.policy.forbidden_paths.join("\n");
+  $("policy-target-branch").value = workplace?.policy?.git_flow?.target_branch || "main";
+  $("policy-remote-enabled").checked = workplace?.policy?.git_flow?.remote_provider === "github";
+  $("policy-merge-enabled").checked = Boolean(workplace?.policy?.git_flow?.allow_merge);
+  $("policy-opencode-enabled").checked = Boolean(workplace?.policy?.git_flow?.allow_opencode_fix);
   $("policy-status").textContent = workplace?.policy ? `已安装 Policy v${workplace.policy.version}` : "尚未安装规范";
 }
 $("workplace").addEventListener("change", () => { toggleWorkspacePath(); void analyzeIntake(); });
@@ -109,6 +132,15 @@ $("save-policy").addEventListener("click", async () => {
         validation_commands: lines("policy-validations"),
         allowed_commit_types: ["feat", "fix", "docs", "refactor", "test", "chore"],
         forbidden_paths: lines("policy-forbidden"),
+        git_flow: {
+          remote_provider: $("policy-remote-enabled").checked ? "github" : "none",
+          target_branch: $("policy-target-branch").value.trim() || "main",
+          allow_issue: $("policy-remote-enabled").checked,
+          allow_push: $("policy-remote-enabled").checked,
+          allow_pull_request: $("policy-remote-enabled").checked,
+          allow_merge: $("policy-merge-enabled").checked,
+          allow_opencode_fix: $("policy-opencode-enabled").checked,
+        },
       }),
     });
     $("policy-status").textContent = `已安装 Policy v${policy.version}`;
@@ -183,11 +215,15 @@ $("task-form").addEventListener("submit", async (event) => {
 async function prepareDevelopmentCommit() {
   if (!$("workplace").value) throw new Error("开发提交必须选择已登记工作地");
   $("phase").textContent = "PLANNING";
-  $("run-message").textContent = "Chief 正在委派开发提交专员，随后由 Reviewer 复核";
+  $("run-message").textContent = "Chief 正在把目标路由给 Git 流程专员，并验收其计划";
   $("progress-bar").style.width = "45%";
   const proposal = await operatorApi("/api/development/prepare", {
     method: "POST",
-    body: JSON.stringify({ workplace_id: $("workplace").value, goal: $("goal").value }),
+    body: JSON.stringify({
+      workplace_id: $("workplace").value, goal: $("goal").value,
+      mode: $("git-flow-mode").value,
+      issue_mode: $("git-flow-mode").value === "commit" ? "none" : "auto",
+    }),
   });
   activeDevelopmentProposal = proposal.id;
   renderDevelopmentProposal(proposal);
@@ -198,29 +234,35 @@ function renderDevelopmentProposal(proposal) {
   $("phase").textContent = proposal.status.toUpperCase();
   $("progress-bar").style.width = proposal.status === "completed" ? "100%" : "70%";
   $("development-proposal").innerHTML = `<article class="proposal">
-    <h3>开发提交 Proposal</h3>
+    <h3>Git Flow 工作流</h3>
     <p>${escapeHtml(proposal.summary)}</p>
     <p><b>${escapeHtml(proposal.commit_message)}</b></p>
-    <div class="chips">Chief / ${escapeHtml(proposal.chief_member_id)} → 专员 / ${escapeHtml(proposal.specialist_member_id)} → Reviewer / ${escapeHtml(proposal.reviewer_member_id)}</div>
+    <div class="chips">Chief / ${escapeHtml(proposal.chief_member_id)} → Git流程专员 / ${escapeHtml(proposal.specialist_member_id)} → Chief 验收</div>
     <p>派工理由：${escapeHtml(proposal.assignment_reason)}</p>
     <p>风险：${escapeHtml(proposal.risk)}</p>
     <p>文件：</p><ul>${proposal.files.map((file) => `<li>${escapeHtml(file)}</li>`).join("")}</ul>
     <p>批准后验证：</p><ul>${proposal.validation_commands.map((command) => `<li>${escapeHtml(command)}</li>`).join("") || "<li>无验证命令</li>"}</ul>
-    <p class="${proposal.review.outcome === "accepted" ? "approved" : "error"}">独立复核：${escapeHtml(proposal.review.outcome)} · ${escapeHtml(proposal.review.rationale)}</p>
-    ${proposal.status === "awaiting_approval" && proposal.review.outcome === "accepted" ? '<button id="approve-development" type="button">批准验证并提交</button>' : ""}
+    <p class="${proposal.self_check.outcome === "accepted" ? "approved" : "error"}">专员自检：${escapeHtml(proposal.self_check.outcome)} · ${escapeHtml(proposal.self_check.rationale)}</p>
+    <p class="${proposal.chief_acceptance.outcome === "accepted" ? "approved" : "error"}">Chief 验收：${escapeHtml(proposal.chief_acceptance.outcome)} · ${escapeHtml(proposal.chief_acceptance.rationale)}</p>
+    ${proposal.status === "awaiting_approval" ? '<button class="advance-development" data-gate="local" type="button">批准验证并提交</button>' : ""}
+    ${proposal.status === "awaiting_remote_approval" ? '<button class="advance-development" data-gate="remote" type="button">批准创建 Issue、Push 和 PR</button>' : ""}
+    ${proposal.status === "awaiting_merge_approval" ? '<button class="advance-development" data-gate="merge" type="button">批准 Merge</button>' : ""}
     ${proposal.validation_results ? `<pre>${escapeHtml(JSON.stringify(proposal.validation_results, null, 2))}</pre>` : ""}
     ${proposal.commit_sha ? `<p class="approved">Commit: ${escapeHtml(proposal.commit_sha)}</p>` : ""}
+    ${proposal.issue_url ? `<p>Issue: <a href="${escapeHtml(proposal.issue_url)}" target="_blank">${escapeHtml(proposal.issue_url)}</a></p>` : ""}
+    ${proposal.pr_url ? `<p>PR: <a href="${escapeHtml(proposal.pr_url)}" target="_blank">${escapeHtml(proposal.pr_url)}</a></p>` : ""}
     ${proposal.error ? `<p class="error">${escapeHtml(proposal.error)}</p>` : ""}
   </article>`;
-  $("approve-development")?.addEventListener("click", approveDevelopmentCommit);
+  document.querySelectorAll(".advance-development").forEach((button) => button.addEventListener("click", () => advanceDevelopment(button.dataset.gate)));
 }
 
-async function approveDevelopmentCommit() {
+async function advanceDevelopment(gate) {
   if (!activeDevelopmentProposal) return;
-  $("approve-development").disabled = true;
   $("phase").textContent = "EXECUTING";
-  $("run-message").textContent = "正在验证批准快照并创建提交";
-  const proposal = await operatorApi(`/api/development/proposals/${activeDevelopmentProposal}/approve`, { method: "POST" });
+  $("run-message").textContent = `正在推进 ${gate} 门禁`;
+  const proposal = await operatorApi(`/api/development/proposals/${activeDevelopmentProposal}/advance`, {
+    method: "POST", body: JSON.stringify({ gate }),
+  });
   renderDevelopmentProposal(proposal);
   await loadDevelopmentHistory();
   await loadSettlement();

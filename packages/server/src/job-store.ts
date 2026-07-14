@@ -10,8 +10,8 @@ export class JobStore<TJob extends { id: string }, TInput> {
   private readonly directory: string;
   private readonly queues = new Map<string, Promise<void>>();
 
-  constructor(dataDir: string) {
-    this.directory = resolve(dataDir, "jobs");
+  constructor(dataDir: string, namespace = "jobs") {
+    this.directory = resolve(dataDir, namespace);
   }
 
   async save(job: TJob, input: TInput): Promise<void> {

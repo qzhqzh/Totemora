@@ -15,7 +15,18 @@ export interface WorkplacePolicy {
   validation_commands: string[];
   allowed_commit_types: string[];
   forbidden_paths: string[];
+  git_flow?: GitFlowPolicy;
   updated_at: string;
+}
+
+export interface GitFlowPolicy {
+  remote_provider: "none" | "github";
+  target_branch: string;
+  allow_issue: boolean;
+  allow_push: boolean;
+  allow_pull_request: boolean;
+  allow_merge: boolean;
+  allow_opencode_fix: boolean;
 }
 
 export interface Mission {
@@ -95,6 +106,15 @@ export class SettlementStore {
           ? input.allowed_commit_types
           : ["feat", "fix", "docs", "refactor", "test", "chore"],
         forbidden_paths: input.forbidden_paths.map((item) => item.trim()).filter(Boolean),
+        git_flow: input.git_flow ?? {
+          remote_provider: "none",
+          target_branch: "main",
+          allow_issue: false,
+          allow_push: false,
+          allow_pull_request: false,
+          allow_merge: false,
+          allow_opencode_fix: false,
+        },
         version: (workplace.policy?.version ?? 0) + 1,
         updated_at: new Date().toISOString(),
       };

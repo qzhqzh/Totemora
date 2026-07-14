@@ -1,24 +1,32 @@
 import { resolve } from "node:path";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { createTotemoraMcpHttpHandler } from "@totemora/mcp";
 import { createPlaygroundApp } from "./app";
 
 const root = resolve(import.meta.dir, "../../..");
 const webRoot = resolve(root, "packages/web/src");
 const dataDir = process.env.TOTEMORA_DATA_DIR ?? resolve(root, ".totemora");
 const operatorToken = await loadOrCreateOperatorToken(dataDir);
+const hostname = process.env.TOTEMORA_HOST ?? "127.0.0.1";
+const port = Number(process.env.TOTEMORA_PORT ?? 4310);
 const app = createPlaygroundApp({
   configDir: process.env.TOTEMORA_CONFIG_DIR ?? resolve(root, "configs/example"),
   dataDir,
   operatorToken,
   projectRoot: root,
 });
+const mcpHandler = createTotemoraMcpHttpHandler({
+  gatewayUrl: `http://127.0.0.1:${port}`,
+  operatorToken,
+});
 
 const server = Bun.serve({
-  hostname: process.env.TOTEMORA_HOST ?? "127.0.0.1",
-  port: Number(process.env.TOTEMORA_PORT ?? 4310),
+  hostname,
+  port,
   async fetch(request) {
     const pathname = new URL(request.url).pathname;
     if (pathname.startsWith("/api/")) return app.fetch(request);
+    if (pathname === "/mcp") return mcpHandler(request);
     const fileName = pathname === "/" ? "index.html" : pathname.slice(1);
     if (!["index.html", "app.js", "styles.css"].includes(fileName)) {
       return new Response("Not found", { status: 404 });

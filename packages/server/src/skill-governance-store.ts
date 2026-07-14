@@ -23,7 +23,7 @@ export class SkillGovernanceStore {
   private readonly skillDir: string;
   private readonly proposalsDir: string;
 
-  constructor(dataDir: string, private readonly skillId: string) {
+  constructor(dataDir: string, private readonly skillId: string, private readonly baseVersion = 1) {
     this.skillDir = resolve(dataDir, "skills", skillId);
     this.proposalsDir = resolve(dataDir, "skill-proposals");
   }
@@ -32,7 +32,7 @@ export class SkillGovernanceStore {
     const overlay = await this.readOverlay();
     const additions = overlay?.additions ?? [];
     return {
-      version: overlay?.version ?? 1,
+      version: Math.max(overlay?.version ?? this.baseVersion, this.baseVersion),
       content: additions.length
         ? `${baseContent.trim()}\n\n## 已批准的部落经验规则\n\n${additions.map((item) => `- ${item}`).join("\n")}\n`
         : baseContent,
@@ -48,7 +48,7 @@ export class SkillGovernanceStore {
     if (existing.some((item) => item.status === "pending" && item.proposed_addition === normalized)) return undefined;
     const proposal: SkillImprovementProposal = {
       id: crypto.randomUUID(), skill_id: this.skillId,
-      base_version: active?.version ?? 1, status: "pending",
+      base_version: Math.max(active?.version ?? this.baseVersion, this.baseVersion), status: "pending",
       proposed_addition: normalized, evidence,
       created_at: new Date().toISOString(),
     };
@@ -76,7 +76,7 @@ export class SkillGovernanceStore {
     catch (error) { throw new Error(`Skill proposal not found: ${proposalId}`, { cause: error }); }
     if (proposal.status !== "pending") throw new Error(`Skill proposal cannot be approved from ${proposal.status}`);
     const active = await this.readOverlay() ?? {
-      skill_id: this.skillId, version: 1, additions: [], updated_at: new Date().toISOString(),
+      skill_id: this.skillId, version: this.baseVersion, additions: [], updated_at: new Date().toISOString(),
     };
     if (active.version !== proposal.base_version) {
       proposal.status = "superseded";

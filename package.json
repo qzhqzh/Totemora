@@ -1,6 +1,6 @@
 {
   "name": "totemora",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "packageManager": "bun@1.3.14",
@@ -10,6 +10,7 @@
   "scripts": {
     "demo:tribe": "bun run totemora run \"分析这个 demo 项目的订单折扣实现，找出与 README 业务规则不一致的风险，并给出有文件证据的改进建议，不修改文件\" --workspace examples/demo-project --accept \"逐条比较 README 业务规则与当前实现\" --accept \"每个关键结论引用真实文件路径\" --accept \"给出按优先级排序的改进建议\" --config-dir configs/example --data-dir .totemora",
     "dev:web": "bun run packages/server/src/index.ts",
+    "mcp:stdio": "bun run packages/mcp/src/stdio.ts",
     "lint": "bun run scripts/check-workspace.mjs lint",
     "totemora": "bun run packages/tui/src/cli.ts",
     "typecheck": "tsc --noEmit",
