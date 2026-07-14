@@ -583,8 +583,7 @@ export class DevelopmentCommitService {
       }
       await git(cwd, [
         "-c", "credential.helper=!gh auth git-credential",
-        "-c", `remote.origin.url=${repository.url}.git`,
-        "push", "-u", "origin", branch,
+        "push", `${repository.url}.git`, branch,
       ]);
       return "GitHub HTTPS fallback";
     }
