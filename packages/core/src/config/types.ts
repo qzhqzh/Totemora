@@ -19,13 +19,28 @@ export type AgentId = string;
 export type RoleId = string;
 export type ToolId = string;
 export type PermissionId = string;
+export type SkillId = string;
 
-export type ProviderType = "openai_compatible" | (string & {});
+export type MemberStatus =
+  | "candidate"
+  | "probation"
+  | "active"
+  | "trusted"
+  | "specialist"
+  | "inactive"
+  | "retired";
+
+export type ProviderType =
+  | "openai_compatible"
+  | "anthropic_compatible"
+  | "openai_responses"
+  | (string & {});
 
 export interface ProviderConfig {
   type: ProviderType;
-  base_url: string;
-  api_key_env: string;
+  base_url?: string;
+  api_key_env?: string;
+  settings_file?: string;
 }
 
 export interface ProvidersConfig {
@@ -34,10 +49,15 @@ export interface ProvidersConfig {
 
 export interface AgentConfig {
   id: AgentId;
+  name?: string;
   provider: ProviderId;
   model: string;
+  persona?: string;
+  status?: MemberStatus;
+  version?: number;
   profile: CapabilityProfile;
   eligible_roles: RoleId[];
+  skills?: SkillId[];
   tools: ToolId[];
 }
 
@@ -85,6 +105,7 @@ export interface TribeManualConfig {
 export interface TribeConfig {
   id: string;
   name: string;
+  chief?: AgentId;
   election: TribeElectionConfig;
   council: TribeCouncilConfig;
   execution: TribeExecutionConfig;

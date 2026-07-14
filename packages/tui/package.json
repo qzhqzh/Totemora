@@ -7,6 +7,7 @@
     "totemora": "./src/cli.ts"
   },
   "dependencies": {
-    "@totemora/core": "workspace:*"
+    "@totemora/core": "workspace:*",
+    "@totemora/providers": "workspace:*"
   }
 }

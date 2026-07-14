@@ -1,0 +1,14 @@
+id: git-change-management
+name: Git 变更提交管理
+version: 3
+status: active
+owner_member_id: deepseek_git_steward
+capabilities:
+  - inspect-git-diff
+  - inspect-git-flow-state
+  - plan-github-flow
+  - review-pull-request
+  - report-to-chief
+  - plan-validation
+  - conventional-commit
+  - secret-path-screening

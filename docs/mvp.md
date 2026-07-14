@@ -1,118 +1,33 @@
-# Totemora MVP Plan
+# Totemora MVP
 
-The MVP goal is to prove that multiple heterogeneous AI agents can be configured into a tribe, elected into roles, collaborate through structured messages, and produce an auditable task result.
+MVP 只验证一个命题：**在有限智能预算下，可解释的异构成员派工是否比固定使用某一个模型更有效。**
 
-## MVP Scope
+## 已具备的基线
 
-Build a local-first TUI product with a minimal runtime and trace storage.
+- 本地配置 GPT、DeepSeek、Qwen、MiMo 成员，Provider 密钥不进入仓库。
+- 动态指定 Chief。
+- CLI 启动入门考核和通用只读 Workspace 任务。
+- Chief 派工、成员执行、最终验收、失败修复和本地 Trace。
+- Workspace 范围、敏感文件排除和上下文大小限制。
 
-The first version should support:
+这些能力构成实验 Runtime，不等于 MVP 已完成。
 
-- configure providers and agents from files
-- start one task from TUI or CLI
-- elect Chief, Shaman, and at least one Executor role
-- run a council planning step
-- let the Chief choose one plan
-- dispatch small tasks to executors
-- record structured messages and tool calls
-- review the final result
-- generate a final report
-- expose a run trace for later web viewing
+## MVP 必须补齐
 
-## Out of Scope
+- Run Schema 记录任务特征、成员与 Skill 版本、选人理由、用量、时延、重试和失败归因。
+- 可解释且受预算约束的 Staffing v1；Chief 可以提供判断，但决策必须有结构化证据。
+- 单模型与部落策略使用相同任务、上下文和验收标准运行。
+- 至少 10 个可重复真实任务，能够汇总质量、成本和强模型消耗。
+- Reviewer 与执行者职责可分离，避免仅由 Chief 自我验收。
 
-Do not implement these in the first version:
+## 暂不进入 MVP
 
-- full autonomous rule mutation
-- multi-user SaaS
-- desktop client
-- visual graph editor
-- marketplace of agents
-- complex memory evolution
-- automatic fine-tuning
-- distributed worker cluster
+- Web 控制台和图形化工作流。
+- 自动安装资产、向量库基础设施或资产市场。
+- 自动修改成员人格、Skills 或能力分数。
+- 文件写入、Shell 执行和高风险工具权限。
+- 多用户 SaaS、分布式执行和自动微调。
 
-## Phase 1: Local TUI Runtime
+## 验收标准
 
-Validation target:
-
-```text
-totemora run "analyze this repo and propose a project plan"
-```
-
-Expected result:
-
-- selected Chief and Shaman are shown
-- council produces 2-3 options
-- Chief chooses one option with reasons
-- task list is generated
-- executor agents complete assigned steps
-- final answer is reviewed
-- run trace is written locally
-
-Minimum commands:
-
-```bash
-totemora
-totemora run "<goal>"
-totemora providers list
-totemora agents list
-totemora runs
-totemora open <run_id>
-```
-
-## Phase 2: Web Observatory
-
-Validation target:
-
-```text
-TUI starts a run and prints a web trace URL.
-```
-
-The web console should be read-heavy:
-
-- run summary
-- role assignments
-- task timeline
-- message timeline
-- tool calls
-- token and cost usage
-- final report
-- manual proposals
-
-The web console should not become the main task entry in early versions.
-
-## Phase 3: Learning Loop
-
-Validation target:
-
-```text
-After multiple runs, agent reliability and role fitness affect future elections.
-```
-
-Add:
-
-- historical success rate
-- agent reliability score
-- role-specific performance
-- manual proposal review
-- bounded profile adjustment
-
-## MVP Acceptance Criteria
-
-A first usable version is acceptable when:
-
-- one local tribe can be configured without code changes
-- at least two different providers can be registered through the same provider adapter shape
-- one task can complete from TUI command to reviewed final report
-- all important events are persisted as trace records
-- failed runs are inspectable enough to tell where the process broke
-
-## Technical Bias
-
-Prefer a simple local-first implementation:
-
-- config files first, database later
-- OpenAI-compatible provider first, special provider adapters later
-- local trace files first, server-backed storage later
-- TUI-first workflow, web observability second
+MVP 完成时，仓库应提供一条可重复命令，输出不同策略的：验收结果、总 Token、强模型 Token、估算费用、时延和失败原因。只有当部落策略在一组任务上表现出稳定的成本或质量收益，才进入 Skills、资产和成长阶段。

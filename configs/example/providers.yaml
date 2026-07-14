@@ -1,15 +1,17 @@
 providers:
   openai:
-    type: openai_compatible
+    type: openai_responses
     base_url: https://api.openai.com/v1
     api_key_env: OPENAI_API_KEY
 
   qwen:
-    type: openai_compatible
-    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-    api_key_env: DASHSCOPE_API_KEY
+    type: anthropic_compatible
+    settings_file: ~/.claude/settings.qwen.json
 
-  kimi:
-    type: openai_compatible
-    base_url: https://api.moonshot.cn/v1
-    api_key_env: MOONSHOT_API_KEY
+  deepseek:
+    type: anthropic_compatible
+    settings_file: ~/.claude/settings.ds.json
+
+  xiaomi:
+    type: anthropic_compatible
+    settings_file: ~/.claude/settings.json

@@ -1,0 +1,21 @@
+id: zvec
+name: Zvec
+kind: vector_database
+status: candidate
+source:
+  homepage: https://zvec.org/
+  repository: https://github.com/alibaba/zvec
+  license: Apache-2.0
+capabilities:
+  - in_process_vector_storage
+  - dense_and_sparse_search
+  - hybrid_search
+  - durable_local_storage
+candidate_uses:
+  - member_experience_retrieval
+  - tribe_asset_search
+  - skill_and_blueprint_discovery
+constraints:
+  - no_dependency_until_trial_passes
+  - embedding_model_must_be_selected_separately
+  - retrieval_quality_requires_tribe_evaluation

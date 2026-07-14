@@ -50,20 +50,31 @@ function validateProviders(
   for (const [providerId, provider] of Object.entries(
     config.providers.providers,
   )) {
-    if (!provider.api_key_env) {
+    if (!provider.api_key_env && !provider.settings_file) {
       issues.push({
         file: "providers.yaml",
-        field: `providers.${providerId}.api_key_env`,
-        message: "Provider api_key_env is required",
+        field: `providers.${providerId}`,
+        message: "Provider requires api_key_env or settings_file",
       });
       continue;
     }
 
-    if (looksLikeSecretValue(provider.api_key_env)) {
+    if (
+      provider.api_key_env &&
+      looksLikeSecretValue(provider.api_key_env)
+    ) {
       issues.push({
         file: "providers.yaml",
         field: `providers.${providerId}.api_key_env`,
         message: "Provider api_key_env must reference an environment variable name",
+      });
+    }
+
+    if (!provider.settings_file && !provider.base_url) {
+      issues.push({
+        file: "providers.yaml",
+        field: `providers.${providerId}.base_url`,
+        message: "Provider base_url is required when settings_file is not used",
       });
     }
   }
@@ -184,6 +195,15 @@ function validateTribe(
   issues: ConfigValidationIssue[],
 ): void {
   const tribe = config.tribe.tribe;
+  const agentIds = new Set(config.agents.agents.map((agent) => agent.id));
+
+  if (tribe.chief && !agentIds.has(tribe.chief)) {
+    issues.push({
+      file: "tribe.yaml",
+      field: "tribe.chief",
+      message: `Unknown chief member reference: ${tribe.chief}`,
+    });
+  }
   const roleReferences = [
     ...tribe.election.required_roles.map((roleId) => ({
       field: "tribe.election.required_roles",
