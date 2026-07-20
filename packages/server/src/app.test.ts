@@ -17,17 +17,18 @@ test("exposes tribe and completes a playground run", async () => {
   expect(tribe.status).toBe(200);
   expect((await tribe.json()).members.length).toBeGreaterThan(1);
   expect(await (await app.fetch(new Request("http://local/api/status"))).json()).toMatchObject({
-    version: "0.5.0-git-flow-steward", active_members: 4,
-    capabilities: { inspect: "enabled", change: "git_flow_existing_changes", specialist_self_review: "enabled" },
+    version: "0.6.0-living-tribe", active_members: 5,
+    capabilities: { inspect: "enabled", change: "git_flow_existing_changes", specialist_self_review: "enabled", member_chat: "mentor_escalation_v1" },
   });
   const tribeData = await (await app.fetch(new Request("http://local/api/tribe"))).json();
-  expect(tribeData.members.filter((member: any) => !["inactive", "retired"].includes(member.status))).toHaveLength(4);
+  expect(tribeData.members.filter((member: any) => !["inactive", "retired"].includes(member.status))).toHaveLength(5);
   expect(tribeData.members.find((member: any) => member.id === "deepseek_reasoner").persona).toContain("深思");
   const embers = await (await app.fetch(new Request("http://local/api/embers"))).json();
   expect(embers.embers).toHaveLength(4);
   expect(embers.embers.find((ember: any) => ember.provider_id === "deepseek")).toMatchObject({
     id: "deepseek/deepseek-v4-pro[1m]", status: "available", member_ids: ["deepseek_reasoner", "deepseek_git_steward"],
   });
+  expect(embers.embers.find((ember: any) => ember.provider_id === "qwen").member_ids).toEqual(["qwen_worker", "qwen_intelligence"]);
 
   const workplaceResponse = await app.fetch(new Request("http://local/api/workplaces", {
     method: "POST", headers: { "content-type": "application/json" },
@@ -59,7 +60,7 @@ test("exposes tribe and completes a playground run", async () => {
   expect(job.status).toBe("completed");
   expect(job.run.schema_version).toBe(2);
   expect(job.run.plan.assignments[0].assignment_reason).toContain("匹配");
-  expect(job.run.plan.candidate_ranking).toHaveLength(3);
+  expect(job.run.plan.candidate_ranking).toHaveLength(4);
   expect(job.run.independent_review).toMatchObject({ reviewer_member_id: "qwen_worker", outcome: "accepted" });
   expect(job.run.final_report.findings[0].evidence[0]).toContain("README.md");
   const history = await app.fetch(new Request("http://local/api/runs"));

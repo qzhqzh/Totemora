@@ -11,8 +11,8 @@ const capabilityText = [
 ].join("\n");
 
 export function createTotemoraMcpServer(gateway: TotemoraGatewayClient): McpServer {
-  const server = new McpServer({ name: "totemora-tribe", version: "0.5.0-git-flow-steward" }, {
-    instructions: "Delegate a Git management outcome to Totemora, poll the durable task, inspect the workflow, and request approval only at its current gate.",
+  const server = new McpServer({ name: "totemora-tribe", version: "0.6.0-living-tribe" }, {
+    instructions: "Discover tribe assets and members, talk to a specialist with optional mentor escalation, run the intelligence watch, or delegate a gated Git management outcome.",
   });
 
   server.registerResource("totemora-capabilities", "totemora://capabilities", {
@@ -38,6 +38,58 @@ export function createTotemoraMcpServer(gateway: TotemoraGatewayClient): McpServ
     description: "Discover deterministic tools, adapters, infrastructure and knowledge owned by the tribe, including member grants, maturity, policy requirements and verified evidence.",
     annotations: readOnlyAnnotations("List tribe assets"),
   }, async () => toolCall(() => gateway.listAssets()));
+
+  server.registerTool("totemora_list_members", {
+    title: "List living tribe members",
+    description: "Inspect member identity, lineage, mentor, verified and failed experiences, vitality, growth evidence and current rank.",
+    annotations: readOnlyAnnotations("List living tribe members"),
+  }, async () => toolCall(() => gateway.listMemberDossiers()));
+
+  server.registerTool("totemora_get_member", {
+    title: "Inspect one tribe member",
+    description: "Read one member's personality, lineage, abilities, life stage, growth signals and recent experiences.",
+    inputSchema: { member_id: z.string().min(1) },
+    annotations: readOnlyAnnotations("Inspect tribe member"),
+  }, async ({ member_id }) => toolCall(() => gateway.getMemberDossier(member_id)));
+
+  server.registerTool("totemora_chat_with_member", {
+    title: "Talk to a tribe member",
+    description: "Send a message to one persistent member. The member sees its own experience and can optionally ask its configured mentor for guidance before answering.",
+    inputSchema: {
+      member_id: z.string().min(1), message: z.string().min(1).max(8_000),
+      ask_mentor: z.boolean().default(false),
+    },
+    annotations: { title: "Talk to member", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, async ({ member_id, message, ask_mentor }) => toolCall(() => gateway.chatWithMember(member_id, message, ask_mentor)));
+
+  server.registerTool("totemora_list_intelligence_briefs", {
+    title: "List tribe intelligence briefs",
+    description: "Inspect recent scheduled or manually requested briefs and Bark delivery evidence.",
+    annotations: readOnlyAnnotations("List intelligence briefs"),
+  }, async () => toolCall(() => gateway.listIntelligenceBriefs()));
+
+  server.registerTool("totemora_list_actions", {
+    title: "Inspect tribe action journal",
+    description: "Inspect recent external side effects, idempotency keys, attempts, outcomes and bounded evidence. Requires the MCP operator credential.",
+    annotations: readOnlyAnnotations("Inspect action journal"),
+  }, async () => toolCall(() => gateway.listActions()));
+
+  server.registerTool("totemora_run_intelligence_brief", {
+    title: "Run the tribe intelligence watch",
+    description: "Queue a durable task for Qwen-seeded intelligence member 听风. Returns immediately with a task id; poll with totemora_get_intelligence_task.",
+    inputSchema: {
+      message_count: z.number().int().min(1).max(5).default(1),
+      idempotency_key: z.string().min(1).max(200).optional(),
+    },
+    annotations: { title: "Run intelligence watch", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, async ({ message_count, idempotency_key }) => toolCall(() => gateway.runIntelligenceBrief(message_count, idempotency_key)));
+
+  server.registerTool("totemora_get_intelligence_task", {
+    title: "Get an intelligence task",
+    description: "Poll a durable intelligence task until it completes with the brief and Bark delivery evidence or fails with a retryable reason.",
+    inputSchema: { task_id: z.string().min(1) },
+    annotations: readOnlyAnnotations("Get intelligence task"),
+  }, async ({ task_id }) => toolCall(() => gateway.getIntelligenceTask(task_id)));
 
   server.registerTool("totemora_start_git_flow", {
     title: "Delegate a Git Flow outcome to the tribe",

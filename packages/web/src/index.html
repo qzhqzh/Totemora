@@ -77,11 +77,33 @@ secrets/</textarea></label>
       <div id="assets" class="assets"></div>
     </section>
     <section class="panel codex-panel">
-      <div class="section-title"><span>05</span><h2>人物图鉴</h2></div>
+      <div class="section-title"><span>05</span><h2>成员营帐</h2></div>
+      <p class="section-note">选择一名成员单独交谈；成员会带着自己的经历、成长状态和性格回答，也可以向同谱系导师求助。</p>
+      <div class="member-camp">
+        <aside><div id="member-tabs" class="member-tabs"></div><div id="member-dossier" class="member-dossier"></div></aside>
+        <div class="conversation-wrap">
+          <div id="member-conversation" class="member-conversation"></div>
+          <form id="member-chat-form">
+            <textarea id="member-message" required placeholder="和当前成员说点什么…"></textarea>
+            <label class="inline-check"><input id="ask-mentor" type="checkbox">请他向同谱系导师求助后再回答</label>
+            <button type="submit">发送到营帐</button>
+          </form>
+        </div>
+      </div>
+    </section>
+    <section class="panel intelligence-panel">
+      <div class="section-title"><span>06</span><h2>听风台</h2></div>
+      <p class="section-note">情报员每小时巡查一次白名单信息源；测试按钮会立即汇总并尝试推送 3 条 Bark 消息。</p>
+      <button id="run-intelligence" type="button">立即巡查并推送 3 条</button>
+      <small id="intelligence-status"></small>
+      <div id="intelligence-history" class="intelligence-history"></div>
+    </section>
+    <section class="panel codex-panel">
+      <div class="section-title"><span>07</span><h2>人物图鉴</h2></div>
       <div id="codex" class="codex"></div>
     </section>
     <section id="run-panel" class="panel run-panel hidden">
-      <div class="section-title"><span>06</span><h2>Run 现场</h2></div>
+      <div class="section-title"><span>08</span><h2>Run 现场</h2></div>
       <div class="run-head"><div><small>当前阶段</small><strong id="phase">QUEUED</strong></div><div id="run-message"></div></div>
       <button id="cancel-run" type="button" class="secondary hidden">取消 Run</button>
       <button id="retry-run" type="button" class="secondary hidden">重试 Run</button>

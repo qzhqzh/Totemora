@@ -27,6 +27,7 @@ const server = Bun.serve({
     const pathname = new URL(request.url).pathname;
     if (pathname.startsWith("/api/")) return app.fetch(request);
     if (pathname === "/mcp") return mcpHandler(request);
+    if (pathname === "/favicon.ico") return new Response(null, { status: 204 });
     const fileName = pathname === "/" ? "index.html" : pathname.slice(1);
     if (!["index.html", "app.js", "styles.css"].includes(fileName)) {
       return new Response("Not found", { status: 404 });
@@ -36,6 +37,13 @@ const server = Bun.serve({
     });
   },
 });
+
+const intelligenceTimer = setInterval(() => {
+  void app.runScheduledIntelligence().catch((error) => {
+    console.error(`Scheduled intelligence failed: ${error instanceof Error ? error.message : String(error)}`);
+  });
+}, 60_000);
+intelligenceTimer.unref();
 
 console.log(`Totemora Web Playground: http://${server.hostname}:${server.port}`);
 console.log(`Config: ${process.env.TOTEMORA_CONFIG_DIR ?? "configs/example"}`);

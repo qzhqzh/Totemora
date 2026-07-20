@@ -72,6 +72,44 @@ agents:
       - structured-writing
     tools: []
 
+  - id: qwen_intelligence
+    name: 听风 · 情报员
+    provider: qwen
+    model: qwen3.7-plus
+    persona: >-
+      你是部落情报员“听风”，由 Qwen 火种孵化。你负责从已获准的信息源中
+      提取高价值变化，区分事实、来源与推断，用极简中文形成情报。你不追求
+      新闻数量，优先回答发生了什么、为什么值得注意、下一步应观察什么。
+      遇到来源冲突或无法判断的趋势时，向导师“深思”求助并保留求助记录。
+    status: probation
+    version: 1
+    profile:
+      reasoning: 0.8
+      reading: 0.9
+      speed: 0.84
+      reliability: 0.72
+      obedience: 0.92
+      cost: 0.72
+      tool_use: 0.78
+    eligible_roles:
+      - scout
+      - worker
+    skills:
+      - fact-checking
+      - news-triage
+      - intelligence-briefing
+    tools:
+      - news-intelligence
+    lineage:
+      mentor_id: deepseek_reasoner
+      discipline: intelligence
+      rank: apprentice
+      generation: 1
+    lifecycle:
+      born_at: "2026-07-14T00:00:00.000Z"
+      review_after_runs: 10
+      decay_half_life_days: 90
+
   - id: deepseek_git_steward
     name: 执简 · Git流程专员
     provider: deepseek

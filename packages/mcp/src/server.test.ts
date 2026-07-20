@@ -29,7 +29,7 @@ const proposal = {
   chief_acceptance: { outcome: "accepted", rationale: "验收通过", issues: [] },
 };
 
-test("exposes one persistent Git Flow capability through MCP", async () => {
+test("exposes living members, intelligence and persistent Git Flow through MCP", async () => {
   const requests: Array<{ path: string; method: string }> = [];
   const request = async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input));
@@ -38,6 +38,13 @@ test("exposes one persistent Git Flow capability through MCP", async () => {
     if (url.pathname === "/api/tribe") return Response.json({ tribe: { id: "first-fire", name: "初火部落" }, members: [] });
     if (url.pathname === "/api/settlement") return Response.json({ workplaces: [{ id: "workplace-1", name: "Demo", policy: { version: 1 } }] });
     if (url.pathname === "/api/assets") return Response.json({ assets: [{ id: "git-flow-engine", maturity: "verified" }] });
+    if (url.pathname === "/api/members/dossiers") return Response.json({ members: [{ member: { id: "qwen_intelligence" }, identity: { rank: "apprentice" } }] });
+    if (url.pathname === "/api/members/qwen_intelligence") return Response.json({ member: { id: "qwen_intelligence" }, growth: { verified_successes: 1 } });
+    if (url.pathname === "/api/members/qwen_intelligence/chat") return Response.json({ reply: { content: "情报已收到" } });
+    if (url.pathname === "/api/intelligence") return Response.json({ briefs: [] });
+    if (url.pathname === "/api/actions") return Response.json({ actions: [] });
+    if (url.pathname === "/api/intelligence/tasks" && init?.method === "POST") return Response.json({ id: "intel-task-1", kind: "intelligence_brief", status: "queued" });
+    if (url.pathname === "/api/intelligence/tasks/intel-task-1") return Response.json({ id: "intel-task-1", kind: "intelligence_brief", status: "completed", result: { id: "brief-1", pushed_messages: 3 } });
     if (url.pathname === "/api/development/tasks" && init?.method === "POST") {
       return Response.json({ id: "task-1", kind: "git_flow", status: "queued", workplace_id: "workplace-1", goal: proposal.goal, mode: "merge", issue_mode: "auto" });
     }
@@ -67,6 +74,13 @@ test("exposes one persistent Git Flow capability through MCP", async () => {
     "totemora_status",
     "totemora_list_workplaces",
     "totemora_list_assets",
+    "totemora_list_members",
+    "totemora_get_member",
+    "totemora_chat_with_member",
+    "totemora_list_intelligence_briefs",
+    "totemora_list_actions",
+    "totemora_run_intelligence_brief",
+    "totemora_get_intelligence_task",
     "totemora_start_git_flow",
     "totemora_get_task",
     "totemora_list_git_flows",
@@ -77,6 +91,10 @@ test("exposes one persistent Git Flow capability through MCP", async () => {
 
   const assets = await client.callTool({ name: "totemora_list_assets", arguments: {} });
   expect(assets.structuredContent).toMatchObject({ assets: [{ id: "git-flow-engine", maturity: "verified" }] });
+  const intelligence = await client.callTool({ name: "totemora_run_intelligence_brief", arguments: { message_count: 3, idempotency_key: "test" } });
+  expect(intelligence.structuredContent).toMatchObject({ id: "intel-task-1", status: "queued" });
+  const intelligenceDone = await client.callTool({ name: "totemora_get_intelligence_task", arguments: { task_id: "intel-task-1" } });
+  expect(intelligenceDone.structuredContent).toMatchObject({ status: "completed", result: { pushed_messages: 3 } });
 
   const prepared = await client.callTool({
     name: "totemora_start_git_flow",

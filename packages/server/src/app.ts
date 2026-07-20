@@ -22,6 +22,10 @@ import { SettlementStore } from "./settlement-store";
 import { JobStore } from "./job-store";
 import { DevelopmentCommitService } from "./development-service";
 import { ToolAssetRegistry } from "./tool-asset-registry";
+import { MemberStateStore } from "./member-state-store";
+import { MemberConversationService } from "./member-conversation-service";
+import { IntelligenceService } from "./intelligence-service";
+import { ActionJournal } from "./action-journal";
 
 export interface PlaygroundOptions {
   configDir: string;
@@ -84,6 +88,21 @@ interface DevelopmentTaskInput {
   issue_mode?: "auto" | "none";
 }
 
+interface IntelligenceTask {
+  id: string;
+  kind: "intelligence_brief";
+  status: "queued" | "running" | "completed" | "failed";
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+  idempotency_key: string;
+  result?: Awaited<ReturnType<IntelligenceService["run"]>>;
+  error?: string;
+  retryable?: boolean;
+}
+
+interface IntelligenceTaskInput { message_count?: number; idempotency_key?: string }
+
 export function createPlaygroundApp(options: PlaygroundOptions) {
   const jobs = new Map<string, RunJob>();
   const controllers = new Map<string, AbortController>();
@@ -92,6 +111,8 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
   const jobStore = new JobStore<RunJob, RunInput>(options.dataDir);
   const developmentTasks = new Map<string, DevelopmentTask>();
   const developmentTaskStore = new JobStore<DevelopmentTask, DevelopmentTaskInput>(options.dataDir, "development-tasks");
+  const intelligenceTasks = new Map<string, IntelligenceTask>();
+  const intelligenceTaskStore = new JobStore<IntelligenceTask, IntelligenceTaskInput>(options.dataDir, "intelligence-tasks");
   const runHydration = jobStore.list().then(async (records) => {
     for (const record of records) {
       const job = record.job;
@@ -124,8 +145,26 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
       developmentTasks.set(task.id, task);
     }
   });
-  const hydration = Promise.all([runHydration, developmentHydration]);
+  const intelligenceHydration = intelligenceTaskStore.list().then(async (records) => {
+    for (const record of records) {
+      const task = record.job;
+      if (["queued", "running"].includes(task.status)) {
+        task.status = "failed";
+        task.error = "Gateway restarted while the intelligence task was running; start a new task with a new idempotency key";
+        task.retryable = true;
+        task.updated_at = new Date().toISOString();
+        await intelligenceTaskStore.save(task, record.input);
+      }
+      intelligenceTasks.set(task.id, task);
+    }
+  });
+  const hydration = Promise.all([runHydration, developmentHydration, intelligenceHydration]);
   let configPromise: Promise<LocalConfigSet> | undefined;
+  let memberServicesPromise: Promise<{
+    state: MemberStateStore;
+    conversations: MemberConversationService;
+    intelligence: IntelligenceService;
+  }> | undefined;
   const getConfig = async () => {
     configPromise ??= loadLocalConfig({ configDir: options.configDir }).then((config) => {
       validateLocalConfig(config);
@@ -145,6 +184,22 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
     options.projectRoot ?? resolve(import.meta.dir, "../../.."),
     options.dataDir,
   );
+  const getMemberServices = async () => {
+    memberServicesPromise ??= (async () => {
+      const config = await getConfig();
+      const providers = options.createProviderRegistry?.(config) ?? new ConfiguredProviderRegistry(config);
+      const state = new MemberStateStore(options.dataDir, config);
+      return {
+        state,
+        conversations: new MemberConversationService(config, providers, state, options.dataDir),
+        intelligence: new IntelligenceService(
+          config, providers, state, options.dataDir,
+          options.projectRoot ?? resolve(import.meta.dir, "../../.."),
+        ),
+      };
+    })();
+    return memberServicesPromise;
+  };
   const enqueueDevelopmentTask = async (input: DevelopmentTaskInput): Promise<DevelopmentTask> => {
     if (!input.workplace_id || !input.goal?.trim()) throw new Error("workplace_id and goal are required");
     const now = new Date().toISOString();
@@ -175,6 +230,35 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
       };
       await developmentTaskStore.save(terminalTask, input);
       Object.assign(task, terminalTask);
+    })();
+    return task;
+  };
+  const enqueueIntelligenceTask = async (input: IntelligenceTaskInput): Promise<IntelligenceTask> => {
+    const now = new Date().toISOString();
+    const task: IntelligenceTask = {
+      id: crypto.randomUUID(), kind: "intelligence_brief", status: "queued",
+      created_at: now, updated_at: now,
+      message_count: Math.max(1, Math.min(5, input.message_count ?? 1)),
+      idempotency_key: input.idempotency_key ?? `intelligence-${crypto.randomUUID()}`,
+    };
+    intelligenceTasks.set(task.id, task);
+    await intelligenceTaskStore.save(task, input);
+    void (async () => {
+      task.status = "running"; task.updated_at = new Date().toISOString();
+      await intelligenceTaskStore.save(task, input);
+      try {
+        task.result = await (await getMemberServices()).intelligence.run({
+          message_count: task.message_count, idempotency_key: task.idempotency_key, reason: "manual",
+        });
+      } catch (error) {
+        task.error = error instanceof Error ? error.message : String(error);
+        task.retryable = true;
+      }
+      const terminal: IntelligenceTask = {
+        ...task, status: task.error ? "failed" : "completed", updated_at: new Date().toISOString(),
+      };
+      await intelligenceTaskStore.save(terminal, input);
+      Object.assign(task, terminal);
     })();
     return task;
   };
@@ -224,6 +308,9 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
 
   return {
     jobs,
+    async runScheduledIntelligence() {
+      return (await getMemberServices()).intelligence.runDue();
+    },
     async fetch(request: Request): Promise<Response> {
       await hydration;
       const url = new URL(request.url);
@@ -244,6 +331,8 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
               skills: member.skills ?? [],
               persona: member.persona ?? "",
               ember_id: `${member.provider}/${member.model}`,
+              lineage: member.lineage,
+              lifecycle: member.lifecycle,
             })),
           });
         }
@@ -251,7 +340,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
         if (request.method === "GET" && url.pathname === "/api/status") {
           const config = await getConfig();
           return json({
-            version: "0.5.0-git-flow-steward",
+            version: "0.6.0-living-tribe",
             settlement: "ready",
             active_members: config.agents.agents.filter((member) => !["inactive", "retired"].includes(member.status ?? "active")).length,
             capabilities: {
@@ -263,8 +352,66 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
               development_git_flow: options.operatorToken ? "enabled" : "needs_operator_token",
               mcp: "streamable_http_and_stdio",
               tribe_assets: "catalog_permissions_evidence_v1",
+              member_dossiers: "experience_growth_decay_v1",
+              member_chat: "mentor_escalation_v1",
+              intelligence_watch: "hourly_bark_v1",
             },
           });
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/members/dossiers") {
+          return json({ members: await (await getMemberServices()).state.listDossiers() });
+        }
+
+        const memberMatch = url.pathname.match(/^\/api\/members\/([^/]+)$/);
+        if (request.method === "GET" && memberMatch) {
+          return json(await (await getMemberServices()).state.getDossier(memberMatch[1]!));
+        }
+
+        const memberMessagesMatch = url.pathname.match(/^\/api\/members\/([^/]+)\/messages$/);
+        if (request.method === "GET" && memberMessagesMatch) {
+          return json({ messages: await (await getMemberServices()).conversations.list(memberMessagesMatch[1]!) });
+        }
+
+        const memberChatMatch = url.pathname.match(/^\/api\/members\/([^/]+)\/chat$/);
+        if (request.method === "POST" && memberChatMatch) {
+          requireOperator(request, options.operatorToken);
+          const input = await request.json() as { message?: string; ask_mentor?: boolean };
+          return json(await (await getMemberServices()).conversations.chat(
+            memberChatMatch[1]!, input.message ?? "", Boolean(input.ask_mentor),
+          ));
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/intelligence") {
+          return json({ briefs: await (await getMemberServices()).intelligence.list() });
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/actions") {
+          requireOperator(request, options.operatorToken);
+          return json({ actions: (await new ActionJournal(options.dataDir).list()).slice(-100).reverse() });
+        }
+
+        if (request.method === "POST" && url.pathname === "/api/intelligence/run") {
+          requireOperator(request, options.operatorToken);
+          const input = await request.json().catch(() => ({})) as { message_count?: number; idempotency_key?: string };
+          return json(await (await getMemberServices()).intelligence.run({
+            message_count: input.message_count,
+            idempotency_key: input.idempotency_key,
+            reason: "manual",
+          }), 201);
+        }
+
+        if (request.method === "POST" && url.pathname === "/api/intelligence/tasks") {
+          requireOperator(request, options.operatorToken);
+          const input = await request.json().catch(() => ({})) as IntelligenceTaskInput;
+          return json(await enqueueIntelligenceTask(input), 202);
+        }
+
+        const intelligenceTaskMatch = url.pathname.match(/^\/api\/intelligence\/tasks\/([^/]+)$/);
+        if (request.method === "GET" && intelligenceTaskMatch) {
+          requireOperator(request, options.operatorToken);
+          const task = intelligenceTasks.get(intelligenceTaskMatch[1]!);
+          return task ? json(task) : json({ error: "Intelligence task not found" }, 404);
         }
 
         if (request.method === "GET" && url.pathname === "/api/assets") {

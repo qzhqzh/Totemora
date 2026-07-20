@@ -17,9 +17,9 @@ Totemora 是一个**预算约束下的异构智能部落**，不是通用聊天�
 
 当前提供 CLI、本地 Web Playground 和 MCP 三种入口。Web 与 MCP 共用常驻 Gateway；MCP 让外部 AI 发现和调用部落专业服务，但不拥有第二套 Runtime。完整的治理控制台仍需在运行数据足够后建设。
 
-当前实现与使用方式见 [quickstart.md](quickstart.md)，领域结构见 [architecture-v2.md](architecture-v2.md)，产品定位见 [ADR-0001](adr/0001-product-positioning-and-delivery-order.md)，驻扎地见 [ADR-0002](adr/0002-settlement-and-continuous-task-intake.md)，技术复用边界见 [ADR-0003](adr/0003-adopt-standards-own-the-domain.md)。推进顺序见 [execution-plan.md](execution-plan.md)。
+当前实现与使用方式见 [quickstart.md](quickstart.md)，v0.6 真实验收见 [v0.6-living-tribe-test-guide.md](v0.6-living-tribe-test-guide.md)，领域结构见 [architecture-v2.md](architecture-v2.md)，产品定位见 [ADR-0001](adr/0001-product-positioning-and-delivery-order.md)，驻扎地见 [ADR-0002](adr/0002-settlement-and-continuous-task-intake.md)，技术复用边界见 [ADR-0003](adr/0003-adopt-standards-own-the-domain.md)。推进顺序见 [execution-plan.md](execution-plan.md)。
 
-当前稳定验收节点是 `v0.5.0-git-flow-steward`。Gateway 设计见 [gateway-architecture.md](gateway-architecture.md)，MCP 接入见 [mcp-gateway.md](mcp-gateway.md)，Git 流程决策见 [ADR-0004](adr/0004-development-commit-steward.md)，真实 Issue → PR → Merge 验收见 [v0.5-mcp-git-flow-e2e.md](v0.5-mcp-git-flow-e2e.md)。MCP 专业服务决策见 [ADR-0005](adr/0005-mcp-specialist-service.md)，共享工具资产见 [ADR-0006](adr/0006-tribe-tool-assets.md)。
+当前开发节点是 `v0.6.0-living-tribe`：在 v0.5 Git Flow 资产基础上增加成员生命档案、谱系导师、持久私聊、情报员定时任务和幂等外部动作日志。Gateway 设计见 [gateway-architecture.md](gateway-architecture.md)，MCP 接入见 [mcp-gateway.md](mcp-gateway.md)，成员生命见 [ADR-0007](adr/0007-member-life-lineage-and-conversation.md)，安全常驻任务见 [ADR-0008](adr/0008-safe-recurring-external-actions.md)。
 
 ## 当前成功标准
 

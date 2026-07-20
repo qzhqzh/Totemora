@@ -34,10 +34,20 @@ export function collectConfigValidationIssues(
   const issues: ConfigValidationIssue[] = [];
   const providerIds = new Set(Object.keys(config.providers.providers));
   const roleIds = new Set(Object.keys(config.roles.roles));
+  const agentIds = new Set(config.agents.agents.map((agent) => agent.id));
 
   validateProviders(config, issues);
   validateRoles(config, issues);
   validateAgents(config, providerIds, roleIds, issues);
+  for (const agent of config.agents.agents) {
+    if (agent.lineage?.mentor_id && !agentIds.has(agent.lineage.mentor_id)) {
+      issues.push({
+        file: "agents.yaml",
+        field: `agents.${agent.id}.lineage.mentor_id`,
+        message: `Unknown mentor member reference: ${agent.lineage.mentor_id}`,
+      });
+    }
+  }
   validateTribe(config, roleIds, issues);
 
   return issues;

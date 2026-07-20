@@ -59,6 +59,17 @@ export interface AgentConfig {
   eligible_roles: RoleId[];
   skills?: SkillId[];
   tools: ToolId[];
+  lineage?: {
+    mentor_id?: AgentId;
+    discipline?: string;
+    rank?: "apprentice" | "journeyman" | "expert" | "elder";
+    generation?: number;
+  };
+  lifecycle?: {
+    born_at?: string;
+    review_after_runs?: number;
+    decay_half_life_days?: number;
+  };
 }
 
 export interface AgentsConfig {

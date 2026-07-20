@@ -5,6 +5,8 @@ let status;
 let settlement;
 let activeJobId;
 let activeDevelopmentProposal;
+let memberDossiers = [];
+let activeMemberId;
 
 $("operator-token").value = localStorage.getItem("totemora_operator_token") || "";
 $("operator-token").addEventListener("change", () => {
@@ -22,7 +24,7 @@ async function loadTribe() {
       <small>${member.skills.map(escapeHtml).join(" · ") || "暂无 Skill"}</small>
     </article>`).join("");
   renderCodex();
-  await Promise.all([loadEmbers(), loadAssets()]);
+  await Promise.all([loadEmbers(), loadAssets(), loadMemberDossiers(), loadIntelligence()]);
   $("chief").innerHTML = tribe.members.filter((m) => m.roles.includes("chief") && !["inactive", "retired"].includes(m.status))
     .map((m) => `<option value="${escapeHtml(m.id)}" ${m.id === tribe.tribe.chief ? "selected" : ""}>${escapeHtml(m.name)} · ${escapeHtml(m.model)}</option>`).join("");
   await loadHistory();
@@ -60,7 +62,7 @@ async function loadEmbers() {
 }
 
 function renderCodex() {
-  const members = tribe.members.filter((member) => !["inactive", "retired"].includes(member.status)).slice(0, 3);
+  const members = tribe.members.filter((member) => !["inactive", "retired"].includes(member.status));
   $("codex").innerHTML = members.map((member) => {
     const profile = Object.entries(member.profile).sort((a, b) => b[1] - a[1]).slice(0, 4);
     return `<article class="codex-card" data-mark="${escapeHtml(member.name.slice(0, 1))}">
@@ -72,6 +74,73 @@ function renderCodex() {
     </article>`;
   }).join("");
 }
+
+async function loadMemberDossiers() {
+  const result = await api("/api/members/dossiers");
+  memberDossiers = result.members.filter((item) => !["inactive", "retired"].includes(item.member.status));
+  activeMemberId ||= memberDossiers[0]?.member.id;
+  $("member-tabs").innerHTML = memberDossiers.map((item) => `<button type="button" class="member-tab ${item.member.id === activeMemberId ? "active" : ""}" data-member="${escapeHtml(item.member.id)}">
+    <b>${escapeHtml(item.member.name || item.member.id)}</b><small>${escapeHtml(item.identity.rank)} · ${escapeHtml(item.member.status || "active")}</small>
+  </button>`).join("");
+  $("member-tabs").querySelectorAll("[data-member]").forEach((button) => button.addEventListener("click", () => {
+    activeMemberId = button.dataset.member; void loadMemberDossiers();
+  }));
+  const dossier = memberDossiers.find((item) => item.member.id === activeMemberId);
+  if (!dossier) return;
+  const mentor = dossier.identity.mentor ? `${escapeHtml(dossier.identity.mentor.name)}（${escapeHtml(dossier.identity.mentor.id)}）` : "无固定导师";
+  $("member-dossier").innerHTML = `<h3>${escapeHtml(dossier.member.name || dossier.member.id)}</h3>
+    <p>${escapeHtml(dossier.member.persona || "")}</p>
+    <dl><dt>谱系</dt><dd>${escapeHtml(dossier.identity.discipline)} / ${escapeHtml(dossier.identity.rank)}</dd><dt>导师</dt><dd>${mentor}</dd><dt>年龄</dt><dd>${dossier.identity.age_days} 天</dd><dt>活力</dt><dd>${Math.round(dossier.growth.vitality * 100)}%</dd></dl>
+    <div class="chips">验证成功 ${dossier.growth.verified_successes} · 失败 ${dossier.growth.failures} · 求助 ${dossier.growth.help_requests} · 获得指点 ${dossier.growth.guidance_received}</div>
+    <h4>最近经历</h4>${dossier.experiences.slice(0, 6).map((item) => `<p class="memory ${item.verified ? "verified" : ""}"><b>${escapeHtml(item.kind)}</b> ${escapeHtml(item.summary)}<small>${escapeHtml(item.at)}</small></p>`).join("") || "<small>尚未留下经历</small>"}`;
+  await loadMemberConversation();
+}
+
+async function loadMemberConversation() {
+  if (!activeMemberId) return;
+  const { messages } = await api(`/api/members/${encodeURIComponent(activeMemberId)}/messages`);
+  $("member-conversation").innerHTML = messages.slice(-30).map((item) => `<article class="chat-message ${escapeHtml(item.role)}"><small>${escapeHtml(item.author_id)} · ${escapeHtml(item.role)}</small><p>${escapeHtml(item.content)}</p></article>`).join("") || "<p class=\"section-note\">营帐还没有对话。</p>";
+  $("member-conversation").scrollTop = $("member-conversation").scrollHeight;
+}
+
+$("member-chat-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!activeMemberId) return;
+  const button = event.submitter; button.disabled = true;
+  try {
+    await operatorApi(`/api/members/${encodeURIComponent(activeMemberId)}/chat`, {
+      method: "POST", body: JSON.stringify({ message: $("member-message").value, ask_mentor: $("ask-mentor").checked }),
+    });
+    $("member-message").value = ""; $("ask-mentor").checked = false;
+    await loadMemberDossiers();
+  } catch (error) { alert(error.message); }
+  finally { button.disabled = false; }
+});
+
+async function loadIntelligence() {
+  const { briefs } = await api("/api/intelligence");
+  $("intelligence-history").innerHTML = briefs.slice(0, 8).map((brief) => `<article class="brief ${escapeHtml(brief.status)}"><h3>${escapeHtml(brief.title)}</h3><p>${escapeHtml(brief.summary || brief.error || "")}</p><div class="chips">${escapeHtml(brief.created_at)} · 来源 ${brief.sources.length} · Bark ${brief.pushed_messages}</div>${brief.items.map((item) => `<p><b>${escapeHtml(item.headline)}</b><br><small>${escapeHtml(item.brief)}</small></p>`).join("")}</article>`).join("") || "<p class=\"section-note\">听风尚未带回情报。</p>";
+}
+
+$("run-intelligence").addEventListener("click", async () => {
+  const button = $("run-intelligence"); button.disabled = true; $("intelligence-status").textContent = "听风正在巡查并汇总…";
+  try {
+    const task = await operatorApi("/api/intelligence/tasks", {
+      method: "POST", body: JSON.stringify({ message_count: 3, idempotency_key: `web-test-${Date.now()}` }),
+    });
+    let current = task;
+    while (!["completed", "failed"].includes(current.status)) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      current = await operatorApi(`/api/intelligence/tasks/${encodeURIComponent(task.id)}`);
+      $("intelligence-status").textContent = `听风任务 ${current.status}…`;
+    }
+    if (current.status === "failed") throw new Error(current.error || "情报任务失败");
+    const brief = current.result;
+    $("intelligence-status").textContent = `完成：${brief.title}，已推送 ${brief.pushed_messages} 条`;
+    await Promise.all([loadIntelligence(), loadMemberDossiers(), loadAssets()]);
+  } catch (error) { $("intelligence-status").textContent = error.message; $("intelligence-status").classList.add("error"); }
+  finally { button.disabled = false; }
+});
 
 async function loadSettlement() {
   settlement = await api("/api/settlement");

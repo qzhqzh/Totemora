@@ -36,6 +36,23 @@
       }
     },
     {
+      "id": "news-intelligence",
+      "name": "News Intelligence Watch",
+      "kind": "tool_service",
+      "maturity": "experimental",
+      "version": 1,
+      "summary": "从 HTTPS 白名单信息源收集热点，由情报员汇总，并通过幂等动作日志推送到 Bark。",
+      "executor": "builtin:IntelligenceService",
+      "actions": ["collect", "summarize", "push_bark"],
+      "risk": "medium",
+      "default_access": "deny",
+      "policy_requirements": ["https_source_allowlist", "operator_gate", "secret_isolation", "action_journal"],
+      "blueprint": {
+        "source": "docs/adr/0008-safe-recurring-external-actions.md",
+        "notes": "每小时最多执行一次；外部推送必须幂等、可审计，Bark 凭据不得进入配置仓库。"
+      }
+    },
+    {
       "id": "zvec",
       "name": "Zvec",
       "kind": "infrastructure",
