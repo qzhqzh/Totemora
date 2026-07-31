@@ -12,6 +12,7 @@ import {
 import { ConfiguredProviderRegistry } from "@totemora/providers";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { runBenchmark } from "./benchmark";
 
 export interface CliStreams {
   stdout: WritableTextStream;
@@ -77,6 +78,32 @@ export async function runCli(
         createRegistry(config, dependencies),
         streams,
       );
+    }
+
+    if (resource === "benchmark" && action === "run") {
+      if (!parsed.suite || !parsed.strongMember || !parsed.cheapMember) {
+        throw new Error("Usage: totemora benchmark run --suite <path> --strong-member <id> --cheap-member <id>");
+      }
+      const benchmark = await runBenchmark({
+        suitePath: parsed.suite,
+        config,
+        providers: createRegistry(config, dependencies),
+        dataDir: parsed.dataDir ?? resolve(".totemora"),
+        strongMemberId: parsed.strongMember,
+        cheapMemberId: parsed.cheapMember,
+        chiefMemberId: parsed.chief,
+        maxFiles: parsed.maxFiles,
+        maxContextBytes: parsed.maxContextBytes,
+        maxOutputTokens: parsed.maxOutputTokens,
+      });
+      streams.stdout.write(`Benchmark: ${benchmark.result.id}\n`);
+      for (const [strategy, summary] of Object.entries(benchmark.result.summary)) {
+        streams.stdout.write(
+          `- ${strategy}: ${summary.structural_passed}/${summary.attempted} structurally passed, total_tokens=${summary.total_tokens}, strong_tokens=${summary.strong_model_tokens}, latency_ms=${summary.latency_ms}, usage_gaps=${summary.usage_unknown_cases}\n`,
+        );
+      }
+      streams.stdout.write(`JSON: ${benchmark.jsonPath}\nReport: ${benchmark.markdownPath}\n`);
+      return 0;
     }
 
     if (resource === "run" && action === "onboarding-exam") {
@@ -224,6 +251,9 @@ function parseArgs(args: string[]): {
   gatewayUrl: string;
   workplace?: string;
   goal?: string;
+  suite?: string;
+  strongMember?: string;
+  cheapMember?: string;
   help: boolean;
 } {
   const command: string[] = [];
@@ -238,6 +268,9 @@ function parseArgs(args: string[]): {
   let gatewayUrl = process.env.TOTEMORA_GATEWAY_URL ?? "http://127.0.0.1:4310";
   let workplace: string | undefined;
   let goal: string | undefined;
+  let suite: string | undefined;
+  let strongMember: string | undefined;
+  let cheapMember: string | undefined;
   let help = false;
 
   for (let index = 0; index < args.length; index += 1) {
@@ -320,6 +353,24 @@ function parseArgs(args: string[]): {
       continue;
     }
 
+    if (arg === "--suite") {
+      suite = requireOptionValue(args, index, arg);
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--strong-member") {
+      strongMember = requireOptionValue(args, index, arg);
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--cheap-member") {
+      cheapMember = requireOptionValue(args, index, arg);
+      index += 1;
+      continue;
+    }
+
     command.push(arg);
   }
 
@@ -336,6 +387,9 @@ function parseArgs(args: string[]): {
     gatewayUrl,
     workplace,
     goal,
+    suite,
+    strongMember,
+    cheapMember,
     help,
   };
 }
@@ -544,6 +598,7 @@ function writeHelp(stdout: CliStreams["stdout"]): void {
       "  totemora tribe inspect [--config-dir <path>]",
       '  totemora development prepare --workplace <id> --goal "<text>" [--gateway-url <url>]',
       "  totemora development approve <proposal_id> [--gateway-url <url>]",
+      "  totemora benchmark run --suite <path> --strong-member <id> --cheap-member <id> [--chief <id>] [--data-dir <path>]",
       "  totemora run onboarding-exam [--chief <member_id>] [--config-dir <path>] [--data-dir <path>]",
       '  totemora run "<goal>" [--workspace <path>] [--accept <criterion>] [--chief <member_id>] [--config-dir <path>] [--data-dir <path>]',
       "    Optional budgets: --max-files <n> --max-context-bytes <n> --max-output-tokens <n>",

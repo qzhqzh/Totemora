@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "id": "read-only-smoke",
+  "version": 1,
+  "description": "首批可重复只读任务，用同一 Workspace 比较单强模型、固定廉价模型与部落策略。",
+  "tasks": [
+    {
+      "id": "discount-rules-gap",
+      "goal": "比较订单折扣实现与 README 业务规则，指出当前实现缺失的校验和金额处理风险。",
+      "workspace": "../examples/demo-project",
+      "acceptance": [
+        "逐条比较 README 业务规则与当前实现",
+        "每个关键结论引用真实文件路径"
+      ],
+      "expected_evidence": [
+        "README.md",
+        "src/pricing.ts"
+      ],
+      "required_claims": [
+        "finite number",
+        "rounded to two decimal places"
+      ],
+      "forbidden_claims": [
+        "已修改文件"
+      ]
+    },
+    {
+      "id": "discount-test-coverage",
+      "goal": "评估现有折扣测试是否覆盖 README 规定的边界、非法输入和金额舍入行为。",
+      "workspace": "../examples/demo-project",
+      "acceptance": [
+        "列出已经覆盖和仍未覆盖的行为",
+        "结论必须引用测试与业务规则文件"
+      ],
+      "expected_evidence": [
+        "README.md",
+        "src/pricing.test.ts"
+      ],
+      "required_claims": [
+        "applyDiscount(100, 20)",
+        "applyDiscount(100, 0)"
+      ],
+      "forbidden_claims": [
+        "已补充测试"
+      ]
+    },
+    {
+      "id": "discount-failure-modes",
+      "goal": "只读分析 applyDiscount 在负数、非有限数字、超过百分比范围和小数金额场景下的失败模式。",
+      "workspace": "../examples/demo-project",
+      "acceptance": [
+        "区分文件事实、推断和未执行验证",
+        "给出按风险排序的改进建议"
+      ],
+      "expected_evidence": [
+        "README.md",
+        "src/pricing.ts"
+      ],
+      "required_claims": [
+        "return subtotal - subtotal * (discountPercent / 100)"
+      ],
+      "forbidden_claims": [
+        "已修复实现"
+      ]
+    }
+  ]
+}

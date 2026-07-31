@@ -39,6 +39,12 @@ export function createTotemoraMcpServer(gateway: TotemoraGatewayClient): McpServ
     annotations: readOnlyAnnotations("List tribe assets"),
   }, async () => toolCall(() => gateway.listAssets()));
 
+  server.registerTool("totemora_list_services", {
+    title: "List Totemora professional services",
+    description: "Discover the tribe's typed long-lived services, allowed operations, risk level, acceptance policy, assigned specialist and tool grants.",
+    annotations: readOnlyAnnotations("List professional services"),
+  }, async () => toolCall(() => gateway.listServices()));
+
   server.registerTool("totemora_list_members", {
     title: "List living tribe members",
     description: "Inspect member identity, lineage, mentor, verified and failed experiences, vitality, growth evidence and current rank.",
@@ -68,6 +74,12 @@ export function createTotemoraMcpServer(gateway: TotemoraGatewayClient): McpServ
     annotations: readOnlyAnnotations("List intelligence briefs"),
   }, async () => toolCall(() => gateway.listIntelligenceBriefs()));
 
+  server.registerTool("totemora_list_intelligence_candidates", {
+    title: "Inspect intelligence candidate pool",
+    description: "Inspect queued, suppressed, sending, sent and failed intelligence candidates with deterministic value scores and deduplication reasons.",
+    annotations: readOnlyAnnotations("Inspect intelligence candidate pool"),
+  }, async () => toolCall(() => gateway.listIntelligenceCandidates()));
+
   server.registerTool("totemora_list_actions", {
     title: "Inspect tribe action journal",
     description: "Inspect recent external side effects, idempotency keys, attempts, outcomes and bounded evidence. Requires the MCP operator credential.",
@@ -76,17 +88,18 @@ export function createTotemoraMcpServer(gateway: TotemoraGatewayClient): McpServ
 
   server.registerTool("totemora_run_intelligence_brief", {
     title: "Run the tribe intelligence watch",
-    description: "Queue a durable task for Qwen-seeded intelligence member 听风. Returns immediately with a task id; poll with totemora_get_intelligence_task.",
+    description: "Queue a durable scan for Qwen-seeded intelligence member 听风. By default results enter the scored, deduplicated candidate pool and the resident dispatcher sends at most one per configured interval. Direct Bark push is an explicit compatibility mode.",
     inputSchema: {
       message_count: z.number().int().min(1).max(5).default(1),
       idempotency_key: z.string().min(1).max(200).optional(),
+      delivery_mode: z.enum(["candidate_pool", "direct_push"]).default("candidate_pool"),
     },
     annotations: { title: "Run intelligence watch", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  }, async ({ message_count, idempotency_key }) => toolCall(() => gateway.runIntelligenceBrief(message_count, idempotency_key)));
+  }, async ({ message_count, idempotency_key, delivery_mode }) => toolCall(() => gateway.runIntelligenceBrief(message_count, idempotency_key, delivery_mode)));
 
   server.registerTool("totemora_get_intelligence_task", {
     title: "Get an intelligence task",
-    description: "Poll a durable intelligence task until it completes with the brief and Bark delivery evidence or fails with a retryable reason.",
+    description: "Poll a durable intelligence task until it completes with candidate-pool decisions or direct Bark evidence, or fails with a retryable reason.",
     inputSchema: { task_id: z.string().min(1) },
     annotations: readOnlyAnnotations("Get intelligence task"),
   }, async ({ task_id }) => toolCall(() => gateway.getIntelligenceTask(task_id)));
@@ -107,10 +120,10 @@ export function createTotemoraMcpServer(gateway: TotemoraGatewayClient): McpServ
 
   server.registerTool("totemora_get_task", {
     title: "Get a Totemora specialist task",
-    description: "Poll the durable task until it completes with a Git Flow workflow id or reports a retryable failure.",
+    description: "Inspect the shared durable envelope for a Git Flow or intelligence specialist task, including member assignment, stage, revision and domain result reference.",
     inputSchema: { task_id: z.string().min(1) },
     annotations: readOnlyAnnotations("Get specialist task"),
-  }, async ({ task_id }) => toolCall(() => gateway.getDevelopmentTask(task_id)));
+  }, async ({ task_id }) => toolCall(() => gateway.getSpecialistTask(task_id)));
 
   server.registerTool("totemora_list_git_flows", {
     title: "List Git Flow workflows",

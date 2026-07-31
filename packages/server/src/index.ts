@@ -25,7 +25,7 @@ const server = Bun.serve({
   port,
   async fetch(request) {
     const pathname = new URL(request.url).pathname;
-    if (pathname.startsWith("/api/")) return app.fetch(request);
+    if (pathname.startsWith("/api/") || pathname.startsWith("/r/")) return app.fetch(request);
     if (pathname === "/mcp") return mcpHandler(request);
     if (pathname === "/favicon.ico") return new Response(null, { status: 204 });
     const fileName = pathname === "/" ? "index.html" : pathname.slice(1);
@@ -38,9 +38,14 @@ const server = Bun.serve({
   },
 });
 
+let scheduledIntelligenceRunning = false;
 const intelligenceTimer = setInterval(() => {
+  if (scheduledIntelligenceRunning) return;
+  scheduledIntelligenceRunning = true;
   void app.runScheduledIntelligence().catch((error) => {
     console.error(`Scheduled intelligence failed: ${error instanceof Error ? error.message : String(error)}`);
+  }).finally(() => {
+    scheduledIntelligenceRunning = false;
   });
 }, 60_000);
 intelligenceTimer.unref();
