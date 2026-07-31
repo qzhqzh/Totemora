@@ -1,0 +1,16 @@
+services:
+  bark:
+    image: ghcr.io/finb/bark-server:v2.3.5
+    container_name: totemora-bark
+    restart: unless-stopped
+    ports:
+      - "${TOTEMORA_BARK_BIND:-127.0.0.1}:${TOTEMORA_BARK_PORT:-18080}:8080"
+    volumes:
+      - ./.totemora/bark-data:/data
+    environment:
+      BARK_SERVER_BASIC_AUTH_USER: "${BARK_SERVER_BASIC_AUTH_USER:-}"
+      BARK_SERVER_BASIC_AUTH_PASSWORD: "${BARK_SERVER_BASIC_AUTH_PASSWORD:-}"
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
