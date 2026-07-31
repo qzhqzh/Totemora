@@ -1,47 +1,49 @@
-import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { readdirSync } from "node:fs";
+import { resolve } from "node:path";
+
+import { StateDatabase } from "./state-database";
 
 export interface PersistedJob<TJob, TInput> {
   job: TJob;
   input: TInput;
 }
 
-export class JobStore<TJob extends { id: string }, TInput> {
-  private readonly directory: string;
-  private readonly queues = new Map<string, Promise<void>>();
+export class JobStore<TJob extends { id: string; created_at?: string; updated_at?: string }, TInput> {
+  private readonly state: StateDatabase;
+  private readonly namespace: string;
 
-  constructor(dataDir: string, namespace = "jobs") {
-    this.directory = resolve(dataDir, namespace);
+  constructor(private readonly dataDir: string, namespace = "jobs") {
+    this.state = StateDatabase.open(dataDir);
+    this.namespace = `jobs:${namespace}`;
+    this.importLegacy(namespace);
   }
 
   async save(job: TJob, input: TInput): Promise<void> {
-    const snapshot = structuredClone({ job, input });
-    const operation = (this.queues.get(job.id) ?? Promise.resolve()).then(async () => {
-      await mkdir(this.directory, { recursive: true });
-      const target = join(this.directory, `${job.id}.json`);
-      const temporary = `${target}.${crypto.randomUUID()}.tmp`;
-      await writeFile(temporary, `${JSON.stringify(snapshot, null, 2)}\n`, "utf8");
-      await rename(temporary, target);
-    });
-    this.queues.set(job.id, operation.catch(() => undefined));
-    await operation;
+    this.state.putRecord(
+      this.namespace, job.id, structuredClone({ job, input }),
+      job.created_at, job.updated_at,
+    );
   }
 
   async list(): Promise<Array<PersistedJob<TJob, TInput>>> {
+    return this.state.listRecords<PersistedJob<TJob, TInput>>(this.namespace);
+  }
+
+  private importLegacy(directoryName: string): void {
+    const directory = resolve(this.dataDir, directoryName);
     let files: string[];
-    try {
-      files = (await readdir(this.directory)).filter((file) => file.endsWith(".json"));
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-      throw error;
+    try { files = readdirSync(directory).filter((file) => file.endsWith(".json")); }
+    catch { return; }
+    for (const file of files) {
+      const source = resolve(directory, file);
+      this.state.importJsonFile<PersistedJob<TJob, TInput>>(
+        source,
+        (value) => [value as PersistedJob<TJob, TInput>],
+        (value) => this.state.putRecord(
+          this.namespace, value.job.id, value,
+          value.job.created_at, value.job.updated_at,
+        ),
+      );
     }
-    const records = await Promise.all(files.map(async (file) => {
-      try {
-        return JSON.parse(await readFile(join(this.directory, file), "utf8")) as PersistedJob<TJob, TInput>;
-      } catch {
-        return undefined;
-      }
-    }));
-    return records.filter((record) => record !== undefined);
   }
 }

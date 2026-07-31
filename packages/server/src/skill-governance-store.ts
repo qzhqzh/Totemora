@@ -1,5 +1,7 @@
-import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { readdirSync } from "node:fs";
+import { resolve } from "node:path";
+
+import { StateDatabase } from "./state-database";
 
 export interface ActiveSkillOverlay {
   skill_id: string;
@@ -20,12 +22,11 @@ export interface SkillImprovementProposal {
 }
 
 export class SkillGovernanceStore {
-  private readonly skillDir: string;
-  private readonly proposalsDir: string;
+  private readonly state: StateDatabase;
 
-  constructor(dataDir: string, private readonly skillId: string, private readonly baseVersion = 1) {
-    this.skillDir = resolve(dataDir, "skills", skillId);
-    this.proposalsDir = resolve(dataDir, "skill-proposals");
+  constructor(private readonly dataDir: string, private readonly skillId: string, private readonly baseVersion = 1) {
+    this.state = StateDatabase.open(dataDir);
+    this.importLegacy();
   }
 
   async getActive(baseContent: string): Promise<{ version: number; content: string }> {
@@ -49,60 +50,70 @@ export class SkillGovernanceStore {
     const proposal: SkillImprovementProposal = {
       id: crypto.randomUUID(), skill_id: this.skillId,
       base_version: Math.max(active?.version ?? this.baseVersion, this.baseVersion), status: "pending",
-      proposed_addition: normalized, evidence,
-      created_at: new Date().toISOString(),
+      proposed_addition: normalized, evidence, created_at: new Date().toISOString(),
     };
-    await mkdir(this.proposalsDir, { recursive: true });
-    await atomicWrite(join(this.proposalsDir, `${proposal.id}.json`), proposal);
+    this.state.putRecord("skill_proposals", proposal.id, proposal, proposal.created_at, proposal.created_at);
     return proposal;
   }
 
   async listProposals(): Promise<SkillImprovementProposal[]> {
-    let files: string[];
-    try { files = (await readdir(this.proposalsDir)).filter((file) => file.endsWith(".json")); }
-    catch { return []; }
-    const values = await Promise.all(files.map(async (file) => {
-      try { return JSON.parse(await readFile(join(this.proposalsDir, file), "utf8")) as SkillImprovementProposal; }
-      catch { return undefined; }
-    }));
-    return values.filter((item): item is SkillImprovementProposal => item?.skill_id === this.skillId)
+    return this.state.listRecords<SkillImprovementProposal>("skill_proposals")
+      .filter((item) => item.skill_id === this.skillId)
       .sort((left, right) => right.created_at.localeCompare(left.created_at));
   }
 
   async approve(proposalId: string): Promise<ActiveSkillOverlay> {
-    const path = join(this.proposalsDir, `${proposalId}.json`);
-    let proposal: SkillImprovementProposal;
-    try { proposal = JSON.parse(await readFile(path, "utf8")) as SkillImprovementProposal; }
-    catch (error) { throw new Error(`Skill proposal not found: ${proposalId}`, { cause: error }); }
-    if (proposal.status !== "pending") throw new Error(`Skill proposal cannot be approved from ${proposal.status}`);
-    const active = await this.readOverlay() ?? {
-      skill_id: this.skillId, version: this.baseVersion, additions: [], updated_at: new Date().toISOString(),
-    };
-    if (active.version !== proposal.base_version) {
-      proposal.status = "superseded";
-      await atomicWrite(path, proposal);
-      throw new Error("Skill changed after this proposal; regenerate it against the active version");
-    }
-    active.version += 1;
-    active.additions.push(proposal.proposed_addition);
-    active.updated_at = new Date().toISOString();
-    await mkdir(this.skillDir, { recursive: true });
-    await atomicWrite(join(this.skillDir, "active.json"), active);
-    proposal.status = "approved";
-    proposal.approved_at = active.updated_at;
-    await atomicWrite(path, proposal);
-    return active;
+    return this.state.db.transaction(() => {
+      const proposal = this.state.listRecords<SkillImprovementProposal>("skill_proposals")
+        .find((item) => item.id === proposalId);
+      if (!proposal) throw new Error(`Skill proposal not found: ${proposalId}`);
+      if (proposal.status !== "pending") throw new Error(`Skill proposal cannot be approved from ${proposal.status}`);
+      const active = this.readOverlaySync() ?? {
+        skill_id: this.skillId, version: this.baseVersion, additions: [], updated_at: new Date().toISOString(),
+      };
+      if (active.version !== proposal.base_version) {
+        proposal.status = "superseded";
+        this.state.putRecord("skill_proposals", proposal.id, proposal, proposal.created_at, new Date().toISOString());
+        throw new Error("Skill changed after this proposal; regenerate it against the active version");
+      }
+      active.version += 1;
+      active.additions.push(proposal.proposed_addition);
+      active.updated_at = new Date().toISOString();
+      proposal.status = "approved";
+      proposal.approved_at = active.updated_at;
+      this.state.putRecord("skill_overlays", this.skillId, active, active.updated_at, active.updated_at);
+      this.state.putRecord("skill_proposals", proposal.id, proposal, proposal.created_at, active.updated_at);
+      return active;
+    })();
   }
 
   private async readOverlay(): Promise<ActiveSkillOverlay | undefined> {
-    try { return JSON.parse(await readFile(join(this.skillDir, "active.json"), "utf8")) as ActiveSkillOverlay; }
-    catch { return undefined; }
+    return this.readOverlaySync();
   }
-}
 
-async function atomicWrite(path: string, value: unknown): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  const temporary = `${path}.${crypto.randomUUID()}.tmp`;
-  await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-  await rename(temporary, path);
+  private readOverlaySync(): ActiveSkillOverlay | undefined {
+    return this.state.listRecords<ActiveSkillOverlay>("skill_overlays")
+      .find((item) => item.skill_id === this.skillId);
+  }
+
+  private importLegacy(): void {
+    const overlayPath = resolve(this.dataDir, "skills", this.skillId, "active.json");
+    this.state.importJsonFile<ActiveSkillOverlay>(
+      overlayPath,
+      (value) => [value as ActiveSkillOverlay],
+      (overlay) => this.state.putRecord("skill_overlays", overlay.skill_id, overlay, overlay.updated_at, overlay.updated_at),
+    );
+    const directory = resolve(this.dataDir, "skill-proposals");
+    let files: string[];
+    try { files = readdirSync(directory).filter((file) => file.endsWith(".json")); }
+    catch { files = []; }
+    for (const file of files) {
+      const path = resolve(directory, file);
+      this.state.importJsonFile<SkillImprovementProposal>(
+        path,
+        (value) => [value as SkillImprovementProposal],
+        (proposal) => this.state.putRecord("skill_proposals", proposal.id, proposal, proposal.created_at, proposal.approved_at ?? proposal.created_at),
+      );
+    }
+  }
 }

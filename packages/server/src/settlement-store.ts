@@ -1,5 +1,6 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { resolve } from "node:path";
+import { realpath } from "node:fs/promises";
+import { StateDatabase } from "./state-database";
 
 export interface Workplace {
   id: string;
@@ -59,26 +60,26 @@ const EMPTY_SETTLEMENT: SettlementData = {
 };
 
 export class SettlementStore {
-  private readonly filePath: string;
-  private writeQueue = Promise.resolve();
+  private readonly state: StateDatabase;
 
-  constructor(dataDir: string) {
-    this.filePath = resolve(dataDir, "settlement.json");
+  constructor(private readonly dataDir: string) {
+    this.state = StateDatabase.open(dataDir);
+    this.state.importJsonFile<SettlementData>(
+      resolve(dataDir, "settlement.json"),
+      (value) => [value as SettlementData],
+      (value) => this.state.putRecord("state", "settlement", value),
+    );
   }
 
   async get(): Promise<SettlementData> {
-    try {
-      return JSON.parse(await readFile(this.filePath, "utf8")) as SettlementData;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return structuredClone(EMPTY_SETTLEMENT);
-      throw error;
-    }
+    return this.getSync();
   }
 
   async addWorkplace(name: string, path: string): Promise<Workplace> {
     if (!name.trim() || !path.trim()) throw new Error("工作地名称和路径不能为空");
+    const canonicalPath = await realpath(resolve(path));
     const workplace: Workplace = {
-      id: crypto.randomUUID(), name: name.trim(), path: resolve(path),
+      id: crypto.randomUUID(), name: name.trim(), path: canonicalPath,
       created_at: new Date().toISOString(),
     };
     await this.update((data) => {
@@ -164,15 +165,15 @@ export class SettlementStore {
   }
 
   private async update(mutator: (data: SettlementData) => void): Promise<void> {
-    const operation = this.writeQueue.then(async () => {
-      const data = await this.get();
+    this.state.db.transaction(() => {
+      const data = this.getSync();
       mutator(data);
-      await mkdir(dirname(this.filePath), { recursive: true });
-      const temporary = `${this.filePath}.${crypto.randomUUID()}.tmp`;
-      await writeFile(temporary, `${JSON.stringify(data, null, 2)}\n`, "utf8");
-      await rename(temporary, this.filePath);
-    });
-    this.writeQueue = operation.catch(() => undefined);
-    return operation;
+      this.state.putRecord("state", "settlement", data);
+    })();
+  }
+
+  private getSync(): SettlementData {
+    return this.state.listRecords<SettlementData>("state")
+      .find((item) => item.schema_version === 1) ?? structuredClone(EMPTY_SETTLEMENT);
   }
 }

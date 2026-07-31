@@ -1,7 +1,8 @@
-import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 
 import type { AgentConfig, LocalConfigSet } from "@totemora/core";
+import { StateDatabase } from "./state-database";
 
 export type ToolAssetMaturity = "candidate" | "experimental" | "verified" | "disabled";
 
@@ -36,13 +37,20 @@ interface AssetCatalog { schema_version: 1; assets: ToolAsset[] }
 export class ToolAssetRegistry {
   private readonly catalogPath: string;
   private readonly usagePath: string;
-  private readonly proposalsDir: string;
-  private writeQueue = Promise.resolve();
+  private readonly state: StateDatabase;
 
   constructor(projectRoot: string, dataDir: string) {
     this.catalogPath = resolve(projectRoot, "assets/tool-assets.json");
     this.usagePath = resolve(dataDir, "asset-usage.json");
-    this.proposalsDir = resolve(dataDir, "development", "proposals");
+    this.state = StateDatabase.open(dataDir);
+    this.state.importJsonFile<ToolAssetUse>(
+      this.usagePath,
+      (value) => {
+        if (!Array.isArray(value)) throw new Error("expected asset usage array");
+        return value as ToolAssetUse[];
+      },
+      (item) => this.state.putRecord("asset_usage", item.id, item, item.at, item.at),
+    );
   }
 
   async list(config: LocalConfigSet) {
@@ -76,13 +84,7 @@ export class ToolAssetRegistry {
 
   async recordUse(input: Omit<ToolAssetUse, "id" | "at">): Promise<ToolAssetUse> {
     const record: ToolAssetUse = { id: crypto.randomUUID(), at: new Date().toISOString(), ...input };
-    const operation = this.writeQueue.then(async () => {
-      const usage = await this.loadUsage();
-      usage.push(record);
-      await atomicWrite(this.usagePath, usage.slice(-500));
-    });
-    this.writeQueue = operation.catch(() => undefined);
-    await operation;
+    this.state.putRecord("asset_usage", record.id, record, record.at, record.at);
     return record;
   }
 
@@ -93,44 +95,21 @@ export class ToolAssetRegistry {
   }
 
   private async loadUsage(): Promise<ToolAssetUse[]> {
-    try { return JSON.parse(await readFile(this.usagePath, "utf8")) as ToolAssetUse[]; }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-      throw error;
-    }
+    return this.state.listRecords<ToolAssetUse>("asset_usage")
+      .sort((left, right) => left.at.localeCompare(right.at));
   }
 
   private async loadWorkflowEvidence() {
-    let files: string[];
-    try { files = (await readdir(this.proposalsDir)).filter((file) => file.endsWith(".json")); }
-    catch { return []; }
-    const evidence = await Promise.all(files.map(async (file) => {
-      try {
-        const workflow = JSON.parse(await readFile(join(this.proposalsDir, file), "utf8")) as {
-          id: string; status: string; specialist_member_id: string; updated_at: string;
-          mode?: string; commit_sha?: string; issue_url?: string; pr_url?: string;
-        };
-        if (workflow.status !== "completed") return undefined;
-        return {
-          workflow_id: workflow.id,
-          member_id: workflow.specialist_member_id,
-          mode: workflow.mode ?? "commit",
-          commit_sha: workflow.commit_sha,
-          issue_url: workflow.issue_url,
-          pr_url: workflow.pr_url,
-          verified_at: workflow.updated_at,
-        };
-      } catch { return undefined; }
-    }));
+    const evidence = this.state.listRecords<{
+      id: string; status: string; specialist_member_id: string; updated_at: string;
+      mode?: string; commit_sha?: string; issue_url?: string; pr_url?: string;
+    }>("development_proposals").flatMap((workflow) => workflow.status === "completed" ? [{
+      workflow_id: workflow.id, member_id: workflow.specialist_member_id,
+      mode: workflow.mode ?? "commit", commit_sha: workflow.commit_sha,
+      issue_url: workflow.issue_url, pr_url: workflow.pr_url, verified_at: workflow.updated_at,
+    }] : []);
     return evidence.filter((item) => item !== undefined)
       .sort((left, right) => right.verified_at.localeCompare(left.verified_at))
       .slice(0, 10);
   }
-}
-
-async function atomicWrite(path: string, value: unknown): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  const temporary = `${path}.${crypto.randomUUID()}.tmp`;
-  await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-  await rename(temporary, path);
 }
