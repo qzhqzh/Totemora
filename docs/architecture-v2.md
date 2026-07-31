@@ -48,11 +48,22 @@ The initial generic runtime is deliberately read-only. Write tools, shell execut
 
 ```text
 CLI -------------------┐
-                       ├─> TribeRuntime -> Provider adapters -> Run trace
-Local Web Playground --┘
+Local Web Playground --┼─> Persistent Gateway -> TribeRuntime / specialist services
+MCP -------------------┘                         -> Provider adapters / governed assets
 ```
 
-The Web Playground is an experience and test surface, not a separate orchestration engine. It exposes the roster, task input, live job phase, staffing evidence, final report and trace. The local server binds to loopback by default, keeps transient job state in memory and persists completed runtime traces through the same `FileRunStore` used by the CLI.
+The Web Playground is an experience and test surface, not a separate orchestration engine. Web and MCP share one persistent Gateway, durable task records and member history. The Gateway binds to loopback by default; LAN access is an explicit host setting.
+
+## Member portrait and recurring work
+
+```text
+Verified task evidence -> observed portrait + task record + major experiences
+                      -> review threshold -> mentor proposal -> operator approval -> constitution vN+1
+
+10-minute scan -> scored/deduplicated candidate pool -> one-per-minute dispatcher -> action evidence
+```
+
+Descriptive portrait fields may update automatically from evidence. Normative personality changes are versioned proposals; protected principles, red lines and permissions never evolve silently.
 
 ## Asset boundary
 
