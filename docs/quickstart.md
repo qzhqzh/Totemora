@@ -13,7 +13,7 @@ bun install
 bun run dev:web
 ```
 
-首次启动会生成 `.totemora/operator-token`（权限 `0600`）。只读任务不需要它；保存开发规范、准备提交和批准提交时，需要把它粘贴到 Web 页头。也可以通过 `TOTEMORA_OPERATOR_TOKEN` 显式提供。
+首次启动会生成 `.totemora/operator-token`（权限 `0600`）。登记工作地、发起模型任务、取消、重试及开发门禁都需要把它粘贴到 Web 页头；纯状态和成员浏览保持只读。也可以通过 `TOTEMORA_OPERATOR_TOKEN` 显式提供。
 
 浏览器打开：
 
@@ -25,7 +25,7 @@ http://127.0.0.1:4310
 
 1. 在“部落成员”确认 DeepSeek 首领及 Qwen、MiMo 等成员状态。
    “火种”区域展示可用基础模型及其 Provider、状态和已孵化人物；“人物图鉴”展示火种与人格、Skills、角色结合后的成员。
-2. 首次可在“登记常用工作地”保存服务器上的项目目录；临时体验也可保持 `examples/demo-project`。
+2. 首次在“登记常用工作地”保存服务器上的项目目录；Run 只能读取已登记工作地或其子目录。
 3. 在“任务大厅”直接描述要做的事。默认创建新 Mission，也可以选择已有 Mission 继续此前目标。
 4. 按需展开高级设置，调整 Chief、验收标准和智能预算，点击“召集部落”。
 5. 在 Run 现场观察 planning、executing、reviewing 等阶段。
@@ -35,7 +35,7 @@ http://127.0.0.1:4310
 
 Provider、预算、派工等临时错误被标记为可重试时，Web 会显示“重试 Run”。重试会创建新的 Run 并继续归入原 Mission。Job 与重试规格已持久化，服务重启后仍可重试；被重启中断的 Job 会转换成可重试失败。
 
-Web 服务默认只监听本机 `127.0.0.1:4310`。它会产生真实模型调用，当前只读取 Workspace，不修改文件或执行 Shell。Run 保存在 `.totemora/runs/`，可恢复 Job 保存在 `.totemora/jobs/`，驻扎地、Workplace 和 Mission 保存在 `.totemora/settlement.json`。
+Web 服务默认只监听本机 `127.0.0.1:4310`。它会产生真实模型调用，当前通用 Run 只读取已登记 Workspace，不修改文件或执行 Shell。不可变 Run 证据保存在 `.totemora/runs/`；Job、驻扎地、Workplace 和 Mission 的运行状态写入 `.totemora/totemora.db`。
 
 可通过环境变量覆盖启动参数：
 

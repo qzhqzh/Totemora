@@ -40,17 +40,42 @@ export function collectConfigValidationIssues(
   validateRoles(config, issues);
   validateAgents(config, providerIds, roleIds, issues);
   for (const agent of config.agents.agents) {
-    if (agent.lineage?.mentor_id && !agentIds.has(agent.lineage.mentor_id)) {
+    const mentorId = agent.lineage?.mentor_id;
+    if (mentorId && !agentIds.has(mentorId)) {
       issues.push({
         file: "agents.yaml",
         field: `agents.${agent.id}.lineage.mentor_id`,
-        message: `Unknown mentor member reference: ${agent.lineage.mentor_id}`,
+        message: `Unknown mentor member reference: ${mentorId}`,
       });
+    } else if (mentorId === agent.id) {
+      issues.push({ file: "agents.yaml", field: `agents.${agent.id}.lineage.mentor_id`, message: "Member cannot mentor itself" });
+    } else if (mentorId) {
+      const mentor = config.agents.agents.find((item) => item.id === mentorId);
+      if (mentor && ["inactive", "retired"].includes(mentor.status ?? "active")) {
+        issues.push({ file: "agents.yaml", field: `agents.${agent.id}.lineage.mentor_id`, message: `Mentor is unavailable: ${mentorId}` });
+      }
     }
   }
+  validateMentorCycles(config.agents.agents, issues);
   validateTribe(config, roleIds, issues);
 
   return issues;
+}
+
+function validateMentorCycles(agents: AgentConfig[], issues: ConfigValidationIssue[]): void {
+  const byId = new Map(agents.map((agent) => [agent.id, agent]));
+  for (const agent of agents) {
+    const seen = new Set<string>([agent.id]);
+    let mentorId = agent.lineage?.mentor_id;
+    while (mentorId && byId.has(mentorId)) {
+      if (seen.has(mentorId)) {
+        issues.push({ file: "agents.yaml", field: `agents.${agent.id}.lineage.mentor_id`, message: `Mentor lineage contains a cycle through ${mentorId}` });
+        break;
+      }
+      seen.add(mentorId);
+      mentorId = byId.get(mentorId)?.lineage?.mentor_id;
+    }
+  }
 }
 
 function validateProviders(

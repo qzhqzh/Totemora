@@ -53,6 +53,13 @@ export interface AgentConfig {
   provider: ProviderId;
   model: string;
   persona?: string;
+  personality?: {
+    traits?: string[];
+    principles?: string[];
+    communication_style?: string[];
+    working_preferences?: string[];
+    red_lines?: string[];
+  };
   status?: MemberStatus;
   version?: number;
   profile: CapabilityProfile;

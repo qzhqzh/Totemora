@@ -70,6 +70,14 @@ test("reports invalid capability scores with file and field", () => {
   });
 });
 
+test("rejects self-referential mentor lineage", () => {
+  const config = createConfig();
+  config.agents.agents[0].lineage = { mentor_id: "gpt_strategist" };
+  expect(collectConfigValidationIssues(config)).toContainEqual({
+    file: "agents.yaml", field: "agents.gpt_strategist.lineage.mentor_id", message: "Member cannot mentor itself",
+  });
+});
+
 test("reports direct secret values in provider api_key_env", () => {
   const config = createConfig();
   config.providers.providers.openai.api_key_env = "sk-live-secret";

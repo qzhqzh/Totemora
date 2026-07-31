@@ -57,7 +57,7 @@ Hermes 的主抽象是一个长期 Agent；Totemora 必须保留以下自有领�
 - Gateway：Bun HTTP 常驻服务。
 - Web：任务大厅、部落观察和开发提交审批。
 - CLI：Gateway 管理客户端，不创建第二份开发 Runtime。
-- 认证：开发写操作使用驻扎地 Operator Token。
+- 认证：所有状态变更、模型调用、取消、重试和开发门禁使用驻扎地 Operator Token；Run 只能访问已登记工作地。
 - 可执行 Change：仅提交已有代码改动。
 - 尚未开放：模型写代码、任意 Shell、push、部署和外部系统操作。
 

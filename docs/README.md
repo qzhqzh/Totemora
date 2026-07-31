@@ -17,9 +17,9 @@ Totemora 是一个**预算约束下的异构智能部落**，不是通用聊天�
 
 当前提供 CLI、本地 Web Playground 和 MCP 三种入口。Web 与 MCP 共用常驻 Gateway；MCP 让外部 AI 发现和调用部落专业服务，但不拥有第二套 Runtime。完整的治理控制台仍需在运行数据足够后建设。
 
-当前实现与使用方式见 [quickstart.md](quickstart.md)，v0.6 真实验收见 [v0.6-living-tribe-test-guide.md](v0.6-living-tribe-test-guide.md)，领域结构见 [architecture-v2.md](architecture-v2.md)，产品定位见 [ADR-0001](adr/0001-product-positioning-and-delivery-order.md)，驻扎地见 [ADR-0002](adr/0002-settlement-and-continuous-task-intake.md)，技术复用边界见 [ADR-0003](adr/0003-adopt-standards-own-the-domain.md)。推进顺序见 [execution-plan.md](execution-plan.md)。
+当前实现与使用方式见 [quickstart.md](quickstart.md)，服务器驻扎见 [always-on-gateway.md](always-on-gateway.md)，v0.9 真实验收见 [v0.9-durable-services-test-guide.md](v0.9-durable-services-test-guide.md)，首个三策略实验入口见 [benchmark.md](benchmark.md)，领域结构见 [architecture-v2.md](architecture-v2.md)，产品定位见 [ADR-0001](adr/0001-product-positioning-and-delivery-order.md)，驻扎地见 [ADR-0002](adr/0002-settlement-and-continuous-task-intake.md)，技术复用边界见 [ADR-0003](adr/0003-adopt-standards-own-the-domain.md)。推进顺序见 [execution-plan.md](execution-plan.md)。
 
-当前开发节点是 `v0.6.0-living-tribe`：在 v0.5 Git Flow 资产基础上增加成员生命档案、谱系导师、持久私聊、情报员定时任务和幂等外部动作日志。Gateway 设计见 [gateway-architecture.md](gateway-architecture.md)，MCP 接入见 [mcp-gateway.md](mcp-gateway.md)，成员生命见 [ADR-0007](adr/0007-member-life-lineage-and-conversation.md)，安全常驻任务见 [ADR-0008](adr/0008-safe-recurring-external-actions.md)。
+当前开发节点是 `v0.9.0-durable-specialist-services`：运行状态已切换到 SQLite；Git Flow 与听风成为统一任务信封下的两个强类型专业服务；内部 Bark 具备退避熔断；候选形成 Web 四类反馈与 Bark 点击弱反馈闭环；成员成长只使用可归因经验信用。Gateway 设计见 [gateway-architecture.md](gateway-architecture.md)，MCP 接入见 [mcp-gateway.md](mcp-gateway.md)，持久内核与专业服务见 [ADR-0011](adr/0011-durable-specialist-service-kernel.md)，内部 Bark 见 [ADR-0012](adr/0012-internal-bark-and-feedback-loop.md)，AI HOT 信息源边界见 [aihot-source.md](aihot-source.md)。
 
 ## 当前成功标准
 

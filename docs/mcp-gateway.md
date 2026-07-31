@@ -11,10 +11,11 @@ MCP 对外发布的是一个持久的“部落 Git Flow 能力”。调用方 AI
 | `totemora_status` | 查看 Gateway、成员和能力 |
 | `totemora_list_workplaces` | 查看工作地和 Policy |
 | `totemora_list_assets` | 查看部落资产、成熟度、成员授权、策略要求和运行证据 |
-| `totemora_list_members` / `totemora_get_member` | 查看成员谱系、成长、活力与成功/失败经历 |
+| `totemora_list_members` / `totemora_get_member` | 查看成员谱系、正式性格、观察画像、任务统计、重大经历与成长提案 |
 | `totemora_chat_with_member` | 与指定成员持久交流，可请求导师指点 |
 | `totemora_list_intelligence_briefs` | 查看听风台历史情报与 Bark 证据 |
-| `totemora_run_intelligence_brief` / `totemora_get_intelligence_task` | 创建并轮询持久情报任务，完成汇总和 1–5 条 Bark 推送 |
+| `totemora_list_intelligence_candidates` | 查看候选消息评分、重复抑制理由和派发状态 |
+| `totemora_run_intelligence_brief` / `totemora_get_intelligence_task` | 创建并轮询持久扫描任务；默认进入候选池，显式 `direct_push` 才直接 Bark |
 | `totemora_list_actions` | 查看外部副作用的幂等动作日志 |
 | `totemora_start_git_flow` | 委托一个 `commit`、`pull_request` 或 `merge` 结果，立即返回 `task_id` |
 | `totemora_get_task` | 查询 Chief 路由和规划任务 |
@@ -25,6 +26,8 @@ MCP 对外发布的是一个持久的“部落 Git Flow 能力”。调用方 AI
 这不是把 Git 命令拆成 MCP 微工具。调用方只启动一次工作流并持有 `workflow_id`；阶段划分属于
 部落内部状态机。模型调用或客户端断开不会丢失 `.totemora/development-tasks/` 中的任务。
 Git Flow Engine 是部落共享资产，当前由执简获授；以后其他成员只需经过配置授权即可复用同一确定性能力。
+
+情报能力同样是一个长期部落服务。调用方默认只发起一次 `candidate_pool` 扫描并保存 `task_id`；听风负责聚类和价值评估，确定性门禁负责阈值与去重，常驻派发器负责至少一分钟的外发间隔。
 
 ## 启动与配置
 
