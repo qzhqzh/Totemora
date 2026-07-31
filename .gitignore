@@ -29,3 +29,12 @@ bun-debug.log*
 .DS_Store
 .idea/
 .vscode/
+
+# Binary and generated assets
+*.png
+*.jpg
+*.webp
+*.gif
+
+# Test recording artifacts
+.playwright-mcp/
