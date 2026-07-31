@@ -9,7 +9,7 @@
 <body>
   <header>
     <div><span class="eyebrow">TOTEMORA / LOCAL TRIBE</span><h1>部落试炼场</h1></div>
-    <div class="operator"><div id="tribe-status" class="status">正在唤醒部落…</div><input id="operator-token" type="password" placeholder="操作员 Token（开发提交必需）"></div>
+    <form id="operator-form" class="operator"><div id="tribe-status" class="status">正在唤醒部落…</div><input id="operator-token" class="token-input" type="password" autocomplete="current-password" spellcheck="false" placeholder="操作员 Token（任务操作必需）"></form>
   </header>
   <main>
     <section class="panel roster-panel">
@@ -93,9 +93,23 @@ secrets/</textarea></label>
     </section>
     <section class="panel intelligence-panel">
       <div class="section-title"><span>06</span><h2>听风台</h2></div>
-      <p class="section-note">情报员每小时巡查一次白名单信息源；测试按钮会立即汇总并尝试推送 3 条 Bark 消息。</p>
-      <button id="run-intelligence" type="button">立即巡查并推送 3 条</button>
+      <p class="section-note">情报员默认每 10 分钟巡查白名单信息源；消息先进入候选池，经过兴趣、重要性、可信度和新颖度评估，再按至少一分钟一条推送。</p>
+      <form id="intelligence-preferences" class="intelligence-preferences">
+        <label>我关注的方向<textarea id="intelligence-interests" placeholder="每行一个，例如：AI Agent&#10;生物信息学&#10;开发工具"></textarea></label>
+        <div class="inline-check"><label><input id="channel-rss" type="checkbox"> 新闻 / 技术 RSS</label><label><input id="channel-ai-hot" type="checkbox"> AI HOT 精选</label><label><input id="channel-x" type="checkbox"> X 热点</label><label><input id="channel-weibo" type="checkbox"> 微博热点</label></div>
+        <label>X 地区 WOEID<input id="x-woeid" type="number" min="1" value="1"></label>
+        <div class="grid-three"><label>扫描间隔（分钟）<input id="scan-interval" type="number" min="5" max="60" value="10"></label><label>推送间隔（秒）<input id="push-interval" type="number" min="60" max="3600" value="60"></label><label>推送阈值<input id="push-threshold" type="number" min="0.5" max="0.95" step="0.01" value="0.72"></label></div>
+        <small id="social-credential-status"></small>
+        <button type="submit" class="secondary">保存听风偏好</button>
+        <small id="intelligence-preference-status"></small>
+      </form>
+      <button id="run-intelligence" type="button">立即扫描候选池</button>
       <small id="intelligence-status"></small>
+      <div id="bark-status" class="channel-status">Bark 状态等待检查</div>
+      <h3>候选消息池</h3>
+      <div id="candidate-summary" class="chips"></div>
+      <div id="intelligence-candidates" class="intelligence-history"></div>
+      <h3>扫描记录</h3>
       <div id="intelligence-history" class="intelligence-history"></div>
     </section>
     <section class="panel codex-panel">

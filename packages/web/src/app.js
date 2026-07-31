@@ -1,4 +1,5 @@
 const $ = (id) => document.getElementById(id);
+$("operator-form").addEventListener("submit", (event) => event.preventDefault());
 const phases = { queued: 8, planning: 25, executing: 55, reviewing: 78, repairing: 68, cancelling: 85, cancelled: 100, completed: 100, failed: 100 };
 let tribe;
 let status;
@@ -8,9 +9,9 @@ let activeDevelopmentProposal;
 let memberDossiers = [];
 let activeMemberId;
 
-$("operator-token").value = localStorage.getItem("totemora_operator_token") || "";
+$("operator-token").value = sessionStorage.getItem("totemora_operator_token") || "";
 $("operator-token").addEventListener("change", () => {
-  localStorage.setItem("totemora_operator_token", $("operator-token").value);
+  sessionStorage.setItem("totemora_operator_token", $("operator-token").value);
   void loadDevelopmentHistory();
 });
 
@@ -24,7 +25,7 @@ async function loadTribe() {
       <small>${member.skills.map(escapeHtml).join(" · ") || "暂无 Skill"}</small>
     </article>`).join("");
   renderCodex();
-  await Promise.all([loadEmbers(), loadAssets(), loadMemberDossiers(), loadIntelligence()]);
+  await Promise.all([loadEmbers(), loadAssets(), loadMemberDossiers(), loadIntelligence(), loadIntelligencePreferences()]);
   $("chief").innerHTML = tribe.members.filter((m) => m.roles.includes("chief") && !["inactive", "retired"].includes(m.status))
     .map((m) => `<option value="${escapeHtml(m.id)}" ${m.id === tribe.tribe.chief ? "selected" : ""}>${escapeHtml(m.name)} · ${escapeHtml(m.model)}</option>`).join("");
   await loadHistory();
@@ -88,11 +89,37 @@ async function loadMemberDossiers() {
   const dossier = memberDossiers.find((item) => item.member.id === activeMemberId);
   if (!dossier) return;
   const mentor = dossier.identity.mentor ? `${escapeHtml(dossier.identity.mentor.name)}（${escapeHtml(dossier.identity.mentor.id)}）` : "无固定导师";
+  const portrait = dossier.portrait;
   $("member-dossier").innerHTML = `<h3>${escapeHtml(dossier.member.name || dossier.member.id)}</h3>
     <p>${escapeHtml(dossier.member.persona || "")}</p>
     <dl><dt>谱系</dt><dd>${escapeHtml(dossier.identity.discipline)} / ${escapeHtml(dossier.identity.rank)}</dd><dt>导师</dt><dd>${mentor}</dd><dt>年龄</dt><dd>${dossier.identity.age_days} 天</dd><dt>活力</dt><dd>${Math.round(dossier.growth.vitality * 100)}%</dd></dl>
-    <div class="chips">验证成功 ${dossier.growth.verified_successes} · 失败 ${dossier.growth.failures} · 求助 ${dossier.growth.help_requests} · 获得指点 ${dossier.growth.guidance_received}</div>
+    <div class="chips">经验信用 ${dossier.growth.experience_credit} · 可信结果 ${dossier.growth.verified_successes} · 日常操作 ${dossier.growth.operation_count} · 成员失败 ${dossier.growth.failures} · 系统失败 ${dossier.growth.system_failures || 0}</div>
+    <h4>性格内核 · v${portrait.constitution.version}</h4>
+    <p><b>特质</b> ${portrait.constitution.traits.map(escapeHtml).join(" · ") || "尚未结构化"}</p>
+    <p><b>原则</b> ${portrait.constitution.principles.map(escapeHtml).join(" · ") || "尚未结构化"}</p>
+    <p><b>表达</b> ${portrait.constitution.communication_style.map(escapeHtml).join(" · ") || "尚未结构化"}</p>
+    <p><b>工作偏好</b> ${portrait.constitution.working_preferences.map(escapeHtml).join(" · ") || "尚未结构化"}</p>
+    <h4>观察画像</h4>${portrait.observed_traits.map((item) => `<p>${escapeHtml(item.name)} ${Math.round(item.score * 100)} <small>置信 ${Math.round(item.confidence * 100)} · ${escapeHtml(item.evidence)}</small></p>`).join("")}
+    <h4>任务履历</h4><p>完成 ${portrait.task_record.completed} · 验收成功 ${portrait.task_record.accepted} · 经验信用 ${portrait.task_record.experience_credit} · 成功率 ${Math.round(portrait.task_record.success_rate * 100)}%</p>
+    <h4>重大经历</h4>${portrait.major_experiences.map((item) => `<p class="memory verified"><b>${escapeHtml(item.title)}</b> ${escapeHtml(item.summary.length > 260 ? `${item.summary.slice(0, 260)}…` : item.summary)}<small>${escapeHtml(item.at)}</small></p>`).join("") || "<small>尚无重大经历</small>"}
+    <h4>成长提案</h4>${portrait.evolution.pending.map((item) => `<article class="memory"><b>${escapeHtml(item.rationale)}</b><p><strong>建议改动</strong> ${escapeHtml(Object.entries(item.proposed_changes).map(([field, values]) => `${field}: ${(values || []).join(" · ")}`).join("；"))}</p><p><strong>预期收益</strong> ${escapeHtml(item.expected_benefit)}</p><p><strong>风险</strong> ${item.risks.map(escapeHtml).join(" · ")}</p><small>由 ${escapeHtml(item.proposed_by)} 提出 · 基于 v${item.base_version}</small><div><button type="button" data-evolution="approve" data-proposal="${escapeHtml(item.id)}">批准升级</button><button type="button" class="secondary" data-evolution="reject" data-proposal="${escapeHtml(item.id)}">拒绝</button></div></article>`).join("") || "<small>当前没有待审提案</small>"}
+    ${portrait.evolution.active_effect ? `<p class="evolution-effect"><b>上次成长已实际生效</b><br>v${portrait.evolution.active_effect.before_version} → v${portrait.evolution.active_effect.after_version}；下一次任务起，提示词使用新的 ${portrait.evolution.active_effect.changed_fields.map(escapeHtml).join("、")}。当前处于 ${escapeHtml(portrait.evolution.active_effect.evaluation_status)}，已观察 ${portrait.evolution.active_effect.observed_experience_credit || 0} / ${portrait.evolution.active_effect.target_credited_tasks} 份经验信用；基线为 ${portrait.evolution.active_effect.baseline.experience_credit} 信用、${portrait.evolution.active_effect.baseline.member_failures} 次成员失败。</p>` : ""}
+    ${portrait.evolution.pending.length ? "<small>正式画像保持当前版本，等待提案处理。</small>" : dossier.growth.eligible_growth_proposal ? '<button type="button" class="secondary" id="generate-evolution">请导师提出成长建议</button>' : `<small>距下次成长评审还需 ${dossier.growth.next_review_after_runs} 份经验信用${dossier.growth.review_cooldown_days ? `；冷却还剩 ${dossier.growth.review_cooldown_days} 天` : ""}</small>`}
     <h4>最近经历</h4>${dossier.experiences.slice(0, 6).map((item) => `<p class="memory ${item.verified ? "verified" : ""}"><b>${escapeHtml(item.kind)}</b> ${escapeHtml(item.summary)}<small>${escapeHtml(item.at)}</small></p>`).join("") || "<small>尚未留下经历</small>"}`;
+  $("generate-evolution")?.addEventListener("click", async (event) => {
+    event.currentTarget.disabled = true;
+    try { await operatorApi(`/api/members/${encodeURIComponent(activeMemberId)}/evolution/proposals`, { method: "POST", body: "{}" }); await loadMemberDossiers(); }
+    catch (error) { alert(error.message); event.currentTarget.disabled = false; }
+  });
+  $("member-dossier").querySelectorAll("[data-evolution]").forEach((button) => button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      await operatorApi(`/api/members/${encodeURIComponent(activeMemberId)}/evolution/proposals/${encodeURIComponent(button.dataset.proposal)}/review`, {
+        method: "POST", body: JSON.stringify({ approve: button.dataset.evolution === "approve", reviewer_id: dossier.identity.mentor?.id || tribe.tribe.chief }),
+      });
+      await loadMemberDossiers();
+    } catch (error) { alert(error.message); button.disabled = false; }
+  }));
   await loadMemberConversation();
 }
 
@@ -118,15 +145,89 @@ $("member-chat-form").addEventListener("submit", async (event) => {
 });
 
 async function loadIntelligence() {
-  const { briefs } = await api("/api/intelligence");
+  const [{ briefs }, pool] = await Promise.all([api("/api/intelligence"), api("/api/intelligence/candidates")]);
+  $("candidate-summary").textContent = `待推送 ${pool.counts.queued || 0} · 重试等待 ${pool.counts.retry_wait || 0} · 通道阻塞 ${pool.counts.channel_blocked || 0} · 已抑制 ${pool.counts.held || 0} · 已推送 ${pool.counts.pushed || 0} · 永久失败 ${pool.counts.failed || 0} · 状态未知 ${pool.counts.delivery_unknown || 0}`;
+  $("intelligence-candidates").innerHTML = pool.candidates.slice(0, 12).map((item) => `<article class="brief ${escapeHtml(item.status)}" data-candidate="${escapeHtml(item.id)}"><h3>${escapeHtml(item.headline)}</h3><p>${escapeHtml(item.brief)}</p><div class="chips">${escapeHtml(item.status)} · 总分 ${Math.round(item.scores.total * 100)}（模型 ${Math.round((item.scores.base_total ?? item.scores.total) * 100)} / 反馈 ${Math.round((item.scores.feedback_adjustment || 0) * 100)}） · 重要 ${Math.round(item.scores.importance * 100)} · 兴趣 ${Math.round(item.scores.interest * 100)} · 可信 ${Math.round(item.scores.confidence * 100)} · 新颖 ${Math.round(item.scores.novelty * 100)}</div><small>${escapeHtml(item.decision)} · ${escapeHtml(item.rationale)}</small><div class="candidate-feedback" role="group" aria-label="评价这条候选消息"><button type="button" data-feedback="valuable">有价值 ${item.feedback?.valuable || ""}</button><button type="button" data-feedback="not_valuable">没价值 ${item.feedback?.not_valuable || ""}</button><button type="button" data-feedback="duplicate">重复 ${item.feedback?.duplicate || ""}</button><button type="button" data-feedback="too_late">太晚 ${item.feedback?.too_late || ""}</button></div><small class="feedback-status" aria-live="polite">${item.feedback?.opened ? `Bark 已打开 ${item.feedback.opened} 次` : "反馈会校正后续相似消息，不改写本次模型原始分"}</small></article>`).join("") || "<p class=\"section-note\">候选池为空。可以立即扫描；如果来源或模型失败，失败原因会留在扫描记录中。</p>";
   $("intelligence-history").innerHTML = briefs.slice(0, 8).map((brief) => `<article class="brief ${escapeHtml(brief.status)}"><h3>${escapeHtml(brief.title)}</h3><p>${escapeHtml(brief.summary || brief.error || "")}</p><div class="chips">${escapeHtml(brief.created_at)} · 来源 ${brief.sources.length} · Bark ${brief.pushed_messages}</div>${brief.items.map((item) => `<p><b>${escapeHtml(item.headline)}</b><br><small>${escapeHtml(item.brief)}</small></p>`).join("")}</article>`).join("") || "<p class=\"section-note\">听风尚未带回情报。</p>";
+  if ($("operator-token").value) {
+    try {
+      const bark = await operatorApi("/api/intelligence/bark?health=1");
+      $("bark-status").className = `channel-status ${bark.healthy ? "ready" : bark.channel_status}`;
+      $("bark-status").textContent = bark.configured
+        ? `内部 Bark ${bark.healthy ? "在线" : bark.channel_status} · ${bark.server_url || ""} · 连续失败 ${bark.consecutive_failures}${bark.retry_after ? ` · ${bark.retry_after} 后重试` : ""}`
+        : "内部 Bark 尚未配置 device key；扫描仍会继续，候选不会丢失";
+    } catch (error) {
+      $("bark-status").className = "channel-status error";
+      $("bark-status").textContent = `Bark 状态读取失败：${error.message}`;
+    }
+  } else {
+    $("bark-status").textContent = "输入操作员 Token 后可检查内部 Bark 健康状态";
+  }
 }
 
+$("intelligence-candidates").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-feedback]");
+  if (!button) return;
+  const card = button.closest("[data-candidate]");
+  const statusNode = card.querySelector(".feedback-status");
+  card.querySelectorAll("[data-feedback]").forEach((item) => { item.disabled = true; });
+  statusNode.classList.remove("error");
+  statusNode.textContent = "正在记录反馈并更新相似消息偏好…";
+  try {
+    const result = await operatorApi(`/api/intelligence/candidates/${encodeURIComponent(card.dataset.candidate)}/feedback`, {
+      method: "POST", body: JSON.stringify({ signal: button.dataset.feedback }),
+    });
+    statusNode.textContent = result.inserted ? "反馈已记录；下一轮相似消息评估会使用这条证据" : "这条反馈已记录过，没有重复计权";
+    await Promise.all([loadIntelligence(), loadMemberDossiers()]);
+  } catch (error) {
+    statusNode.classList.add("error");
+    statusNode.textContent = `反馈失败：${error.message}。可再次点击重试。`;
+    card.querySelectorAll("[data-feedback]").forEach((item) => { item.disabled = false; });
+  }
+});
+
+async function loadIntelligencePreferences() {
+  const value = await api("/api/intelligence/preferences");
+  $("intelligence-interests").value = value.interests.join("\n");
+  $("channel-rss").checked = value.channels.rss;
+  $("channel-ai-hot").checked = value.channels.ai_hot;
+  $("channel-x").checked = value.channels.x_trends;
+  $("channel-weibo").checked = value.channels.weibo_hot;
+  $("x-woeid").value = value.x_woeid;
+  $("scan-interval").value = value.scan_interval_minutes;
+  $("push-interval").value = value.push_interval_seconds;
+  $("push-threshold").value = value.push_threshold;
+  $("social-credential-status").textContent = `只读凭据：X ${value.credentials?.x_trends ? "已配置" : "未配置"} · 微博 ${value.credentials?.weibo_hot ? "已配置" : "未配置"}`;
+}
+
+$("intelligence-preferences").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = event.submitter; button.disabled = true;
+  try {
+    await operatorApi("/api/intelligence/preferences", { method: "PUT", body: JSON.stringify({
+      interests: $("intelligence-interests").value.split("\n").map((item) => item.trim()).filter(Boolean),
+      channels: {
+        rss: $("channel-rss").checked,
+        ai_hot: $("channel-ai-hot").checked,
+        x_trends: $("channel-x").checked,
+        weibo_hot: $("channel-weibo").checked,
+      },
+      x_woeid: Number($("x-woeid").value),
+      scan_interval_minutes: Number($("scan-interval").value),
+      push_interval_seconds: Number($("push-interval").value),
+      push_threshold: Number($("push-threshold").value),
+      novelty_history_hours: 72,
+    }) });
+    $("intelligence-preference-status").textContent = "偏好已保存；下一轮巡查生效";
+  } catch (error) { $("intelligence-preference-status").textContent = error.message; }
+  finally { button.disabled = false; }
+});
+
 $("run-intelligence").addEventListener("click", async () => {
-  const button = $("run-intelligence"); button.disabled = true; $("intelligence-status").textContent = "听风正在巡查并汇总…";
+  const button = $("run-intelligence"); button.disabled = true; $("intelligence-status").textContent = "听风正在扫描、聚类并评估候选消息…";
   try {
     const task = await operatorApi("/api/intelligence/tasks", {
-      method: "POST", body: JSON.stringify({ message_count: 3, idempotency_key: `web-test-${Date.now()}` }),
+      method: "POST", body: JSON.stringify({ message_count: 3, delivery_mode: "candidate_pool", idempotency_key: `web-scan-${Date.now()}` }),
     });
     let current = task;
     while (!["completed", "failed"].includes(current.status)) {
@@ -136,7 +237,8 @@ $("run-intelligence").addEventListener("click", async () => {
     }
     if (current.status === "failed") throw new Error(current.error || "情报任务失败");
     const brief = current.result;
-    $("intelligence-status").textContent = `完成：${brief.title}，已推送 ${brief.pushed_messages} 条`;
+    const growth = current.growth_review?.status === "proposed" ? "；导师已生成成长提案" : "";
+    $("intelligence-status").textContent = `扫描完成：${brief.title}，形成 ${brief.candidate_ids?.length || 0} 条候选，${brief.queued_messages || 0} 条进入推送队列${growth}`;
     await Promise.all([loadIntelligence(), loadMemberDossiers(), loadAssets()]);
   } catch (error) { $("intelligence-status").textContent = error.message; $("intelligence-status").classList.add("error"); }
   finally { button.disabled = false; }
@@ -186,7 +288,7 @@ async function analyzeIntake() {
 }
 $("add-workplace").addEventListener("click", async () => {
   try {
-    const workplace = await api("/api/workplaces", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: $("workplace-name").value, path: $("workplace-path").value }) });
+    const workplace = await operatorApi("/api/workplaces", { method: "POST", body: JSON.stringify({ name: $("workplace-name").value, path: $("workplace-path").value }) });
     await loadSettlement(); $("workplace").value = workplace.id; toggleWorkspacePath();
   } catch (error) { alert(error.message); }
 });
@@ -268,7 +370,7 @@ $("task-form").addEventListener("submit", async (event) => {
       return;
     }
     if (!analysis.execution_enabled) throw new Error(`任务模式 ${analysis.type} 尚未开放执行：${analysis.reason}`);
-    const job = await api("/api/runs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({
+    const job = await operatorApi("/api/runs", { method: "POST", body: JSON.stringify({
       goal: $("goal").value, workspace: $("workspace").value, workplace_id: $("workplace").value,
       mission_id: $("mission").value, chief: $("chief").value,
       acceptance: $("acceptance").value.split("\n").map((v) => v.trim()).filter(Boolean),
@@ -355,7 +457,7 @@ async function watchRun(id) {
 $("cancel-run").addEventListener("click", async () => {
   if (!activeJobId) return;
   $("cancel-run").disabled = true;
-  try { await api(`/api/runs/${activeJobId}/cancel`, { method: "POST" }); }
+  try { await operatorApi(`/api/runs/${activeJobId}/cancel`, { method: "POST" }); }
   catch (error) { renderError(error.message); }
 });
 
@@ -363,7 +465,7 @@ $("retry-run").addEventListener("click", async () => {
   if (!activeJobId) return;
   $("retry-run").disabled = true;
   try {
-    const job = await api(`/api/runs/${activeJobId}/retry`, { method: "POST" });
+    const job = await operatorApi(`/api/runs/${activeJobId}/retry`, { method: "POST" });
     $("retry-run").classList.add("hidden"); activeJobId = job.id;
     $("cancel-run").classList.remove("hidden"); await watchRun(job.id);
   } catch (error) { renderError(error.message); }

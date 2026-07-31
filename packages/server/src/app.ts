@@ -15,8 +15,8 @@ import {
   type MemberPerformanceSummary,
 } from "@totemora/core";
 import { ConfiguredProviderRegistry } from "@totemora/providers";
-import { readdir, readFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { readdir, readFile, realpath } from "node:fs/promises";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { timingSafeEqual } from "node:crypto";
 import { SettlementStore } from "./settlement-store";
 import { JobStore } from "./job-store";
@@ -24,8 +24,12 @@ import { DevelopmentCommitService } from "./development-service";
 import { ToolAssetRegistry } from "./tool-asset-registry";
 import { MemberStateStore } from "./member-state-store";
 import { MemberConversationService } from "./member-conversation-service";
+import { MemberEvolutionService } from "./member-evolution-service";
 import { IntelligenceService } from "./intelligence-service";
+import { IntelligencePreferenceStore } from "./intelligence-preference-store";
 import { ActionJournal } from "./action-journal";
+import { SPECIALIST_SERVICES, SpecialistTaskRepository } from "./specialist-service";
+import { MemberProfileStore } from "./member-profile-store";
 
 export interface PlaygroundOptions {
   configDir: string;
@@ -96,12 +100,20 @@ interface IntelligenceTask {
   updated_at: string;
   message_count: number;
   idempotency_key: string;
+  delivery_mode: "candidate_pool" | "direct_push";
   result?: Awaited<ReturnType<IntelligenceService["run"]>>;
   error?: string;
   retryable?: boolean;
+  growth_review?: { status: "not_due" | "proposed" | "failed"; proposal_id?: string; error?: string };
 }
 
-interface IntelligenceTaskInput { message_count?: number; idempotency_key?: string }
+interface IntelligenceTaskInput { message_count?: number; idempotency_key?: string; delivery_mode?: "candidate_pool" | "direct_push" }
+
+class HttpError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+  }
+}
 
 export function createPlaygroundApp(options: PlaygroundOptions) {
   const jobs = new Map<string, RunJob>();
@@ -113,6 +125,14 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
   const developmentTaskStore = new JobStore<DevelopmentTask, DevelopmentTaskInput>(options.dataDir, "development-tasks");
   const intelligenceTasks = new Map<string, IntelligenceTask>();
   const intelligenceTaskStore = new JobStore<IntelligenceTask, IntelligenceTaskInput>(options.dataDir, "intelligence-tasks");
+  const specialistTasks = new SpecialistTaskRepository(options.dataDir);
+  const failInterruptedSpecialistTask = (taskId: string, summary: string) => {
+    const task = specialistTasks.get(taskId);
+    if (!task || !["queued", "routing", "running"].includes(task.status)) return;
+    specialistTasks.update(task.id, task.revision, {
+      status: "failed", current_stage: "failed", error: summary, summary,
+    });
+  };
   const runHydration = jobStore.list().then(async (records) => {
     for (const record of records) {
       const job = record.job;
@@ -141,6 +161,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
         task.retryable = true;
         task.updated_at = new Date().toISOString();
         await developmentTaskStore.save(task, record.input);
+        failInterruptedSpecialistTask(task.id, task.error);
       }
       developmentTasks.set(task.id, task);
     }
@@ -154,6 +175,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
         task.retryable = true;
         task.updated_at = new Date().toISOString();
         await intelligenceTaskStore.save(task, record.input);
+        failInterruptedSpecialistTask(task.id, task.error);
       }
       intelligenceTasks.set(task.id, task);
     }
@@ -163,14 +185,34 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
   let memberServicesPromise: Promise<{
     state: MemberStateStore;
     conversations: MemberConversationService;
+    evolution: MemberEvolutionService;
     intelligence: IntelligenceService;
   }> | undefined;
+  let bindingsRegistered = false;
   const getConfig = async () => {
     configPromise ??= loadLocalConfig({ configDir: options.configDir }).then((config) => {
       validateLocalConfig(config);
       return config;
     });
     return configPromise;
+  };
+  const ensureServiceBindings = async () => {
+    if (bindingsRegistered) return;
+    const config = await getConfig();
+    const chief = config.tribe.tribe.chief ?? "deepseek_reasoner";
+    const gitMember = config.agents.agents.find((member) => member.skills?.includes("git-flow-safety"));
+    const intelligenceMember = config.agents.agents.find((member) => member.id === "qwen_intelligence");
+    if (gitMember) specialistTasks.registerBinding({
+      service_id: "git.flow", chief_member_id: chief, specialist_member_id: gitMember.id,
+      routing_reason: "当前唯一具备 git-flow-safety 且处于 active 状态的成员",
+      capability_evidence: ["git-flow-safety"], tool_grants: ["git-flow-engine", "opencode-correction"],
+    });
+    if (intelligenceMember) specialistTasks.registerBinding({
+      service_id: "intelligence.watch", chief_member_id: chief, specialist_member_id: intelligenceMember.id,
+      routing_reason: "Chief 已批准的常驻听风岗位；定时巡查复用委任，不重复调用 Chief",
+      capability_evidence: ["news-intelligence"], tool_grants: ["news-intelligence", "aihot-public-feed", "internal-bark"],
+    });
+    bindingsRegistered = true;
   };
   const getDevelopmentService = async () => {
     const config = await getConfig();
@@ -192,6 +234,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
       return {
         state,
         conversations: new MemberConversationService(config, providers, state, options.dataDir),
+        evolution: new MemberEvolutionService(config, providers, state),
         intelligence: new IntelligenceService(
           config, providers, state, options.dataDir,
           options.projectRoot ?? resolve(import.meta.dir, "../../.."),
@@ -210,10 +253,20 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
     };
     developmentTasks.set(task.id, task);
     await developmentTaskStore.save(task, input);
+    await ensureServiceBindings();
+    let serviceTask = specialistTasks.create({
+      id: task.id, service_id: "git.flow", service_version: 1, operation: task.mode,
+      trigger: "manual", status: "queued", current_stage: "routing",
+      chief_member_id: (await getConfig()).tribe.tribe.chief,
+      idempotency_key: task.id, input,
+    });
     void (async () => {
       task.status = "running";
       task.updated_at = new Date().toISOString();
       await developmentTaskStore.save(task, input);
+      serviceTask = specialistTasks.update(task.id, serviceTask.revision, {
+        status: "running", current_stage: "inspect", summary: "Chief 开始路由并检查工作地",
+      });
       try {
         task.result = await (await getDevelopmentService()).prepare(input.workplace_id, input.goal.trim(), {
           mode: task.mode, issue_mode: task.issue_mode,
@@ -230,6 +283,15 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
       };
       await developmentTaskStore.save(terminalTask, input);
       Object.assign(task, terminalTask);
+      specialistTasks.update(task.id, serviceTask.revision, task.error ? {
+        status: "failed", current_stage: "failed", error: task.error,
+        summary: `Git 专业任务失败：${task.error}`,
+      } : {
+        status: "waiting_approval", current_stage: "local_gate",
+        result: task.result, result_ref: task.proposal_id,
+        member_id: task.result?.specialist_member_id,
+        summary: "专员已完成准备与自检，等待对应 Git 门禁",
+      });
     })();
     return task;
   };
@@ -240,15 +302,29 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
       created_at: now, updated_at: now,
       message_count: Math.max(1, Math.min(5, input.message_count ?? 1)),
       idempotency_key: input.idempotency_key ?? `intelligence-${crypto.randomUUID()}`,
+      delivery_mode: input.delivery_mode ?? "candidate_pool",
     };
     intelligenceTasks.set(task.id, task);
     await intelligenceTaskStore.save(task, input);
+    await ensureServiceBindings();
+    let serviceTask = specialistTasks.create({
+      id: task.id, service_id: "intelligence.watch", service_version: 1, operation: "scan",
+      trigger: "manual", status: "queued", current_stage: "collect",
+      member_id: "qwen_intelligence", chief_member_id: (await getConfig()).tribe.tribe.chief,
+      idempotency_key: task.idempotency_key, input,
+    });
     void (async () => {
       task.status = "running"; task.updated_at = new Date().toISOString();
       await intelligenceTaskStore.save(task, input);
+      serviceTask = specialistTasks.update(task.id, serviceTask.revision, {
+        status: "running", current_stage: "collect", summary: "听风开始采集白名单来源",
+        member_id: "qwen_intelligence",
+      });
       try {
-        task.result = await (await getMemberServices()).intelligence.run({
+        const services = await getMemberServices();
+        task.result = await services.intelligence.run({
           message_count: task.message_count, idempotency_key: task.idempotency_key, reason: "manual",
+          defer_push: task.delivery_mode === "candidate_pool",
         });
       } catch (error) {
         task.error = error instanceof Error ? error.message : String(error);
@@ -259,17 +335,69 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
       };
       await intelligenceTaskStore.save(terminal, input);
       Object.assign(task, terminal);
+      specialistTasks.update(task.id, serviceTask.revision, task.error ? {
+        status: "failed", current_stage: "failed", error: task.error,
+        summary: `听风扫描失败：${task.error}`,
+      } : {
+        status: "completed", current_stage: "candidate_gate", result: task.result,
+        result_ref: task.result?.id, summary: "扫描完成；候选已进入价值门禁，扫描本身不产生成长信用",
+      });
+      if (task.result) {
+        void (async () => {
+          try {
+            const proposal = await (await getMemberServices()).evolution.proposeIfEligible(task.result!.member_id);
+            task.growth_review = proposal ? { status: "proposed", proposal_id: proposal.id } : { status: "not_due" };
+          } catch (error) {
+            task.growth_review = { status: "failed", error: error instanceof Error ? error.message : String(error) };
+          }
+          task.updated_at = new Date().toISOString();
+          await intelligenceTaskStore.save(task, input);
+        })();
+      }
     })();
     return task;
+  };
+  const syncDevelopmentSpecialistTask = (proposal: {
+    id: string; status: string; specialist_member_id: string; error?: string;
+  }) => {
+    const task = specialistTasks.findByResultRef("git.flow", proposal.id);
+    if (!task) return;
+    const stateByProposal: Record<string, { status: "running" | "waiting_approval" | "waiting_external" | "completed" | "failed"; stage: string }> = {
+      awaiting_approval: { status: "waiting_approval", stage: "local_gate" },
+      executing: { status: "running", stage: "local_gate" },
+      awaiting_remote_approval: { status: "waiting_approval", stage: "remote_gate" },
+      publishing: { status: "waiting_external", stage: "remote_gate" },
+      awaiting_merge_approval: { status: "waiting_approval", stage: "merge_gate" },
+      merging: { status: "waiting_external", stage: "merge_gate" },
+      changes_requested: { status: "waiting_approval", stage: "plan" },
+      completed: { status: "completed", stage: "accepted" },
+      failed: { status: "failed", stage: "failed" },
+    };
+    const next = stateByProposal[proposal.status];
+    if (!next) return;
+    specialistTasks.update(task.id, task.revision, {
+      status: next.status, current_stage: next.stage, result: proposal,
+      result_ref: proposal.id, member_id: proposal.specialist_member_id,
+      error: proposal.error, summary: `Git Flow 进入 ${proposal.status}`,
+    });
   };
 
   const enqueueRun = async (input: RunInput): Promise<RunJob> => {
     if (!input.goal?.trim()) throw new Error("任务目标不能为空");
     const settlementData = await settlement.get();
-    const workplace = input.workplace_id
-      ? settlementData.workplaces.find((item) => item.id === input.workplace_id)
+    const existingMission = input.mission_id
+      ? settlementData.missions.find((item) => item.id === input.mission_id)
       : undefined;
-    const workspacePath = workplace?.path ?? input.workspace?.trim();
+    if (input.mission_id && !existingMission) throw new Error("Mission 不存在");
+    const workplaceId = input.workplace_id ?? existingMission?.workplace_id;
+    const workplace = workplaceId
+      ? settlementData.workplaces.find((item) => item.id === workplaceId)
+      : undefined;
+    if (workplaceId && !workplace) throw new Error("工作地不存在");
+    const workspacePath = await registeredWorkspacePath(
+      workplace?.path ?? input.workspace,
+      settlementData.workplaces.map((item) => item.path),
+    );
     const taskAnalysis = analyzeTaskIntent({
       goal: input.goal.trim(), has_workspace: Boolean(workspacePath),
       continuing: Boolean(input.mission_id),
@@ -278,10 +406,8 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
       throw new Error(`任务已识别为 ${taskAnalysis.type}，但该执行模式尚未开放：${taskAnalysis.reason}`);
     }
     if (!workspacePath) throw new Error("请选择工作地或填写 Workspace 路径");
-    const mission = input.mission_id
-      ? settlementData.missions.find((item) => item.id === input.mission_id)
-      : await settlement.createMission(input.goal.trim(), workplace?.id);
-    if (!mission) throw new Error("Mission 不存在");
+    const mission = existingMission
+      ?? await settlement.createMission(input.goal.trim(), workplace?.id);
     input.workspace = workspacePath;
     input.mission_id = mission.id;
     input.mission_context = mission.requests.slice(-6).flatMap((request) => [
@@ -309,7 +435,26 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
   return {
     jobs,
     async runScheduledIntelligence() {
-      return (await getMemberServices()).intelligence.runDue();
+      await ensureServiceBindings();
+      const services = await getMemberServices();
+      const result = await services.intelligence.runDue();
+      if (result?.scan) {
+        const task = specialistTasks.create({
+          id: crypto.randomUUID(), service_id: "intelligence.watch", service_version: 1,
+          operation: "scan", trigger: "scheduled", status: "completed", current_stage: "candidate_gate",
+          member_id: result.scan.member_id, chief_member_id: (await getConfig()).tribe.tribe.chief,
+          idempotency_key: `scheduled:${result.scan.id}`, input: { reason: "scheduled" },
+          result: result.scan, result_ref: result.scan.id,
+        });
+        void task;
+        void services.evolution.proposeIfEligible(result.scan.member_id).catch(async (error) => {
+          await services.state.remember({
+            member_id: result.scan!.member_id, kind: "system_failure", verified: true, source_id: result.scan!.id,
+            summary: `自动成长评审失败：${(error instanceof Error ? error.message : String(error)).slice(0, 300)}`,
+          });
+        });
+      }
+      return result;
     },
     async fetch(request: Request): Promise<Response> {
       await hydration;
@@ -340,7 +485,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
         if (request.method === "GET" && url.pathname === "/api/status") {
           const config = await getConfig();
           return json({
-            version: "0.6.0-living-tribe",
+            version: "0.9.0-durable-specialist-services",
             settlement: "ready",
             active_members: config.agents.agents.filter((member) => !["inactive", "retired"].includes(member.status ?? "active")).length,
             capabilities: {
@@ -348,15 +493,36 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
               change: "git_flow_existing_changes", operate: "policy_gated", cancellation: "enabled",
               persistent_jobs: "enabled", safe_retry: "enabled",
               budget_staffing: "evidence_v1", specialist_self_review: "enabled",
-              member_growth: "verified_experience_context_v1",
+              member_growth: "credited_evidence_and_effect_observation_v3",
               development_git_flow: options.operatorToken ? "enabled" : "needs_operator_token",
               mcp: "streamable_http_and_stdio",
               tribe_assets: "catalog_permissions_evidence_v1",
-              member_dossiers: "experience_growth_decay_v1",
+              member_dossiers: "portrait_experience_evolution_v2",
               member_chat: "mentor_escalation_v1",
-              intelligence_watch: "hourly_bark_v1",
+              intelligence_watch: "ten_minute_candidate_pool_v3",
+              intelligence_candidate_pool: "sqlite_feedback_retry_circuit_v2",
+              durable_state: "sqlite_wal_v1",
+              internal_bark: "self_hosted_v2_api",
+              specialist_services: "typed_contract_v1",
             },
           });
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/services") {
+          await ensureServiceBindings();
+          return json({ services: SPECIALIST_SERVICES, bindings: specialistTasks.bindings() });
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/service-tasks") {
+          requireOperator(request, options.operatorToken);
+          return json({ tasks: specialistTasks.list(Number(url.searchParams.get("limit") ?? 100)) });
+        }
+
+        const specialistTaskMatch = url.pathname.match(/^\/api\/service-tasks\/([^/]+)$/);
+        if (request.method === "GET" && specialistTaskMatch) {
+          requireOperator(request, options.operatorToken);
+          const task = specialistTasks.get(specialistTaskMatch[1]!);
+          return task ? json(task) : json({ error: "Specialist task not found" }, 404);
         }
 
         if (request.method === "GET" && url.pathname === "/api/members/dossiers") {
@@ -373,6 +539,20 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
           return json({ messages: await (await getMemberServices()).conversations.list(memberMessagesMatch[1]!) });
         }
 
+        const evolutionProposalMatch = url.pathname.match(/^\/api\/members\/([^/]+)\/evolution\/proposals$/);
+        if (request.method === "POST" && evolutionProposalMatch) {
+          requireOperator(request, options.operatorToken);
+          return json(await (await getMemberServices()).evolution.propose(evolutionProposalMatch[1]!), 201);
+        }
+
+        const evolutionReviewMatch = url.pathname.match(/^\/api\/members\/([^/]+)\/evolution\/proposals\/([^/]+)\/review$/);
+        if (request.method === "POST" && evolutionReviewMatch) {
+          requireOperator(request, options.operatorToken);
+          const input = await request.json() as { approve?: boolean; reviewer_id?: string };
+          if (!input.reviewer_id) throw new Error("reviewer_id is required");
+          return json(await (await getMemberServices()).evolution.review(evolutionReviewMatch[1]!, evolutionReviewMatch[2]!, input.reviewer_id, Boolean(input.approve)));
+        }
+
         const memberChatMatch = url.pathname.match(/^\/api\/members\/([^/]+)\/chat$/);
         if (request.method === "POST" && memberChatMatch) {
           requireOperator(request, options.operatorToken);
@@ -384,6 +564,54 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
 
         if (request.method === "GET" && url.pathname === "/api/intelligence") {
           return json({ briefs: await (await getMemberServices()).intelligence.list() });
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/intelligence/candidates") {
+          const intelligence = (await getMemberServices()).intelligence;
+          const [candidates, counts] = await Promise.all([
+            intelligence.listCandidates(), intelligence.candidateCounts(),
+          ]);
+          return json({
+            candidates,
+            counts,
+          });
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/intelligence/bark") {
+          requireOperator(request, options.operatorToken);
+          return json(await (await getMemberServices()).intelligence.barkStatus(url.searchParams.get("health") === "1"));
+        }
+
+        const candidateFeedbackMatch = url.pathname.match(/^\/api\/intelligence\/candidates\/([^/]+)\/feedback$/);
+        if (request.method === "POST" && candidateFeedbackMatch) {
+          requireOperator(request, options.operatorToken);
+          const input = await request.json() as { signal?: "valuable" | "not_valuable" | "duplicate" | "too_late" };
+          if (!input.signal || !["valuable", "not_valuable", "duplicate", "too_late"].includes(input.signal)) {
+            throw new Error("signal must be valuable, not_valuable, duplicate, or too_late");
+          }
+          return json(await (await getMemberServices()).intelligence.recordFeedback(candidateFeedbackMatch[1]!, input.signal));
+        }
+
+        const feedbackRedirectMatch = url.pathname.match(/^\/r\/([^/]+)$/);
+        if (request.method === "GET" && feedbackRedirectMatch) {
+          const result = await (await getMemberServices()).intelligence.openFeedback(decodeURIComponent(feedbackRedirectMatch[1]!));
+          if (!result) return json({ error: "Feedback link not found" }, 404);
+          return new Response(null, { status: 303, headers: { location: result.target_url, "cache-control": "no-store" } });
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/intelligence/preferences") {
+          return json({
+            ...await new IntelligencePreferenceStore(options.dataDir).get(),
+            credentials: {
+              x_trends: await hasLocalSecret(options.dataDir, "x-bearer-token", "TOTEMORA_X_BEARER_TOKEN"),
+              weibo_hot: await hasLocalSecret(options.dataDir, "weibo-access-token", "TOTEMORA_WEIBO_ACCESS_TOKEN"),
+            },
+          });
+        }
+
+        if (request.method === "PUT" && url.pathname === "/api/intelligence/preferences") {
+          requireOperator(request, options.operatorToken);
+          return json(await new IntelligencePreferenceStore(options.dataDir).save(await request.json()));
         }
 
         if (request.method === "GET" && url.pathname === "/api/actions") {
@@ -449,6 +677,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
         }
 
         if (request.method === "POST" && url.pathname === "/api/workplaces") {
+          requireOperator(request, options.operatorToken);
           const input = await request.json() as { name?: string; path?: string };
           return json(await settlement.addWorkplace(input.name ?? "", input.path ?? ""), 201);
         }
@@ -535,7 +764,9 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
         const approveMatch = url.pathname.match(/^\/api\/development\/proposals\/([^/]+)\/approve$/);
         if (request.method === "POST" && approveMatch) {
           requireOperator(request, options.operatorToken);
-          return json(await (await getDevelopmentService()).approve(approveMatch[1]!));
+          const proposal = await (await getDevelopmentService()).approve(approveMatch[1]!);
+          syncDevelopmentSpecialistTask(proposal);
+          return json(proposal);
         }
 
         const advanceMatch = url.pathname.match(/^\/api\/development\/proposals\/([^/]+)\/advance$/);
@@ -543,13 +774,23 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
           requireOperator(request, options.operatorToken);
           const input = await request.json() as { gate?: "local" | "remote" | "merge" };
           const service = await getDevelopmentService();
-          if (input.gate === "local") return json(await service.approve(advanceMatch[1]!));
-          if (input.gate === "remote") return json(await service.publish(advanceMatch[1]!));
-          if (input.gate === "merge") return json(await service.merge(advanceMatch[1]!));
+          if (input.gate === "local") {
+            const proposal = await service.approve(advanceMatch[1]!);
+            syncDevelopmentSpecialistTask(proposal); return json(proposal);
+          }
+          if (input.gate === "remote") {
+            const proposal = await service.publish(advanceMatch[1]!);
+            syncDevelopmentSpecialistTask(proposal); return json(proposal);
+          }
+          if (input.gate === "merge") {
+            const proposal = await service.merge(advanceMatch[1]!);
+            syncDevelopmentSpecialistTask(proposal); return json(proposal);
+          }
           throw new Error("gate must be local, remote, or merge");
         }
 
         if (request.method === "POST" && url.pathname === "/api/missions") {
+          requireOperator(request, options.operatorToken);
           const input = await request.json() as { title?: string; workplace_id?: string };
           return json(await settlement.createMission(input.title ?? "", input.workplace_id), 201);
         }
@@ -564,6 +805,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
         }
 
         if (request.method === "POST" && url.pathname === "/api/runs") {
+          requireOperator(request, options.operatorToken);
           return json(await enqueueRun((await request.json()) as RunInput), 202);
         }
 
@@ -585,6 +827,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
 
         const cancelMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/cancel$/);
         if (request.method === "POST" && cancelMatch) {
+          requireOperator(request, options.operatorToken);
           const job = jobs.get(cancelMatch[1]!);
           if (!job) return json({ error: "Run job not found" }, 404);
           if (!["queued", "running"].includes(job.status)) {
@@ -599,6 +842,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
 
         const retryMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/retry$/);
         if (request.method === "POST" && retryMatch) {
+          requireOperator(request, options.operatorToken);
           const previous = jobs.get(retryMatch[1]!);
           const input = jobInputs.get(retryMatch[1]!);
           if (!previous || !input) return json({ error: "Run job not found or no longer retryable" }, 404);
@@ -615,7 +859,10 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
         }
         return json({ error: "Not found" }, 404);
       } catch (error) {
-        return json({ error: error instanceof Error ? error.message : String(error) }, 400);
+        return json(
+          { error: error instanceof Error ? error.message : String(error) },
+          error instanceof HttpError ? error.status : 400,
+        );
       }
     },
   };
@@ -634,8 +881,17 @@ async function executeRun(
       maxFiles: input.max_files,
       maxTotalBytes: input.max_context_bytes,
     });
-    const registry = options.createProviderRegistry?.(config) ?? new ConfiguredProviderRegistry(config);
-    const runtime = new TribeRuntime(config, registry, new FileRunStore(options.dataDir), undefined, {
+    const effectiveConfig = structuredClone(config);
+    const profiles = new MemberProfileStore(options.dataDir);
+    for (const member of effectiveConfig.agents.agents) {
+      const constitution = await profiles.current(member);
+      member.persona = [
+        member.persona ?? `你是部落成员 ${member.name ?? member.id}。`,
+        `正式画像 v${constitution.version}：特质=${JSON.stringify(constitution.traits)}；表达=${JSON.stringify(constitution.communication_style)}；工作偏好=${JSON.stringify(constitution.working_preferences)}`,
+      ].join("\n");
+    }
+    const registry = options.createProviderRegistry?.(effectiveConfig) ?? new ConfiguredProviderRegistry(effectiveConfig);
+    const runtime = new TribeRuntime(effectiveConfig, registry, new FileRunStore(options.dataDir), undefined, {
       onProgress(progress: RuntimeProgress) {
         job.phase = progress.phase;
         job.message = progress.message;
@@ -755,11 +1011,29 @@ function json(value: unknown, status = 200): Response {
 }
 
 function requireOperator(request: Request, configuredToken?: string): void {
-  if (!configuredToken) throw new Error("Development operations require TOTEMORA_OPERATOR_TOKEN on the server");
+  if (!configuredToken) throw new HttpError(503, "Operator authorization is not configured on the server");
   const provided = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
   const expectedBuffer = Buffer.from(configuredToken);
   const providedBuffer = Buffer.from(provided);
   if (providedBuffer.length !== expectedBuffer.length || !timingSafeEqual(providedBuffer, expectedBuffer)) {
-    throw new Error("Operator authorization failed");
+    throw new HttpError(401, "Operator authorization failed");
   }
+}
+
+async function registeredWorkspacePath(input: string | undefined, registeredRoots: string[]): Promise<string | undefined> {
+  if (!input?.trim()) return undefined;
+  const candidate = await realpath(resolve(input.trim()));
+  const roots = registeredRoots.map((rootPath) => resolve(rootPath));
+  const allowed = roots.some((root) => {
+    const child = relative(root, candidate);
+    return child === "" || (!child.startsWith("..") && !isAbsolute(child));
+  });
+  if (!allowed) throw new HttpError(403, "Workspace 必须位于已登记工作地内");
+  return candidate;
+}
+
+async function hasLocalSecret(dataDir: string, fileName: string, environmentName: string): Promise<boolean> {
+  if (process.env[environmentName]?.trim()) return true;
+  try { return Boolean((await readFile(resolve(dataDir, "secrets", fileName), "utf8")).trim()); }
+  catch { return false; }
 }

@@ -83,6 +83,14 @@ export class TotemoraGatewayClient {
     return this.request("/api/assets");
   }
 
+  async listServices() {
+    return this.request("/api/services");
+  }
+
+  async getSpecialistTask(taskId: string) {
+    return this.request(`/api/service-tasks/${encodeURIComponent(taskId)}`);
+  }
+
   async listMemberDossiers() {
     return this.request("/api/members/dossiers");
   }
@@ -101,13 +109,17 @@ export class TotemoraGatewayClient {
     return this.request("/api/intelligence");
   }
 
+  async listIntelligenceCandidates() {
+    return this.request("/api/intelligence/candidates");
+  }
+
   async listActions() {
     return this.request("/api/actions");
   }
 
-  async runIntelligenceBrief(messageCount: number, idempotencyKey?: string) {
+  async runIntelligenceBrief(messageCount: number, idempotencyKey?: string, deliveryMode: "candidate_pool" | "direct_push" = "candidate_pool") {
     return this.request("/api/intelligence/tasks", {
-      method: "POST", body: JSON.stringify({ message_count: messageCount, idempotency_key: idempotencyKey }),
+      method: "POST", body: JSON.stringify({ message_count: messageCount, idempotency_key: idempotencyKey, delivery_mode: deliveryMode }),
     });
   }
 
