@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { readFile, stat } from "node:fs/promises";
+import { readdirSync } from "node:fs";
+import { basename, join, resolve } from "node:path";
 
 import type { AgentConfig, LocalConfigSet, ProviderRegistry } from "@totemora/core";
 
@@ -8,6 +9,8 @@ import type { SettlementStore, Workplace, WorkplacePolicy } from "./settlement-s
 import { SkillGovernanceStore } from "./skill-governance-store";
 import { OpenCodeCorrectionTool, type OpenCodeCorrectionResult } from "./opencode-correction-tool";
 import { ToolAssetRegistry } from "./tool-asset-registry";
+import { StateDatabase } from "./state-database";
+import { MemberStateStore } from "./member-state-store";
 
 export interface DevelopmentProposal {
   id: string;
@@ -102,6 +105,8 @@ export class DevelopmentCommitService {
   private readonly experienceFile: string;
   private readonly skillStore: SkillGovernanceStore;
   private readonly assetRegistry: ToolAssetRegistry;
+  private readonly state: StateDatabase;
+  private readonly memberState: MemberStateStore;
 
   constructor(
     private readonly config: LocalConfigSet,
@@ -116,6 +121,9 @@ export class DevelopmentCommitService {
     this.experienceFile = resolve(dataDir, "member-experience", `${GIT_COMMIT_SPECIALIST_ID}.json`);
     this.skillStore = new SkillGovernanceStore(dataDir, "git-change-management", GIT_CHANGE_SKILL_VERSION);
     this.assetRegistry = new ToolAssetRegistry(projectRoot, dataDir);
+    this.state = StateDatabase.open(dataDir);
+    this.memberState = new MemberStateStore(dataDir, config);
+    this.importLegacyState();
   }
 
   async prepare(
@@ -537,22 +545,14 @@ export class DevelopmentCommitService {
   }
 
   async getProposal(id: string): Promise<DevelopmentProposal> {
-    try {
-      return JSON.parse(await readFile(join(this.proposalsDir, `${id}.json`), "utf8")) as DevelopmentProposal;
-    } catch (error) {
-      throw new Error(`Development proposal not found: ${id}`, { cause: error });
-    }
+    const proposal = this.state.listRecords<DevelopmentProposal>("development_proposals")
+      .find((item) => item.id === id);
+    if (!proposal) throw new Error(`Development proposal not found: ${id}`);
+    return proposal;
   }
 
   async listProposals(): Promise<DevelopmentProposal[]> {
-    let files: string[];
-    try { files = (await readdir(this.proposalsDir)).filter((file) => file.endsWith(".json")); }
-    catch { return []; }
-    const proposals = await Promise.all(files.map(async (file) => {
-      try { return JSON.parse(await readFile(join(this.proposalsDir, file), "utf8")) as DevelopmentProposal; }
-      catch { return undefined; }
-    }));
-    return proposals.filter((item) => item !== undefined)
+    return this.state.listRecords<DevelopmentProposal>("development_proposals")
       .sort((left, right) => right.created_at.localeCompare(left.created_at));
   }
 
@@ -571,11 +571,15 @@ export class DevelopmentCommitService {
   }
 
   private async callJson(member: AgentConfig, prompt: string, maxTokens = 4_000): Promise<unknown> {
+    const constitution = (await this.memberState.getDossier(member.id)).portrait.constitution;
     const response = await this.providers.get(member.provider).generate({
       memberId: member.id,
       model: member.model,
       messages: [
-        { role: "system", content: member.persona ?? `你是部落成员 ${member.id}` },
+        { role: "system", content: [
+          member.persona ?? `你是部落成员 ${member.id}`,
+          `正式画像 v${constitution.version}：特质=${JSON.stringify(constitution.traits)}；表达=${JSON.stringify(constitution.communication_style)}；工作偏好=${JSON.stringify(constitution.working_preferences)}`,
+        ].join("\n") },
         { role: "user", content: prompt },
       ],
       responseFormat: "json",
@@ -585,8 +589,7 @@ export class DevelopmentCommitService {
   }
 
   private async saveProposal(proposal: DevelopmentProposal): Promise<void> {
-    await mkdir(this.proposalsDir, { recursive: true });
-    await atomicWrite(join(this.proposalsDir, `${proposal.id}.json`), proposal);
+    this.state.putRecord("development_proposals", proposal.id, proposal, proposal.created_at, proposal.updated_at);
   }
 
   private async pushBranch(cwd: string, branch: string): Promise<"configured origin" | "GitHub HTTPS fallback"> {
@@ -652,15 +655,14 @@ export class DevelopmentCommitService {
   }
 
   private async loadExperiences(): Promise<Array<Record<string, unknown>>> {
-    try { return JSON.parse(await readFile(this.experienceFile, "utf8")) as Array<Record<string, unknown>>; }
-    catch { return []; }
+    return this.state.listRecords<Record<string, unknown>>(`member_experience:${GIT_COMMIT_SPECIALIST_ID}`);
   }
 
   private async recordExperience(proposal: DevelopmentProposal): Promise<void> {
-    const experiences = await this.loadExperiences();
-    experiences.push({
-      id: crypto.randomUUID(),
-      at: new Date().toISOString(),
+    const id = crypto.randomUUID();
+    const at = new Date().toISOString();
+    const experience = {
+      id, at,
       workplace_id: proposal.workplace_id,
       branch: proposal.git_context.branch,
       skill: proposal.skill,
@@ -673,9 +675,44 @@ export class DevelopmentCommitService {
       pr_url: proposal.pr_url,
       mode: proposal.mode,
       verified: true,
-    });
-    await mkdir(dirname(this.experienceFile), { recursive: true });
-    await atomicWrite(this.experienceFile, experiences.slice(-50));
+    };
+    this.state.db.transaction(() => {
+      this.state.putRecord(`member_experience:${GIT_COMMIT_SPECIALIST_ID}`, id, experience, at, at);
+      this.state.db.query(`
+        INSERT OR IGNORE INTO member_events(
+          id,member_id,kind,credit_type,credit_value,verified,source_type,source_id,summary,at
+        ) VALUES(?,?,'success','task_outcome',1,1,'git_flow',?,?,?)
+      `).run(
+        crypto.randomUUID(), GIT_COMMIT_SPECIALIST_ID, proposal.id,
+        `Git Flow 验收通过：${proposal.summary}`, at,
+      );
+    })();
+  }
+
+  private importLegacyState(): void {
+    let files: string[];
+    try { files = readdirSync(this.proposalsDir).filter((file) => file.endsWith(".json")); }
+    catch { files = []; }
+    for (const file of files) {
+      const path = resolve(this.proposalsDir, file);
+      this.state.importJsonFile<DevelopmentProposal>(
+        path,
+        (value) => [value as DevelopmentProposal],
+        (proposal) => this.state.putRecord("development_proposals", proposal.id, proposal, proposal.created_at, proposal.updated_at),
+      );
+    }
+    this.state.importJsonFile<Record<string, unknown>>(
+      this.experienceFile,
+      (value) => {
+        if (!Array.isArray(value)) throw new Error("expected Git experience array");
+        return value as Array<Record<string, unknown>>;
+      },
+      (experience) => {
+        const experienceId = String(experience.id ?? crypto.randomUUID());
+        const experienceAt = String(experience.at ?? new Date(0).toISOString());
+        this.state.putRecord(`member_experience:${GIT_COMMIT_SPECIALIST_ID}`, experienceId, experience, experienceAt, experienceAt);
+      },
+    );
   }
 }
 
@@ -964,12 +1001,6 @@ function balancedJsonObjects(content: string): string[] {
     }
   }
   return values;
-}
-
-async function atomicWrite(path: string, value: unknown): Promise<void> {
-  const temporary = `${path}.${crypto.randomUUID()}.tmp`;
-  await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-  await rename(temporary, path);
 }
 
 function escapeRegExp(value: string): string {

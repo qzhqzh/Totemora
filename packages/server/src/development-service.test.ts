@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -8,6 +8,7 @@ import { loadLocalConfig, validateLocalConfig } from "@totemora/core";
 
 import { DevelopmentCommitService } from "./development-service";
 import { SettlementStore } from "./settlement-store";
+import { StateDatabase } from "./state-database";
 
 test("chief delegates a policy-bound commit and approval creates verified experience", async () => {
   const root = await createRepository();
@@ -41,7 +42,7 @@ test("chief delegates a policy-bound commit and approval creates verified experi
   expect(completed.status).toBe("completed");
   expect(completed.commit_sha).toMatch(/^[0-9a-f]{40}$/);
   expect((await command(root, ["log", "-1", "--pretty=%s"])).trim()).toBe("feat(demo): add greeting");
-  expect(JSON.parse(await readFile(join(dataDir, "member-experience", "deepseek_git_steward.json"), "utf8"))).toMatchObject([
+  expect(StateDatabase.open(dataDir).listRecords("member_experience:deepseek_git_steward")).toMatchObject([
     { verified: true, skill: { id: "git-change-management", version: 3 }, self_check_outcome: "accepted", chief_acceptance: "accepted" },
   ]);
   const skillProposals = await service.listSkillProposals();
