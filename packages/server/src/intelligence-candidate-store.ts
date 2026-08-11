@@ -209,7 +209,11 @@ export class IntelligenceCandidateStore {
     `).run(now.toISOString(), now.toISOString()).changes;
   }
 
-  async recordFeedback(id: string, signal: CandidateFeedbackSignal, source: "web" | "bark_click"): Promise<{ candidate: IntelligenceCandidate; inserted: boolean }> {
+  async recordFeedback(
+    id: string,
+    signal: CandidateFeedbackSignal,
+    source: "web" | "bark_click" | "telegram",
+  ): Promise<{ candidate: IntelligenceCandidate; inserted: boolean }> {
     const candidate = await this.get(id);
     if (!candidate) throw new Error(`Intelligence candidate not found: ${id}`);
     const result = this.state.db.query(`

@@ -70,7 +70,7 @@ export function createTotemoraMcpServer(gateway: TotemoraGatewayClient): McpServ
 
   server.registerTool("totemora_list_intelligence_briefs", {
     title: "List tribe intelligence briefs",
-    description: "Inspect recent scheduled or manually requested briefs and Bark delivery evidence.",
+    description: "Inspect recent scheduled or manually requested briefs and configured notification-channel evidence.",
     annotations: readOnlyAnnotations("List intelligence briefs"),
   }, async () => toolCall(() => gateway.listIntelligenceBriefs()));
 
@@ -88,7 +88,7 @@ export function createTotemoraMcpServer(gateway: TotemoraGatewayClient): McpServ
 
   server.registerTool("totemora_run_intelligence_brief", {
     title: "Run the tribe intelligence watch",
-    description: "Queue a durable scan for Qwen-seeded intelligence member 听风. By default results enter the scored, deduplicated candidate pool and the resident dispatcher sends at most one per configured interval. Direct Bark push is an explicit compatibility mode.",
+    description: "Queue a durable scan for Qwen-seeded intelligence member 听风. By default results enter the scored, deduplicated candidate pool and the resident dispatcher fans out at most one candidate per configured interval to Bark and Telegram. Direct push is an explicit compatibility mode.",
     inputSchema: {
       message_count: z.number().int().min(1).max(5).default(1),
       idempotency_key: z.string().min(1).max(200).optional(),
@@ -99,7 +99,7 @@ export function createTotemoraMcpServer(gateway: TotemoraGatewayClient): McpServ
 
   server.registerTool("totemora_get_intelligence_task", {
     title: "Get an intelligence task",
-    description: "Poll a durable intelligence task until it completes with candidate-pool decisions or direct Bark evidence, or fails with a retryable reason.",
+    description: "Poll a durable intelligence task until it completes with candidate-pool decisions or direct notification evidence, or fails with a retryable reason.",
     inputSchema: { task_id: z.string().min(1) },
     annotations: readOnlyAnnotations("Get intelligence task"),
   }, async ({ task_id }) => toolCall(() => gateway.getIntelligenceTask(task_id)));

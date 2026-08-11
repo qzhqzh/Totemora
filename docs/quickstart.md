@@ -4,6 +4,8 @@ Totemora 提供 Web Playground 和 CLI，所有命令从仓库根目录执行。
 
 外部 AI 也可以通过 MCP 调用同一个常驻 Gateway。完整配置见 [mcp-gateway.md](mcp-gateway.md)。
 
+注意：当前通用 `totemora run` 是本地直连 Runtime 的兼容路径；Web、MCP 与专业服务共享常驻 Gateway。
+
 ## 启动 Web Playground
 
 安装依赖后运行：
@@ -23,19 +25,24 @@ http://127.0.0.1:4310
 
 页面使用流程：
 
-1. 在“部落成员”确认 DeepSeek 首领及 Qwen、MiMo 等成员状态。
-   “火种”区域展示可用基础模型及其 Provider、状态和已孵化人物；“人物图鉴”展示火种与人格、Skills、角色结合后的成员。
-2. 首次在“登记常用工作地”保存服务器上的项目目录；Run 只能读取已登记工作地或其子目录。
-3. 在“任务大厅”直接描述要做的事。默认创建新 Mission，也可以选择已有 Mission 继续此前目标。
-4. 按需展开高级设置，调整 Chief、验收标准和智能预算，点击“召集部落”。
-5. 在 Run 现场观察 planning、executing、reviewing 等阶段。
-6. 查看每个成员的选择理由、最终报告、验收结果、Token 汇总和完整 Trace。
+1. 先看“部落证据台”：它汇总常驻专业服务、Chief 到专员的委任、Skill/资产装配、成员经历和最近反馈。输入操作员 Token 后可继续查看受保护的任务与资产动作。
+2. 在“部落成员”“火种”和“人物图鉴”确认模型与人物状态；在“成员营帐”查看画像、经历、成长效果并与成员交谈。
+3. 首次在“登记常用工作地”保存服务器上的项目目录；通用 Run 只能读取已登记工作地或其子目录。
+4. 在“任务大厅”描述只读分析目标。默认创建新 Mission，也可以选择已有 Mission 继续此前目标；按需调整 Chief、验收标准和智能预算。
+5. 在 Run 现场观察 planning、executing、reviewing 等阶段，并查看派工理由、报告、验收、Token 和 Trace。
+6. 专业任务使用对应入口：已有代码改动走 Git Flow 门禁，情报走“听风台”，协作写作与配图走“创作工坊”；不要把这些副作用隐含在通用 Run 文本里。
 
-任务大厅会在提交前显示 Task Analyzer 判断的模式。当前可执行 `inspect` 和绑定工作地的 `continue`；`change`、`operate`、无工作地 `answer` 会明确显示尚未开放，不会伪装成只读任务执行。运行中的模型请求可以点击“取消 Run”中止。
+任务大厅会在提交前显示 Task Analyzer 判断的模式。通用 Run 当前执行 `inspect` 和绑定工作地的 `continue`；`change`、`operate` 和无工作地 `answer` 不会伪装成只读执行。受控变更、通知和内容生产由强类型专业服务承接。运行中的模型请求可以点击“取消 Run”中止。
 
 Provider、预算、派工等临时错误被标记为可重试时，Web 会显示“重试 Run”。重试会创建新的 Run 并继续归入原 Mission。Job 与重试规格已持久化，服务重启后仍可重试；被重启中断的 Job 会转换成可重试失败。
 
-Web 服务默认只监听本机 `127.0.0.1:4310`。它会产生真实模型调用，当前通用 Run 只读取已登记 Workspace，不修改文件或执行 Shell。不可变 Run 证据保存在 `.totemora/runs/`；Job、驻扎地、Workplace 和 Mission 的运行状态写入 `.totemora/totemora.db`。
+Web 服务默认只监听本机 `127.0.0.1:4310`。它会产生真实模型调用，通用 Run 只读取已登记 Workspace，不修改文件或执行 Shell。不可变 Run 证据保存在 `.totemora/runs/`；Job、驻扎地、Workplace、Mission、专业任务、候选、反馈、成员经历和治理 Proposal 的活动状态写入 `.totemora/totemora.db`。
+
+## 委任部落学习能力
+
+Totemora 的目标交互不是上传 Skill 文件。用户应通过部落对话描述能力、提供参考链接或指出成员需要改进的地方，由 Chief 澄清后创建能力委任，再组织起草、校验、试用和装备。
+
+通用 `SkillCommission` 对话入口仍是下一实现节点；当前可在成员营帐讨论能力，并通过 Git Flow 的真实任务产生和批准 `git-change-management` 改进提案。不要把尚未落地的自然语言讨论理解成已经激活或授予权限。完整边界见 [Skill 对话治理](skill-governance.md)。
 
 可通过环境变量覆盖启动参数：
 
@@ -58,6 +65,7 @@ bun run dev:web
 | Xiaomi MiMo | `~/.claude/settings.json` |
 | DeepSeek | `~/.claude/settings.ds.json` |
 | Qwen | `~/.claude/settings.qwen.json` |
+| CPA 图片模型 | `~/star/infra/cpa/config.yaml` 中的本地 CPA 上游配置 |
 
 `.env` 已被 Git 忽略。不要把真实密钥写入 `configs/`、源码或提交记录。
 

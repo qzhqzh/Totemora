@@ -15,3 +15,8 @@ providers:
   xiaomi:
     type: anthropic_compatible
     settings_file: ~/.claude/settings.json
+
+  cpa:
+    type: openai_compatible
+    base_url: http://127.0.0.1:31000/v1
+    settings_file: ~/star/infra/cpa/config.yaml

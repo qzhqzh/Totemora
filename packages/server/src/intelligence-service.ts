@@ -4,13 +4,19 @@ import { resolve } from "node:path";
 
 import type { AgentConfig, LocalConfigSet, ProviderRegistry } from "@totemora/core";
 
-import { ActionJournal } from "./action-journal";
+import { ActionJournal, UncertainExternalEffectError } from "./action-journal";
 import { BarkDeliveryError, BarkNotificationService } from "./bark-notification-service";
 import { IntelligenceCandidateStore, type CandidateEvaluation, type CandidateFeedbackSignal, type IntelligenceCandidate } from "./intelligence-candidate-store";
 import { IntelligencePreferenceStore } from "./intelligence-preference-store";
 import { MemberStateStore } from "./member-state-store";
 import { StateDatabase } from "./state-database";
 import { SpecialistTaskRepository } from "./specialist-service";
+import {
+  parseTelegramFeedback,
+  TelegramBotService,
+  TelegramDeliveryError,
+  type TelegramUpdate,
+} from "./telegram-bot-service";
 import { ToolAssetRegistry } from "./tool-asset-registry";
 
 interface NewsItem {
@@ -67,6 +73,7 @@ export class IntelligenceService {
   private readonly preferences: IntelligencePreferenceStore;
   private readonly candidates: IntelligenceCandidateStore;
   private readonly bark: BarkNotificationService;
+  private readonly telegram: TelegramBotService;
   private readonly state: StateDatabase;
   private readonly specialistTasks: SpecialistTaskRepository;
 
@@ -83,6 +90,7 @@ export class IntelligenceService {
     this.preferences = new IntelligencePreferenceStore(dataDir);
     this.candidates = new IntelligenceCandidateStore(dataDir);
     this.bark = new BarkNotificationService(dataDir, fetchImpl);
+    this.telegram = new TelegramBotService(dataDir, fetchImpl);
     this.state = StateDatabase.open(dataDir);
     this.specialistTasks = new SpecialistTaskRepository(dataDir);
     this.importLegacyBriefs();
@@ -95,6 +103,10 @@ export class IntelligenceService {
     await this.assetRegistry.assertCanUse(member, "news-intelligence", "collect");
     await this.assetRegistry.assertCanUse(member, "news-intelligence", "summarize");
     if (await this.bark.configured()) await this.assetRegistry.assertCanUse(member, "news-intelligence", "push_bark");
+    if (await this.telegram.configured()) {
+      await this.assetRegistry.assertCanUse(member, "news-intelligence", "push_telegram");
+      await this.assetRegistry.assertCanUse(member, "telegram-bot", "push_notification");
+    }
     const brief: IntelligenceBrief = {
       id: crypto.randomUUID(), member_id: member.id, title: "部落情报",
       summary: "", items: [], sources: [], warnings: [], pushed_messages: 0,
@@ -171,15 +183,11 @@ export class IntelligenceService {
         });
         brief.candidate_ids = accepted.map((item) => item.id);
         brief.queued_messages = accepted.filter((item) => item.status === "queued").length;
-      } else if (await this.bark.configured()) {
+      } else if (await this.notificationConfigured()) {
         const messages = buildMessages(brief, messageCount);
         for (let index = 0; index < messages.length; index += 1) {
           const message = messages[index]!;
-          await this.journal.executeOnce({
-            idempotency_key: `${input.idempotency_key ?? brief.id}:bark:${index}`,
-            asset_id: "news-intelligence", member_id: member.id, action: "push_bark",
-            request: { title: message.title, body: message.body, item_url: message.url },
-          }, () => this.bark.push(message), (result) => `Bark accepted request with status ${result.status}`);
+          await this.pushDirectMessage(input.idempotency_key ?? brief.id, index, member.id, message);
           brief.pushed_messages += 1;
         }
       }
@@ -253,7 +261,93 @@ export class IntelligenceService {
     return this.bark.status(checkHealth);
   }
 
-  async recordFeedback(candidateId: string, signal: Exclude<CandidateFeedbackSignal, "opened">, source: "web" = "web") {
+  async telegramStatus(checkHealth = false) {
+    return this.telegram.status(checkHealth);
+  }
+
+  async verifyTelegramWebhook(secret: string | null): Promise<void> {
+    return this.telegram.verifyWebhookSecret(secret);
+  }
+
+  async handleTelegramUpdate(update: TelegramUpdate) {
+    const chatId = update.callback_query?.message?.chat.id ?? update.message?.chat.id;
+    if (chatId === undefined || !(await this.telegram.isAllowedChat(chatId))) {
+      return { accepted: true, ignored: "chat_not_allowlisted" };
+    }
+    const messageText = update.message?.text?.trim() ?? "";
+    if (!update.callback_query && !messageText.startsWith("/")) {
+      return { accepted: true, ignored: "non_command_message" };
+    }
+    const command = messageText.startsWith("/")
+      ? messageText.split(/\s+/, 1)[0]!.split("@")[0]!.toLowerCase()
+      : "";
+    const chief = this.config.tribe.tribe.chief ?? "deepseek_reasoner";
+    try {
+      const result = await this.journal.executeEffectOnce({
+      idempotency_key: `telegram:update:${update.update_id}`,
+      asset_id: "telegram-bot",
+      member_id: chief,
+      action: "handle_group_update",
+      request: {
+        update_id: update.update_id,
+        chat_id: String(chatId),
+        callback_data: update.callback_query?.data,
+        command,
+      },
+    }, async () => {
+      const callback = update.callback_query;
+      if (callback) {
+        const feedback = parseTelegramFeedback(callback.data);
+        if (!feedback) {
+          await this.telegram.answerCallback(callback.id, "这个按钮已经失效");
+          return "ignored unsupported callback";
+        }
+        const recorded = await this.recordFeedback(feedback.candidateId, feedback.signal, "telegram");
+        await this.telegram.answerCallback(callback.id, recorded.inserted ? "反馈已交给听风" : "这条反馈已经记录");
+        return `recorded ${feedback.signal} feedback for candidate ${feedback.candidateId}`;
+      }
+      let reply: string;
+      if (["/start", "/help"].includes(command)) {
+        reply = [
+          "Totemora 部落已驻扎。",
+          "/tribe — 查看当前在线成员",
+          "/news — 查看最近 3 条情报候选",
+          "情报消息下方按钮可反馈价值、重复或时效。",
+          "涉及执行和修改的任务仍通过 MCP / Web 进入 Chief 门禁。",
+        ].join("\n");
+      } else if (command === "/tribe") {
+        const active = this.config.agents.agents.filter((member) => !["inactive", "retired"].includes(member.status ?? "active"));
+        reply = [
+          `部落在线 ${active.length} 名成员；Chief：${chief}`,
+          ...active.map((member) => `• ${member.name ?? member.id}（${member.id}）· ${member.status ?? "active"}`),
+        ].join("\n");
+      } else if (command === "/news") {
+        const candidates = (await this.candidates.list(20))
+          .filter((candidate) => ["queued", "pushed", "retry_wait", "channel_blocked"].includes(candidate.status))
+          .slice(0, 3);
+        reply = candidates.length
+          ? ["最近情报候选：", ...candidates.map((candidate) => `• [${candidate.status}] ${candidate.headline}\n  ${candidate.url}`)].join("\n")
+          : "当前没有可展示的情报候选。";
+      } else {
+        reply = "未知命令。发送 /help 查看可用交互。";
+      }
+      const sent = await this.telegram.sendText(chatId, reply);
+      return `sent Telegram group reply ${sent.message_id}`;
+      });
+      return { accepted: true, replayed: result.replayed };
+    } catch (error) {
+      if (error instanceof UncertainExternalEffectError) {
+        return { accepted: true, replayed: false, uncertain: true };
+      }
+      throw error;
+    }
+  }
+
+  async recordFeedback(
+    candidateId: string,
+    signal: Exclude<CandidateFeedbackSignal, "opened">,
+    source: "web" | "telegram" = "web",
+  ) {
     const result = await this.candidates.recordFeedback(candidateId, signal, source);
     if (result.inserted) {
       await this.memberState.remember({
@@ -422,32 +516,49 @@ export class IntelligenceService {
   }
 
   private async pushNextCandidate(minimumIntervalMs: number): Promise<IntelligenceCandidate | undefined> {
-    if (!(await this.bark.configured())) return undefined;
+    if (!(await this.notificationConfigured())) return undefined;
     await this.candidates.releaseBlocked();
     const candidate = await this.candidates.claimNext(minimumIntervalMs);
     if (!candidate) return undefined;
     try {
-      const callbackUrl = this.callbackUrl(candidate);
-      await this.journal.executeOnce({
-        idempotency_key: `candidate:${candidate.id}:attempt:${candidate.attempt_count}`, asset_id: "news-intelligence",
-        member_id: candidate.member_id, action: "push_bark",
-        request: { title: candidate.headline, body: candidate.brief, item_url: candidate.url },
-      }, () => this.bark.push({
-        title: candidate.headline, body: candidate.brief, url: callbackUrl, id: candidate.id,
-      }), (result) => `Bark accepted request with status ${result.status}`);
+      if (await this.bark.configured()) {
+        await this.journal.executeEffectOnce({
+          idempotency_key: `candidate:${candidate.id}:bark`, asset_id: "internal-bark",
+          member_id: candidate.member_id, action: "push_notification",
+          request: { candidate_id: candidate.id, title: candidate.headline, item_url: candidate.url },
+        }, async () => {
+          const result = await this.bark.push({
+            title: candidate.headline, body: candidate.brief,
+            url: this.callbackUrl(candidate), id: candidate.id,
+          });
+          return `Bark accepted request with status ${result.status}`;
+        });
+      }
+      for (const chatId of await this.telegram.chatIds()) {
+        await this.journal.executeEffectOnce({
+          idempotency_key: `candidate:${candidate.id}:telegram:${chatId}`, asset_id: "telegram-bot",
+          member_id: candidate.member_id, action: "push_notification",
+          request: { candidate_id: candidate.id, chat_id: chatId, item_url: candidate.url },
+        }, async () => {
+          const result = await this.telegram.pushCandidate(chatId, {
+            id: candidate.id, title: candidate.headline, body: candidate.brief, url: candidate.url,
+          });
+          return `Telegram chat ${chatId} accepted message ${result.message_id}`;
+        });
+      }
       await this.candidates.complete(candidate.id, candidate.claim_token);
       const task = this.specialistTasks.findByResultRef("intelligence.watch", candidate.scan_id);
       if (task) this.specialistTasks.appendEvent(task.id, {
         type: "external_receipt", stage: "dispatch", actor_id: candidate.member_id,
-        summary: `内部 Bark 已接受候选 ${candidate.id}；这不等同于用户已打开`,
+        summary: `已配置通知通道均接受候选 ${candidate.id}；这不等同于用户已阅读`,
       });
       return { ...candidate, status: "pushed", pushed_at: new Date().toISOString() };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const barkError = error instanceof BarkDeliveryError ? error : undefined;
+      const deliveryError = error instanceof BarkDeliveryError || error instanceof TelegramDeliveryError ? error : undefined;
       const delays = [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000];
-      if (barkError?.retryable && candidate.attempt_count < delays.length) {
-        const status = await this.bark.status();
+      if (deliveryError?.retryable && candidate.attempt_count < delays.length) {
+        const status = error instanceof TelegramDeliveryError ? await this.telegram.status() : await this.bark.status();
         const retryAt = status.channel_status === "open" && status.retry_after
           ? new Date(status.retry_after)
           : new Date(Date.now() + delays[Math.max(0, candidate.attempt_count - 1)]!);
@@ -458,6 +569,41 @@ export class IntelligenceService {
       }
       await this.memberState.remember({ member_id: candidate.member_id, kind: "system_failure", summary: `候选消息推送失败：${message.slice(0, 300)}`, verified: true, source_id: candidate.id });
       throw error;
+    }
+  }
+
+  private async notificationConfigured(): Promise<boolean> {
+    return (await this.bark.configured()) || (await this.telegram.configured());
+  }
+
+  private async pushDirectMessage(
+    workflowId: string,
+    index: number,
+    memberId: string,
+    message: { title: string; body: string; url?: string },
+  ): Promise<void> {
+    if (await this.bark.configured()) {
+      await this.journal.executeEffectOnce({
+        idempotency_key: `${workflowId}:bark:${index}`, asset_id: "internal-bark",
+        member_id: memberId, action: "push_notification",
+        request: { index, title: message.title, item_url: message.url },
+      }, async () => {
+        const result = await this.bark.push(message);
+        return `Bark accepted request with status ${result.status}`;
+      });
+    }
+    for (const chatId of await this.telegram.chatIds()) {
+      await this.journal.executeEffectOnce({
+        idempotency_key: `${workflowId}:telegram:${index}:${chatId}`, asset_id: "telegram-bot",
+        member_id: memberId, action: "push_notification",
+        request: { index, chat_id: chatId, title: message.title, item_url: message.url },
+      }, async () => {
+        const result = await this.telegram.sendText(
+          chatId,
+          [message.title, "", message.body, message.url ? `\n${message.url}` : ""].join("\n").trim(),
+        );
+        return `Telegram chat ${chatId} accepted message ${result.message_id}`;
+      });
     }
   }
 

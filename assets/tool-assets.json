@@ -40,10 +40,10 @@
       "name": "News Intelligence Watch",
       "kind": "tool_service",
       "maturity": "experimental",
-      "version": 2,
-      "summary": "从 HTTPS 白名单信息源收集热点，经情报员评估和确定性去重进入候选池，再由常驻派发器节流推送到 Bark。",
+      "version": 3,
+      "summary": "从 HTTPS 白名单信息源收集热点，经情报员评估和确定性去重进入候选池，再由常驻派发器节流推送到 Bark 与 Telegram。",
       "executor": "builtin:IntelligenceService",
-      "actions": ["collect", "summarize", "push_bark"],
+      "actions": ["collect", "summarize", "push_bark", "push_telegram"],
       "risk": "medium",
       "default_access": "deny",
       "policy_requirements": ["https_source_allowlist", "operator_gate", "secret_isolation", "action_journal"],
@@ -70,6 +70,23 @@
       }
     },
     {
+      "id": "telegram-bot",
+      "name": "Telegram Tribe Bot",
+      "kind": "infrastructure",
+      "maturity": "experimental",
+      "version": 1,
+      "summary": "面向白名单群的部落通信通道，支持情报通知、按钮反馈和只读群命令。",
+      "executor": "builtin:TelegramBotService",
+      "actions": ["health_check", "push_notification", "handle_group_update", "record_feedback"],
+      "risk": "medium",
+      "default_access": "deny",
+      "policy_requirements": ["secret_isolation", "chat_allowlist", "webhook_secret", "action_journal", "bounded_commands"],
+      "blueprint": {
+        "source": "https://core.telegram.org/bots/api",
+        "notes": "保持群隐私模式；只处理命令和 Bot 自己发出的按钮回调，不将普通群消息送入模型。"
+      }
+    },
+    {
       "id": "aihot-public-feed",
       "name": "AI HOT Public Feed",
       "kind": "tool_adapter",
@@ -84,6 +101,40 @@
       "blueprint": {
         "source": "https://aihot.virxact.com/agent",
         "notes": "每次巡查先读 fingerprint；变化后才拉 selected items。AI 生成摘要只用于发现和排序，数字、政策、引语与安全事件应回原文复核。"
+      }
+    },
+    {
+      "id": "content-studio",
+      "name": "Tribe Content Studio",
+      "kind": "tool_service",
+      "maturity": "experimental",
+      "version": 1,
+      "summary": "把情报候选转化为可追溯的双人协作内容，提供选题研究、渠道写作、独立审校、不定时调度和复制采纳回执。",
+      "executor": "builtin:ContentStudioService",
+      "actions": ["research", "write", "review", "schedule", "record_adoption"],
+      "risk": "medium",
+      "default_access": "deny",
+      "policy_requirements": ["minimum_two_members", "source_attribution", "independent_review", "operator_gate", "external_publish_gate"],
+      "blueprint": {
+        "source": "docs/adr/0014-collaborative-content-studio.md",
+        "notes": "当前只生成并复制；未来发布适配器必须使用用户上下文授权、显式审批、幂等键和平台回执。"
+      }
+    },
+    {
+      "id": "cpa-image-generation",
+      "name": "CPA Article Illustration Forge",
+      "kind": "tool_adapter",
+      "maturity": "experimental",
+      "version": 1,
+      "summary": "通过本地 CPA 的 Gemini 图片模型生成文章语义配图，执行角色锚定、视觉验收、一次纠错和本地证据留存。",
+      "executor": "builtin:CpaIllustrationService",
+      "actions": ["brief", "generate_image", "review_image", "retry_once", "persist_artifact"],
+      "risk": "medium",
+      "default_access": "deny",
+      "policy_requirements": ["member_assignment", "local_secret_source", "bounded_retry", "image_validation", "human_publish_gate"],
+      "blueprint": {
+        "source": "docs/adr/0015-cpa-article-illustration.md",
+        "notes": "CPA 的 gemini-3.1-flash-image 通过 chat/completions 的 message.images 返回图片；标准 images/generations 端点不适用于该模型。"
       }
     },
     {

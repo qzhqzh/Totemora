@@ -50,6 +50,18 @@ const intelligenceTimer = setInterval(() => {
 }, 60_000);
 intelligenceTimer.unref();
 
+let scheduledContentRunning = false;
+const contentTimer = setInterval(() => {
+  if (scheduledContentRunning) return;
+  scheduledContentRunning = true;
+  void app.runScheduledContent().catch((error) => {
+    console.error(`Scheduled content failed: ${error instanceof Error ? error.message : String(error)}`);
+  }).finally(() => {
+    scheduledContentRunning = false;
+  });
+}, 60_000);
+contentTimer.unref();
+
 console.log(`Totemora Web Playground: http://${server.hostname}:${server.port}`);
 console.log(`Config: ${process.env.TOTEMORA_CONFIG_DIR ?? "configs/example"}`);
 console.log(`Operator token: ${process.env.TOTEMORA_OPERATOR_TOKEN ? "environment" : `${resolve(dataDir, "operator-token")} (0600)`}`);

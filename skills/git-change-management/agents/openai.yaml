@@ -1,0 +1,4 @@
+interface:
+  display_name: "Git Flow Steward"
+  short_description: "安全推进 Commit、Pull Request 与 Merge 全流程"
+  default_prompt: "Use $git-change-management to review and safely advance the current repository changes through the requested Git flow."

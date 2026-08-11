@@ -14,7 +14,12 @@ export interface BarkStatus {
 }
 
 export class BarkDeliveryError extends Error {
-  constructor(message: string, readonly retryable: boolean, readonly status?: number) {
+  constructor(
+    message: string,
+    readonly retryable: boolean,
+    readonly status?: number,
+    readonly outcomeUncertain = false,
+  ) {
     super(message);
   }
 }
@@ -105,10 +110,11 @@ export class BarkNotificationService {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.failure(message);
-      throw new BarkDeliveryError(`Bark request failed: ${message}`, true);
+      throw new BarkDeliveryError(`Bark request failed: ${message}`, true, undefined, true);
     }
-    const body = (await response.text()).slice(0, 2_000);
     if (!response.ok) {
+      let body = "unreadable response body";
+      try { body = (await response.text()).slice(0, 2_000); } catch {}
       const retryable = response.status === 408 || response.status === 429 || response.status >= 500;
       this.failure(`HTTP ${response.status}: ${body}`);
       throw new BarkDeliveryError(`Bark push failed (${response.status}): ${body}`, retryable, response.status);

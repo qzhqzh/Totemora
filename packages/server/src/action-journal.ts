@@ -10,7 +10,7 @@ export interface ActionRecord {
   member_id: string;
   action: string;
   request_hash: string;
-  status: "executing" | "completed" | "failed";
+  status: "executing" | "completed" | "failed" | "uncertain";
   attempts: number;
   started_at: string;
   updated_at: string;
@@ -23,6 +23,12 @@ interface ActionRow extends Omit<ActionRecord, "evidence" | "error"> {
   error: string | null;
   lease_token: string | null;
   lease_expires_at: string | null;
+}
+
+export class UncertainExternalEffectError extends Error {
+  constructor(readonly record: ActionRecord) {
+    super(`External effect outcome is uncertain for idempotency key ${record.idempotency_key}; automatic replay is blocked`);
+  }
 }
 
 export class ActionJournal {
@@ -41,13 +47,42 @@ export class ActionJournal {
     request: unknown;
   }, operation: () => Promise<T>, evidence: (result: T) => string): Promise<{ result: T; record: ActionRecord; replayed: boolean }> {
     const requestHash = createHash("sha256").update(JSON.stringify(input.request)).digest("hex");
-    const { record, leaseToken } = this.reserve(input, requestHash);
+    const reservation = this.reserve(input, requestHash, false);
+    if (reservation.replayed) throw new Error("Unexpected replay for strict action");
+    const { record, leaseToken } = reservation;
     try {
       const result = await operation();
       const completed = this.finalize(record.id, leaseToken, "completed", evidence(result).slice(0, 4_000));
       return { result, record: completed, replayed: false };
     } catch (error) {
       this.finalize(record.id, leaseToken, "failed", error instanceof Error ? error.message : String(error));
+      throw error;
+    }
+  }
+
+  async executeEffectOnce(input: {
+    idempotency_key: string;
+    asset_id: string;
+    member_id: string;
+    action: string;
+    request: unknown;
+  }, operation: () => Promise<string>): Promise<{ record: ActionRecord; replayed: boolean }> {
+    const requestHash = createHash("sha256").update(JSON.stringify(input.request)).digest("hex");
+    const reservation = this.reserve(input, requestHash, true);
+    if (reservation.replayed) return { record: reservation.record, replayed: true };
+    try {
+      const evidence = await operation();
+      return {
+        record: this.finalize(reservation.record.id, reservation.leaseToken, "completed", evidence.slice(0, 4_000)),
+        replayed: false,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (hasUncertainOutcome(error)) {
+        const record = this.finalize(reservation.record.id, reservation.leaseToken, "uncertain", message);
+        throw new UncertainExternalEffectError(record);
+      }
+      this.finalize(reservation.record.id, reservation.leaseToken, "failed", message);
       throw error;
     }
   }
@@ -63,14 +98,31 @@ export class ActionJournal {
     member_id: string;
     action: string;
     request: unknown;
-  }, requestHash: string): { record: ActionRecord; leaseToken: string } {
-    return this.state.db.transaction(() => {
+  }, requestHash: string, allowReplay: boolean):
+    | { record: ActionRecord; leaseToken: string; replayed: false }
+    | { record: ActionRecord; replayed: true } {
+    const reservation = this.state.db.transaction(() => {
       const existing = this.state.db.query("SELECT * FROM action_journal WHERE idempotency_key=?")
         .get(input.idempotency_key) as ActionRow | null;
       const now = new Date();
-      if (existing?.status === "completed") throw new Error(`Action already completed for idempotency key ${input.idempotency_key}`);
+      if (existing?.status === "completed") {
+        if (existing.request_hash !== requestHash) throw new Error("Idempotency key was reused with a different request");
+        if (allowReplay) return { record: fromRow(existing), replayed: true } as const;
+        throw new Error(`Action already completed for idempotency key ${input.idempotency_key}`);
+      }
+      if (existing?.status === "uncertain") throw new UncertainExternalEffectError(fromRow(existing));
       if (existing?.status === "executing" && Date.parse(existing.lease_expires_at ?? existing.updated_at) > now.getTime()) {
         throw new Error(`Action is already executing for idempotency key ${input.idempotency_key}`);
+      }
+      if (allowReplay && existing?.status === "executing") {
+        const message = "The process stopped before the external receipt was durably finalized; automatic replay is blocked";
+        this.state.db.query(`
+          UPDATE action_journal
+          SET status='uncertain', lease_token=NULL, lease_expires_at=NULL, updated_at=?, error=?
+          WHERE id=? AND status='executing'
+        `).run(now.toISOString(), message, existing.id);
+        const uncertain = this.state.db.query("SELECT * FROM action_journal WHERE id=?").get(existing.id) as ActionRow;
+        return { uncertain: fromRow(uncertain) } as const;
       }
       if (existing && existing.request_hash !== requestHash) throw new Error("Idempotency key was reused with a different request");
       const leaseToken = crypto.randomUUID();
@@ -97,17 +149,19 @@ export class ActionJournal {
         record.request_hash, record.status, record.attempts, leaseToken, leaseExpiresAt,
         record.started_at, record.updated_at, record.evidence ?? null, null,
       );
-      return { record, leaseToken };
+      return { record, leaseToken, replayed: false } as const;
     })();
+    if ("uncertain" in reservation) throw new UncertainExternalEffectError(reservation.uncertain!);
+    return reservation;
   }
 
-  private finalize(id: string, leaseToken: string, status: "completed" | "failed", value: string): ActionRecord {
+  private finalize(id: string, leaseToken: string, status: "completed" | "failed" | "uncertain", value: string): ActionRecord {
     const now = new Date().toISOString();
     const result = this.state.db.query(`
       UPDATE action_journal
       SET status=?, evidence=?, error=?, lease_token=NULL, lease_expires_at=NULL, updated_at=?
       WHERE id=? AND lease_token=? AND status='executing'
-    `).run(status, status === "completed" ? value : null, status === "failed" ? value.slice(0, 4_000) : null, now, id, leaseToken);
+    `).run(status, status === "completed" ? value : null, status === "completed" ? null : value.slice(0, 4_000), now, id, leaseToken);
     if (result.changes !== 1) throw new Error(`Action lease was lost before completion: ${id}`);
     return fromRow(this.state.db.query("SELECT * FROM action_journal WHERE id=?").get(id) as ActionRow);
   }
@@ -133,6 +187,11 @@ export class ActionJournal {
       },
     );
   }
+}
+
+function hasUncertainOutcome(error: unknown): boolean {
+  return typeof error === "object" && error !== null
+    && "outcomeUncertain" in error && error.outcomeUncertain === true;
 }
 
 function fromRow(row: ActionRow): ActionRecord {

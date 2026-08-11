@@ -7,6 +7,7 @@ import { loadLocalConfig, type AgentProvider } from "@totemora/core";
 import { IntelligenceService } from "./intelligence-service";
 import { IntelligencePreferenceStore } from "./intelligence-preference-store";
 import { MemberStateStore } from "./member-state-store";
+import { StateDatabase } from "./state-database";
 
 test("intelligence member collects allowlisted RSS and journals three Bark pushes", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "totemora-intelligence-"));
@@ -116,6 +117,51 @@ test("a Bark delivery failure does not prevent the next scheduled scan", async (
   expect(result?.scan?.status).toBe("completed");
   expect(result?.push_error).toContain("Bark push failed (503)");
   expect((await state.getDossier("qwen_intelligence")).growth.system_failures).toBeGreaterThanOrEqual(1);
+  await rm(dataDir, { recursive: true, force: true });
+});
+
+test("a Telegram retry does not duplicate a Bark delivery that already succeeded", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-intelligence-multichannel-"));
+  await mkdir(join(dataDir, "secrets"), { recursive: true });
+  await writeFile(join(dataDir, "secrets", "bark-device-key"), "test-device\n");
+  await writeFile(join(dataDir, "secrets", "telegram-bot-token"), "123456:test_token\n");
+  await writeFile(join(dataDir, "secrets", "telegram-chat-ids"), "-100123\n");
+  const config = await loadLocalConfig({ configDir: resolve(import.meta.dir, "../../../configs/example") });
+  const provider: AgentProvider = { async generate() { return { content: JSON.stringify({
+    title: "多通道候选", summary: "一次候选。", items: [{
+      headline: "同一候选", brief: "只应推送一次 Bark。", url: "https://example.com/a",
+      event_key: "multi-channel-case", importance: 1, interest: 1, confidence: 1, novelty: 1,
+      push_worthy: true, rationale: "high value", is_update: false,
+    }],
+  }) }; } };
+  const rss = "<rss><channel><item><title>News A</title><link>https://example.com/a</link></item></channel></rss>";
+  let barkPushes = 0;
+  let telegramPushes = 0;
+  const fakeFetch = async (input: string | URL | Request) => {
+    const url = String(input);
+    if (url.includes("127.0.0.1:18080")) { barkPushes += 1; return Response.json({ code: 200 }); }
+    if (url.includes("api.telegram.org")) {
+      telegramPushes += 1;
+      return telegramPushes === 1
+        ? Response.json({ ok: false, error_code: 503, description: "temporary" }, { status: 503 })
+        : Response.json({ ok: true, result: { message_id: 9 } });
+    }
+    return new Response(rss);
+  };
+  const state = new MemberStateStore(dataDir, config);
+  const service = new IntelligenceService(
+    config, { get: () => provider }, state, dataDir,
+    resolve(import.meta.dir, "../../.."), fakeFetch as typeof fetch,
+  );
+  const brief = await service.run({ defer_push: true });
+  const push = (service as unknown as { pushNextCandidate(interval: number): Promise<unknown> }).pushNextCandidate.bind(service);
+  await expect(push(0)).rejects.toThrow("Telegram API sendMessage failed");
+  StateDatabase.open(dataDir).db.query(`
+    UPDATE intelligence_candidates SET next_attempt_at=? WHERE scan_id=?
+  `).run(new Date(0).toISOString(), brief.id);
+  await push(0);
+  expect(barkPushes).toBe(1);
+  expect(telegramPushes).toBe(2);
   await rm(dataDir, { recursive: true, force: true });
 });
 

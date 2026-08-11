@@ -1,8 +1,19 @@
+schema_version: 1
 id: git-change-management
 name: Git 变更提交管理
 version: 3
 status: active
 owner_member_id: deepseek_git_steward
+steward_member_id: deepseek_git_steward
+risk: repository_mutation
+activation_policy: explicit_for_external_side_effects
+source:
+  kind: user-guided-reference
+  reference: Hermes git-flow v2.0.0
+required_assets:
+  - git-flow-engine
+optional_assets:
+  - opencode-correction
 capabilities:
   - inspect-git-diff
   - inspect-git-flow-state
@@ -12,3 +23,7 @@ capabilities:
   - plan-validation
   - conventional-commit
   - secret-path-screening
+trigger_examples:
+  - 提交当前工作区的已有改动
+  - 为已有改动创建并评审 Pull Request
+  - 按门禁把已评审 PR 合并到目标分支
