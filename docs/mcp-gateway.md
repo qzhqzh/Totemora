@@ -13,9 +13,9 @@ MCP 对外发布的是一个持久的“部落 Git Flow 能力”。调用方 AI
 | `totemora_list_assets` | 查看部落资产、成熟度、成员授权、策略要求和运行证据 |
 | `totemora_list_members` / `totemora_get_member` | 查看成员谱系、正式性格、观察画像、任务统计、重大经历与成长提案 |
 | `totemora_chat_with_member` | 与指定成员持久交流，可请求导师指点 |
-| `totemora_list_intelligence_briefs` | 查看听风台历史情报与 Bark 证据 |
+| `totemora_list_intelligence_briefs` | 查看听风台历史情报与通知通道证据 |
 | `totemora_list_intelligence_candidates` | 查看候选消息评分、重复抑制理由和派发状态 |
-| `totemora_run_intelligence_brief` / `totemora_get_intelligence_task` | 创建并轮询持久扫描任务；默认进入候选池，显式 `direct_push` 才直接 Bark |
+| `totemora_run_intelligence_brief` / `totemora_get_intelligence_task` | 创建并轮询持久扫描任务；默认进入候选池，由常驻派发器送往已配置的 Bark / Telegram，显式 `direct_push` 走兼容直推 |
 | `totemora_list_actions` | 查看外部副作用的幂等动作日志 |
 | `totemora_start_git_flow` | 委托一个 `commit`、`pull_request` 或 `merge` 结果，立即返回 `task_id` |
 | `totemora_get_task` | 查询 Chief 路由和规划任务 |

@@ -1,6 +1,12 @@
-# Git Flow Steward v3
+---
+name: git-change-management
+description: Safely inspect existing repository changes and advance them through a governed Git flow, including scoped staging, Conventional Commits, validation, Issue and Pull Request preparation, PR review, and gated merge. Use when a Totemora Git specialist is asked to commit, publish, review, or merge changes in an existing working tree.
+---
 
-本 Skill 参考用户维护的 Hermes `git-flow` v2.0.0。它定义的是一个由 Chief 委派、由 Git
+# Git Flow Steward
+
+本包的基线版本在 `skill.yaml` 声明；实际活动版本由 Totemora 治理 Store 固定并写入运行证据。它参考用户维护的 Hermes
+`git-flow` v2.0.0，定义的是一个由 Chief 委派、由 Git
 流程专员持续负责的完整生命周期，不是一次孤立的 `git commit`。
 
 ## 目标

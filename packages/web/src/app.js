@@ -8,12 +8,21 @@ let activeJobId;
 let activeDevelopmentProposal;
 let memberDossiers = [];
 let activeMemberId;
+let contentWorks = [];
+const contentIllustrationUrls = new Map();
+let observatoryLoading = false;
 
 $("operator-token").value = sessionStorage.getItem("totemora_operator_token") || "";
 $("operator-token").addEventListener("change", () => {
   sessionStorage.setItem("totemora_operator_token", $("operator-token").value);
+  for (const url of contentIllustrationUrls.values()) URL.revokeObjectURL(url);
+  contentIllustrationUrls.clear();
   void loadDevelopmentHistory();
+  void loadObservatory();
+  void loadContentStudio();
 });
+
+$("refresh-observatory").addEventListener("click", () => void loadObservatory());
 
 async function loadTribe() {
   [tribe, status] = await Promise.all([api("/api/tribe"), api("/api/status")]);
@@ -25,12 +34,162 @@ async function loadTribe() {
       <small>${member.skills.map(escapeHtml).join(" · ") || "暂无 Skill"}</small>
     </article>`).join("");
   renderCodex();
-  await Promise.all([loadEmbers(), loadAssets(), loadMemberDossiers(), loadIntelligence(), loadIntelligencePreferences()]);
+  await Promise.all([loadEmbers(), loadAssets(), loadMemberDossiers(), loadIntelligence(), loadIntelligencePreferences(), loadContentStudio()]);
+  await loadObservatory();
   $("chief").innerHTML = tribe.members.filter((m) => m.roles.includes("chief") && !["inactive", "retired"].includes(m.status))
     .map((m) => `<option value="${escapeHtml(m.id)}" ${m.id === tribe.tribe.chief ? "selected" : ""}>${escapeHtml(m.name)} · ${escapeHtml(m.model)}</option>`).join("");
   await loadHistory();
   await loadSettlement();
   await loadDevelopmentHistory();
+}
+
+async function loadObservatory({ quiet = false } = {}) {
+  if (observatoryLoading) return;
+  observatoryLoading = true;
+  const refreshButton = $("refresh-observatory");
+  refreshButton.disabled = true;
+  if (!quiet) $("observatory-live").textContent = "正在汇总部落现场…";
+  try {
+    const [latestStatus, serviceData, dossierData, assetData, candidatePool] = await Promise.all([
+      api("/api/status"), api("/api/services"), api("/api/members/dossiers"),
+      api("/api/assets"), api("/api/intelligence/candidates"),
+    ]);
+    let serviceTasks = [];
+    let actions = [];
+    let protectedEvidenceError;
+    if ($("operator-token").value.trim()) {
+      try {
+        [{ tasks: serviceTasks }, { actions }] = await Promise.all([
+          operatorApi("/api/service-tasks?limit=200"), operatorApi("/api/actions"),
+        ]);
+      } catch (error) {
+        protectedEvidenceError = error.message;
+      }
+    }
+
+    renderObservatorySummary(latestStatus, serviceData, dossierData.members, assetData.assets, serviceTasks, protectedEvidenceError);
+    renderServiceObservatory(serviceData, serviceTasks, protectedEvidenceError);
+    renderEvidenceStream(serviceData.services, serviceTasks, actions, dossierData.members, protectedEvidenceError);
+    renderFeedbackEvidence(candidatePool.candidates);
+    $("observatory-live").classList.remove("error");
+    $("observatory-live").textContent = `现场更新于 ${formatObservatoryTime(new Date().toISOString())} · 30 秒自动刷新`;
+  } catch (error) {
+    $("observatory-live").classList.add("error");
+    $("observatory-live").textContent = `证据台读取失败：${error.message}`;
+    $("observatory-summary").innerHTML = '<p class="observatory-empty">其他功能仍可使用；请检查服务后刷新现场。</p>';
+  } finally {
+    observatoryLoading = false;
+    refreshButton.disabled = false;
+  }
+}
+
+function renderObservatorySummary(latestStatus, serviceData, dossiers, assets, serviceTasks, protectedEvidenceError) {
+  const activeStatuses = new Set(["queued", "routing", "running", "waiting_approval", "waiting_external"]);
+  const activeTasks = serviceTasks.filter((task) => activeStatuses.has(task.status)).length;
+  const provenAssets = assets.filter((asset) => asset.evidence?.length).length;
+  const observedGrowth = dossiers.filter((item) => item.portrait?.evolution?.active_effect).length;
+  const taskValue = !$("operator-token").value.trim() ? "待解锁" : protectedEvidenceError ? "读取失败" : String(activeTasks);
+  $("observatory-summary").innerHTML = `<dl class="observatory-ledger">
+    <div><dt>驻地</dt><dd>${latestStatus.settlement === "ready" ? "正常值守" : escapeHtml(latestStatus.settlement)}</dd></div>
+    <div><dt>可用成员</dt><dd>${latestStatus.active_members} 名</dd></div>
+    <div><dt>专业委任</dt><dd>${serviceData.services.length} 项</dd></div>
+    <div><dt>当前任务</dt><dd>${taskValue}</dd></div>
+    <div><dt>能力落地</dt><dd>${provenAssets} 项资产有实证 · ${observedGrowth} 名成员在观察成长效果</dd></div>
+  </dl>`;
+}
+
+function renderServiceObservatory(serviceData, tasks, protectedEvidenceError) {
+  const membersById = new Map(tribe.members.map((member) => [member.id, member]));
+  const activeStatuses = new Set(["queued", "routing", "running", "waiting_approval", "waiting_external"]);
+  const hasTaskEvidence = Boolean($("operator-token").value.trim()) && !protectedEvidenceError;
+  $("service-observatory").innerHTML = serviceData.services.map((service) => {
+    const binding = serviceData.bindings.find((item) => item.service_id === service.id);
+    const specialist = membersById.get(binding?.specialist_member_id);
+    const chief = membersById.get(binding?.chief_member_id);
+    const serviceTasks = tasks.filter((task) => task.service_id === service.id);
+    const latest = serviceTasks[0];
+    const active = serviceTasks.filter((task) => activeStatuses.has(task.status)).length;
+    const completed = serviceTasks.filter((task) => task.status === "completed").length;
+    const failed = serviceTasks.filter((task) => task.status === "failed").length;
+    const state = !hasTaskEvidence ? "unknown" : active ? "working" : latest?.status === "failed" ? "attention" : "waiting";
+    const stateLabel = !$("operator-token").value.trim()
+      ? "任务状态受保护"
+      : protectedEvidenceError
+        ? "任务状态不可用"
+        : active
+          ? `${active} 项执行中`
+          : latest?.status === "failed" ? "最近任务需关注" : "待命";
+    const taskEvidence = !$("operator-token").value.trim()
+      ? "输入操作员 Token 后显示任务统计"
+      : protectedEvidenceError
+        ? `任务证据读取失败：${escapeHtml(protectedEvidenceError)}`
+        : latest
+          ? `近 ${serviceTasks.length} 项：完成 ${completed} · 失败 ${failed} · 最近 ${escapeHtml(latest.current_stage)} / ${formatObservatoryTime(latest.updated_at)}`
+          : "尚未留下专业任务记录";
+    return `<article class="service-line">
+      <div class="service-line-head">
+        <div><h4>${escapeHtml(service.title)}</h4><p>${escapeHtml(service.summary)}</p></div>
+        <span class="service-state ${state}">${stateLabel}</span>
+      </div>
+      <dl class="service-binding">
+        <div><dt>派工</dt><dd>${escapeHtml(chief?.name || binding?.chief_member_id || "未绑定")} → ${escapeHtml(specialist?.name || binding?.specialist_member_id || "未绑定")}</dd></div>
+        <div><dt>能力</dt><dd>${(binding?.capability_evidence || service.required_capabilities).map(escapeHtml).join(" · ")}</dd></div>
+        <div><dt>资产</dt><dd>${(binding?.tool_grants || service.allowed_assets).map(escapeHtml).join(" · ")}</dd></div>
+      </dl>
+      <p class="service-stages"><b>服务图纸</b> ${service.stages.map(escapeHtml).join(" → ")}</p>
+      <small>${taskEvidence}</small>
+    </article>`;
+  }).join("");
+}
+
+function renderEvidenceStream(services, tasks, actions, dossiers, protectedEvidenceError) {
+  const serviceTitles = new Map(services.map((service) => [service.id, service.title]));
+  const items = [
+    ...dossiers.flatMap((dossier) => dossier.experiences.filter((item) => item.verified).slice(0, 2).map((item) => ({
+      at: item.at, kind: "成员经历", title: dossier.member.name || dossier.member.id,
+      detail: `${item.kind} · ${item.summary.slice(0, 110)}`,
+      tone: item.kind.includes("failure") ? "negative" : item.kind === "success" ? "positive" : "active",
+    }))),
+    ...tasks.slice(0, 12).map((task) => ({
+      at: task.updated_at, kind: "专业任务", title: serviceTitles.get(task.service_id) || task.service_id,
+      detail: `${task.member_id || task.chief_member_id || "Chief"} · ${task.status} · ${task.current_stage}`,
+      tone: observatoryTone(task.status),
+    })),
+    ...actions.slice(0, 12).map((action) => ({
+      at: action.updated_at, kind: "资产动作", title: `${action.asset_id} / ${action.action}`,
+      detail: `${action.member_id} · ${action.status}${action.evidence ? ` · ${action.evidence.slice(0, 90)}` : ""}`,
+      tone: observatoryTone(action.status),
+    })),
+  ].sort((left, right) => right.at.localeCompare(left.at)).slice(0, 8);
+  const unlockNote = !$("operator-token").value.trim()
+    ? '<p class="evidence-unlock">输入操作员 Token 后，任务阶段与资产动作也会加入这条证据流。</p>'
+    : protectedEvidenceError
+      ? `<p class="evidence-unlock error">受保护证据读取失败：${escapeHtml(protectedEvidenceError)}。请检查 Token 后刷新。</p>`
+      : "";
+  $("evidence-stream").innerHTML = items.map((item) => `<article class="evidence-item ${item.tone}">
+    <div><span>${escapeHtml(item.kind)}</span><time datetime="${escapeHtml(item.at)}">${formatObservatoryTime(item.at)}</time></div>
+    <h4>${escapeHtml(item.title)}</h4><p>${escapeHtml(item.detail)}</p>
+  </article>`).join("") + (items.length ? unlockNote : '<p class="observatory-empty">尚未留下可展示的部落证据。首次完成任务后，记录会出现在这里。</p>');
+}
+
+function renderFeedbackEvidence(candidates) {
+  const feedback = candidates.map((candidate) => candidate.feedback || {});
+  const positive = feedback.reduce((total, item) => total + (item.valuable || 0) + (item.opened || 0), 0);
+  const corrective = feedback.reduce((total, item) => total + (item.not_valuable || 0) + (item.duplicate || 0) + (item.too_late || 0), 0);
+  const unlabeled = feedback.filter((item) => !Object.values(item).some(Boolean)).length;
+  $("feedback-evidence").textContent = `最近 ${candidates.length} 条候选：${positive} 次明确正向 · ${corrective} 次纠偏 · ${unlabeled} 条未标注。未标注样本不参与负向学习。`;
+}
+
+function observatoryTone(value) {
+  if (["completed", "ready", "accepted"].includes(value)) return "positive";
+  if (["failed", "cancelled"].includes(value)) return "negative";
+  return "active";
+}
+
+function formatObservatoryTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "时间未知";
+  return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(date);
 }
 
 async function loadAssets() {
@@ -147,8 +306,8 @@ $("member-chat-form").addEventListener("submit", async (event) => {
 async function loadIntelligence() {
   const [{ briefs }, pool] = await Promise.all([api("/api/intelligence"), api("/api/intelligence/candidates")]);
   $("candidate-summary").textContent = `待推送 ${pool.counts.queued || 0} · 重试等待 ${pool.counts.retry_wait || 0} · 通道阻塞 ${pool.counts.channel_blocked || 0} · 已抑制 ${pool.counts.held || 0} · 已推送 ${pool.counts.pushed || 0} · 永久失败 ${pool.counts.failed || 0} · 状态未知 ${pool.counts.delivery_unknown || 0}`;
-  $("intelligence-candidates").innerHTML = pool.candidates.slice(0, 12).map((item) => `<article class="brief ${escapeHtml(item.status)}" data-candidate="${escapeHtml(item.id)}"><h3>${escapeHtml(item.headline)}</h3><p>${escapeHtml(item.brief)}</p><div class="chips">${escapeHtml(item.status)} · 总分 ${Math.round(item.scores.total * 100)}（模型 ${Math.round((item.scores.base_total ?? item.scores.total) * 100)} / 反馈 ${Math.round((item.scores.feedback_adjustment || 0) * 100)}） · 重要 ${Math.round(item.scores.importance * 100)} · 兴趣 ${Math.round(item.scores.interest * 100)} · 可信 ${Math.round(item.scores.confidence * 100)} · 新颖 ${Math.round(item.scores.novelty * 100)}</div><small>${escapeHtml(item.decision)} · ${escapeHtml(item.rationale)}</small><div class="candidate-feedback" role="group" aria-label="评价这条候选消息"><button type="button" data-feedback="valuable">有价值 ${item.feedback?.valuable || ""}</button><button type="button" data-feedback="not_valuable">没价值 ${item.feedback?.not_valuable || ""}</button><button type="button" data-feedback="duplicate">重复 ${item.feedback?.duplicate || ""}</button><button type="button" data-feedback="too_late">太晚 ${item.feedback?.too_late || ""}</button></div><small class="feedback-status" aria-live="polite">${item.feedback?.opened ? `Bark 已打开 ${item.feedback.opened} 次` : "反馈会校正后续相似消息，不改写本次模型原始分"}</small></article>`).join("") || "<p class=\"section-note\">候选池为空。可以立即扫描；如果来源或模型失败，失败原因会留在扫描记录中。</p>";
-  $("intelligence-history").innerHTML = briefs.slice(0, 8).map((brief) => `<article class="brief ${escapeHtml(brief.status)}"><h3>${escapeHtml(brief.title)}</h3><p>${escapeHtml(brief.summary || brief.error || "")}</p><div class="chips">${escapeHtml(brief.created_at)} · 来源 ${brief.sources.length} · Bark ${brief.pushed_messages}</div>${brief.items.map((item) => `<p><b>${escapeHtml(item.headline)}</b><br><small>${escapeHtml(item.brief)}</small></p>`).join("")}</article>`).join("") || "<p class=\"section-note\">听风尚未带回情报。</p>";
+  $("intelligence-candidates").innerHTML = pool.candidates.slice(0, 12).map((item) => `<article class="brief ${escapeHtml(item.status)}" data-candidate="${escapeHtml(item.id)}"><h3>${escapeHtml(item.headline)}</h3><p>${escapeHtml(item.brief)}</p><div class="chips">${escapeHtml(item.status)} · 总分 ${Math.round(item.scores.total * 100)}（模型 ${Math.round((item.scores.base_total ?? item.scores.total) * 100)} / 反馈 ${Math.round((item.scores.feedback_adjustment || 0) * 100)}） · 重要 ${Math.round(item.scores.importance * 100)} · 兴趣 ${Math.round(item.scores.interest * 100)} · 可信 ${Math.round(item.scores.confidence * 100)} · 新颖 ${Math.round(item.scores.novelty * 100)}</div><small>${escapeHtml(item.decision)} · ${escapeHtml(item.rationale)}</small><div class="candidate-feedback" role="group" aria-label="评价这条候选消息"><button type="button" data-feedback="valuable">有价值 ${item.feedback?.valuable || ""}</button><button type="button" data-feedback="not_valuable">没价值 ${item.feedback?.not_valuable || ""}</button><button type="button" data-feedback="duplicate">重复 ${item.feedback?.duplicate || ""}</button><button type="button" data-feedback="too_late">太晚 ${item.feedback?.too_late || ""}</button></div><small class="feedback-status" aria-live="polite">${item.feedback?.opened ? `Bark 已打开 ${item.feedback.opened} 次；这是高置信正向证据` : "未反馈不会扣分；主动反馈才会校正后续相似消息"}</small></article>`).join("") || "<p class=\"section-note\">候选池为空。可以立即扫描；如果来源或模型失败，失败原因会留在扫描记录中。</p>";
+  $("intelligence-history").innerHTML = briefs.slice(0, 8).map((brief) => `<article class="brief ${escapeHtml(brief.status)}"><h3>${escapeHtml(brief.title)}</h3><p>${escapeHtml(brief.summary || brief.error || "")}</p><div class="chips">${escapeHtml(brief.created_at)} · 来源 ${brief.sources.length} · 通知 ${brief.pushed_messages}</div>${brief.items.map((item) => `<p><b>${escapeHtml(item.headline)}</b><br><small>${escapeHtml(item.brief)}</small></p>`).join("")}</article>`).join("") || "<p class=\"section-note\">听风尚未带回情报。</p>";
   if ($("operator-token").value) {
     try {
       const bark = await operatorApi("/api/intelligence/bark?health=1");
@@ -243,6 +402,187 @@ $("run-intelligence").addEventListener("click", async () => {
   } catch (error) { $("intelligence-status").textContent = error.message; $("intelligence-status").classList.add("error"); }
   finally { button.disabled = false; }
 });
+
+async function loadContentStudio() {
+  const [preferences, pool] = await Promise.all([
+    api("/api/content/preferences"), api("/api/intelligence/candidates"),
+  ]);
+  $("content-schedule-enabled").checked = preferences.enabled;
+  $("content-min-hours").value = preferences.min_interval_hours;
+  $("content-max-hours").value = preferences.max_interval_hours;
+  $("content-schedule-x").checked = preferences.formats.includes("x_hot_post");
+  $("content-schedule-long").checked = preferences.formats.includes("longform_tutorial");
+  $("content-schedule-status").textContent = preferences.enabled
+    ? `下一次窗口：${preferences.next_run_at ? new Date(preferences.next_run_at).toLocaleString() : "等待排期"}`
+    : "自动创作已暂停；手动创作仍可使用";
+  $("content-candidate").innerHTML = '<option value="">自动选择高可信候选</option>' + pool.candidates
+    .filter((item) => item.scores.confidence >= 0.6)
+    .slice(0, 30)
+    .map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.headline)} · ${Math.round(item.scores.total * 100)}分</option>`).join("");
+  if (!$("operator-token").value.trim()) {
+    contentWorks = [];
+    $("content-summary").textContent = "输入操作员 Token 后查看未发布作品与配图";
+    $("content-works").innerHTML = '<div class="content-empty"><b>创作证据已保护</b><p>作品正文、提示词、失败原因和配图只对操作员开放。</p></div>';
+    return;
+  }
+  contentWorks = (await operatorApi("/api/content/works")).works;
+  renderContentWorks();
+}
+
+function renderContentWorks() {
+  const format = $("content-filter-format").value;
+  const status = $("content-filter-status").value;
+  const active = ["queued", "researching", "drafting", "reviewing"];
+  const filtered = contentWorks.filter((work) => (format === "all" || work.format === format)
+    && (status === "all" || work.status === status || (status === "active" && active.includes(work.status))));
+  const ready = contentWorks.filter((work) => work.status === "ready").length;
+  const illustrated = contentWorks.filter((work) => work.illustration?.status === "ready").length;
+  $("content-summary").textContent = `${contentWorks.length} 份作品 · ${ready} 份可复制 · ${illustrated} 份已有配图`;
+  $("content-works").innerHTML = filtered.map((work) => {
+    const formatLabel = work.format === "x_hot_post" ? "X 热点短帖" : "教程 / 经验长文";
+    const statusLabel = ({ queued: "等待召集", researching: "选题研究", drafting: "撰写中", reviewing: "协作审校", ready: "可复制", failed: "未通过" })[work.status] || work.status;
+    const members = work.assignments.map((item) => {
+      const member = tribe?.members.find((entry) => entry.id === item.member_id);
+      const role = item.role === "writer" ? "执笔" : item.role === "illustrator" ? "视觉策划 / 配图" : "研究 / 审校";
+      return `<span><b>${escapeHtml(member?.name || item.member_id)}</b> · ${role}</span>`;
+    }).join("");
+    const contributions = work.contributions.map((item) => `<li><b>${escapeHtml(item.member_name)}</b> · ${escapeHtml(item.summary)}</li>`).join("");
+    const illustration = work.illustration;
+    const illustrationLabel = ({ pending: "等待绘影", briefing: "视觉简报中", generating: "配图生成中", reviewing: "视觉验收中", ready: "配图已就绪", failed: "配图未通过" })[illustration?.status] || "未启用配图";
+    const illustrationBlock = illustration ? `<section class="content-illustration ${escapeHtml(illustration.status)}">
+      <header><b>${escapeHtml(illustrationLabel)}</b><small>${illustration.image_model ? `${escapeHtml(illustration.image_model)} · ${illustration.attempt_count} 次尝试` : "绘影正在把文章语义翻译成画面"}</small></header>
+      ${illustration.status === "ready" ? `<img data-content-illustration="${escapeHtml(work.id)}" alt="${escapeHtml(illustration.brief?.alt_text || `《${work.title || work.topic}》文章配图`)}" loading="lazy"><div class="illustration-evidence"><span>${illustration.width} × ${illustration.height}</span><span>语义 ${Math.round((illustration.review?.semantic_score || 0) * 100)}%</span><span>风格 ${Math.round((illustration.review?.style_score || 0) * 100)}%</span><span>线稿 ${Math.round((illustration.review?.line_quality_score || 0) * 100)}%</span></div>` : `<p>${escapeHtml(illustration.error || illustration.brief?.alt_text || "绘影正在工作，正文不会因图片失败而丢失")}</p>`}
+      ${illustration.status === "failed" ? '<button type="button" class="secondary" data-retry-illustration>重新召集绘影</button>' : ""}
+    </section>` : "";
+    return `<article class="content-work ${escapeHtml(work.status)}" data-content-work="${escapeHtml(work.id)}">
+      <header class="content-work-head"><div><span class="content-kind">${formatLabel}</span><h4>${escapeHtml(work.title || work.topic)}</h4></div><span class="content-state">${escapeHtml(statusLabel)}</span></header>
+      <div class="content-lineage">${members}</div>
+      ${work.body ? `<details class="content-draft"><summary>查看正文 · ${[...work.body].length} 字</summary><pre class="content-body">${escapeHtml(work.body)}</pre></details>` : `<div class="content-progress"><i></i><span>${escapeHtml(work.error || "成员正在工作，页面会自动刷新进度")}</span></div>`}
+      ${illustrationBlock}
+      <div class="content-source"><span>来源</span>${work.source.url ? `<a href="${escapeHtml(work.source.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(work.source.headline)}</a>` : `<b>${escapeHtml(work.source.headline)} · 用户选题</b>`}</div>
+      <details><summary>协作证据 · ${work.contributions.length} 条</summary><ol class="content-contributions">${contributions || "<li>Chief 已完成路由，等待成员贡献</li>"}</ol>${work.review ? `<p>审校：${escapeHtml(work.review.outcome)} · ${escapeHtml(work.review.rationale)}</p>` : ""}</details>
+      <footer><small>v${work.revision} · ${work.usage.calls} 次模型调用 · ${work.usage.total_tokens || 0} Tokens · 已复制 ${work.copy_count} 次</small><div class="content-actions">${illustration?.status === "ready" ? '<button type="button" class="secondary" data-download-illustration>下载配图</button>' : ""}${work.status === "ready" ? '<button type="button" data-copy-content>复制正文</button>' : ""}</div></footer>
+      <small class="copy-status" aria-live="polite">${work.status === "ready" ? "复制行为会作为用户采纳信号记入参与成员的经历" : work.error ? escapeHtml(work.error) : ""}</small>
+    </article>`;
+  }).join("") || '<div class="content-empty"><b>还没有符合条件的作品</b><p>从左侧选择一个情报候选，召集听风与千工完成第一份双人协作内容。</p></div>';
+  void hydrateContentIllustrations();
+}
+
+async function hydrateContentIllustrations() {
+  await Promise.all([...document.querySelectorAll("[data-content-illustration]")].map(async (image) => {
+    const id = image.dataset.contentIllustration;
+    try {
+      let url = contentIllustrationUrls.get(id);
+      if (!url) {
+        const response = await operatorFetch(`/api/content/works/${encodeURIComponent(id)}/illustration`);
+        url = URL.createObjectURL(await response.blob());
+        contentIllustrationUrls.set(id, url);
+      }
+      image.src = url;
+    } catch (error) {
+      image.alt = `配图读取失败：${error.message}`;
+    }
+  }));
+}
+
+$("content-filter-format").addEventListener("change", renderContentWorks);
+$("content-filter-status").addEventListener("change", renderContentWorks);
+
+$("content-create-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = event.submitter; button.disabled = true;
+  $("content-create-status").classList.remove("error");
+  $("content-create-status").textContent = "Chief 正在登记双人创作任务…";
+  try {
+    const work = await operatorApi("/api/content/works", { method: "POST", body: JSON.stringify({
+      format: $("content-format").value,
+      source_candidate_id: $("content-candidate").value || undefined,
+      topic: $("content-topic").value.trim() || undefined,
+    }) });
+    $("content-create-status").textContent = "已召集听风、千工与绘影；研究、写作、审校和配图会在后台继续";
+    await watchContentWork(work.id);
+  } catch (error) {
+    $("content-create-status").classList.add("error");
+    $("content-create-status").textContent = error.message;
+  } finally { button.disabled = false; }
+});
+
+$("content-schedule-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = event.submitter; button.disabled = true;
+  try {
+    const formats = [$("content-schedule-x").checked && "x_hot_post", $("content-schedule-long").checked && "longform_tutorial"].filter(Boolean);
+    const value = await operatorApi("/api/content/preferences", { method: "PUT", body: JSON.stringify({
+      enabled: $("content-schedule-enabled").checked,
+      min_interval_hours: Number($("content-min-hours").value),
+      max_interval_hours: Number($("content-max-hours").value), formats,
+    }) });
+    $("content-schedule-status").textContent = value.enabled
+      ? `节律已保存；下一次窗口 ${new Date(value.next_run_at).toLocaleString()}`
+      : "自动创作已暂停；手动创作仍可使用";
+  } catch (error) { $("content-schedule-status").textContent = error.message; }
+  finally { button.disabled = false; }
+});
+
+$("content-works").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-copy-content],[data-retry-illustration],[data-download-illustration]");
+  if (!button) return;
+  const card = button.closest("[data-content-work]");
+  const work = contentWorks.find((item) => item.id === card.dataset.contentWork);
+  const statusNode = card.querySelector(".copy-status");
+  button.disabled = true;
+  try {
+    if (button.matches("[data-retry-illustration]")) {
+      statusNode.textContent = "已重新召集绘影，正在生成并验收…";
+      await operatorApi(`/api/content/works/${encodeURIComponent(work.id)}/illustration/retry`, { method: "POST", body: "{}" });
+      await watchContentWork(work.id);
+      return;
+    }
+    if (button.matches("[data-download-illustration]")) {
+      const response = await operatorFetch(`/api/content/works/${encodeURIComponent(work.id)}/illustration`);
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = url; link.download = `${work.id}-illustration`; link.click();
+      URL.revokeObjectURL(url);
+      statusNode.textContent = "配图已下载";
+      return;
+    }
+    await copyText(work.body);
+    const updated = await operatorApi(`/api/content/works/${encodeURIComponent(work.id)}/copied`, { method: "POST", body: "{}" });
+    statusNode.textContent = "正文已复制；这次采纳已记入协作成员经历";
+    contentWorks = contentWorks.map((item) => item.id === updated.id ? updated : item);
+    await loadMemberDossiers();
+  } catch (error) {
+    statusNode.classList.add("error"); statusNode.textContent = `复制失败：${error.message}`;
+  } finally { button.disabled = false; }
+});
+
+async function watchContentWork(id) {
+  for (let attempt = 0; attempt < 180; attempt += 1) {
+    const work = await operatorApi(`/api/content/works/${encodeURIComponent(id)}`);
+    const index = contentWorks.findIndex((item) => item.id === id);
+    if (index >= 0) contentWorks[index] = work; else contentWorks.unshift(work);
+    renderContentWorks();
+    const illustrationActive = ["pending", "briefing", "generating", "reviewing"].includes(work.illustration?.status);
+    if (["ready", "failed"].includes(work.status) && !illustrationActive) {
+      $("content-create-status").textContent = work.status === "ready"
+        ? work.illustration?.status === "ready" ? "文字与配图均已通过，作品可复制和下载" : "文字已通过；配图未通过，可在作品卡中重试"
+        : `创作未通过：${work.error}`;
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  $("content-create-status").textContent = "创作仍在后台进行，可稍后刷新查看";
+}
+
+async function copyText(value) {
+  if (navigator.clipboard?.writeText && window.isSecureContext) return navigator.clipboard.writeText(value);
+  const node = document.createElement("textarea");
+  node.value = value; node.setAttribute("readonly", ""); node.style.position = "fixed"; node.style.opacity = "0";
+  document.body.appendChild(node); node.select();
+  const copied = document.execCommand("copy"); node.remove();
+  if (!copied) throw new Error("浏览器拒绝剪贴板访问，请手动选择正文复制");
+}
 
 async function loadSettlement() {
   settlement = await api("/api/settlement");
@@ -516,6 +856,19 @@ async function operatorApi(url, options = {}) {
   const headers = { "content-type": "application/json", authorization: `Bearer ${token}`, ...(options.headers || {}) };
   return api(url, { ...options, headers });
 }
+async function operatorFetch(url, options = {}) {
+  const token = $("operator-token").value.trim();
+  if (!token) throw new Error("请输入操作员 Token");
+  const response = await fetch(url, { ...options, headers: { authorization: `Bearer ${token}`, ...(options.headers || {}) } });
+  if (!response.ok) {
+    let message = `HTTP ${response.status}`;
+    try { message = (await response.json()).error || message; } catch {}
+    throw new Error(message);
+  }
+  return response;
+}
 function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, (char) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", "'":"&#39;", "\"":"&quot;" })[char]); }
 
 loadTribe().then(analyzeIntake).catch((error) => { $("tribe-status").textContent = error.message; $("tribe-status").classList.add("error"); });
+window.setInterval(() => { if (!document.hidden) void loadObservatory({ quiet: true }); }, 30_000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) void loadObservatory({ quiet: true }); });

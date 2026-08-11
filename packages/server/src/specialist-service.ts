@@ -5,7 +5,7 @@ export type SpecialistTaskStatus =
   | "completed" | "failed" | "cancelled";
 
 export interface SpecialistServiceDefinition {
-  id: "git.flow" | "intelligence.watch";
+  id: "git.flow" | "intelligence.watch" | "content.studio";
   version: number;
   title: string;
   summary: string;
@@ -54,10 +54,20 @@ export const SPECIALIST_SERVICES: SpecialistServiceDefinition[] = [
     summary: "常驻委任情报员按规则扫描来源；候选评估、通知派发和用户反馈分别留下证据。",
     operations: ["scan"],
     required_capabilities: ["news-intelligence"],
-    allowed_assets: ["news-intelligence", "aihot-public-feed", "internal-bark"],
+    allowed_assets: ["news-intelligence", "aihot-public-feed", "internal-bark", "telegram-bot"],
     risk: "external_side_effects",
     acceptance_policy: "扫描只算操作完成；候选获得明确正向反馈或专业任务验收后才形成成长信用。",
     stages: ["collect", "summarize", "candidate_gate", "dispatch", "feedback"],
+  },
+  {
+    id: "content.studio", version: 1, title: "部落内容工坊",
+    summary: "Chief 按常驻委任组织至少两名成员，把情报候选转化为 X 热点短帖或教程长文，并保留研究、写作与审校证据。",
+    operations: ["x_hot_post", "longform_tutorial"],
+    required_capabilities: ["editorial-research", "structured-writing"],
+    allowed_assets: ["content-studio", "news-intelligence", "cpa-image-generation"],
+    risk: "external_side_effects",
+    acceptance_policy: "至少两名不同成员实际贡献；来源 URL 与事实边界通过独立审校；外部发布始终需要单独授权和幂等回执。",
+    stages: ["routing", "research", "draft", "review", "copy_ready", "publish_gate"],
   },
 ];
 

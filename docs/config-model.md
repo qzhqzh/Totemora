@@ -1,242 +1,135 @@
-# Totemora Configuration Model
+# Totemora 配置模型
 
-Configuration files are acceptable for the first version because they keep the product small. They should be treated as the bootstrap format, not the final management experience.
+YAML 是部落的**启动配置**，不是最终管理体验。成员经历、专业任务、反馈、Skill Proposal 和其他活动状态写入 `.totemora/totemora.db`；Secrets、Operator Token、静态 Skill/资产包和不可变 Run 证据仍保留为文件。
 
-Later versions can add TUI editing, web editing, database storage, and import/export.
+权威类型定义在 `packages/core/src/config/types.ts`，可运行示例在 `configs/example/`。本文件解释边界，不复制完整 Schema。
 
-## Files
+## 文件
 
 ```text
-configs/providers.yaml
-configs/agents.yaml
-configs/roles.yaml
-configs/tribe.yaml
+configs/example/
+├── providers.yaml
+├── agents.yaml
+├── roles.yaml
+└── tribe.yaml
 ```
 
 ## Providers
 
-Providers define how Totemora calls model APIs.
-
-Prefer `openai_compatible` as the first adapter type because many providers can use it.
+Provider 只描述模型调用适配，不拥有成员人格、Skill 或历史。凭据应引用环境变量或已有 settings 文件，不能写入仓库。
 
 ```yaml
 providers:
   openai:
-    type: openai_compatible
+    type: openai_responses
     base_url: https://api.openai.com/v1
     api_key_env: OPENAI_API_KEY
 
-  qwen:
-    type: openai_compatible
-    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-    api_key_env: DASHSCOPE_API_KEY
+  deepseek:
+    type: anthropic_compatible
+    settings_file: ~/.claude/settings.ds.json
 
-  kimi:
+  cpa:
     type: openai_compatible
-    base_url: https://api.moonshot.cn/v1
-    api_key_env: MOONSHOT_API_KEY
-
-  glm:
-    type: openai_compatible
-    base_url: https://open.bigmodel.cn/api/paas/v4
-    api_key_env: BIGMODEL_API_KEY
+    base_url: http://127.0.0.1:31000/v1
+    settings_file: ~/star/infra/cpa/config.yaml
 ```
 
-API keys must be referenced by environment variable name. Do not store secrets in config files.
+支持 `openai_responses`、`openai_compatible`、`anthropic_compatible` 和后续注册的适配类型。示例地址不等于部署要求；以实际 `providers.yaml` 为准。
 
-## Agents
+## Members
 
-Agents are tribe members. They bind a provider model to a capability profile and tool permissions.
+成员把火种与连续身份组合起来：
 
 ```yaml
 agents:
-  - id: gpt_strategist
-    provider: openai
-    model: gpt-5
+  - id: deepseek_git_steward
+    name: 执简 · Git流程专员
+    provider: deepseek
+    model: deepseek-v4-pro[1m]
+    status: probation
+    version: 1
+    persona: 克制、审慎，优先保护已有改动和阶段证据。
     profile:
-      reasoning: 0.95
+      reasoning: 0.9
       coding: 0.85
-      review: 0.9
-      reading: 0.85
-      speed: 0.6
-      cost: 0.3
-      context: 0.9
-      reliability: 0.8
-      obedience: 0.85
-    eligible_roles:
-      - chief
-      - shaman
-      - reviewer
-    tools:
-      - file_read
-      - web_search
-      - code_review
-
-  - id: qwen_executor
-    provider: qwen
-    model: qwen-plus
-    profile:
-      reasoning: 0.75
-      coding: 0.8
-      review: 0.65
-      reading: 0.7
-      speed: 0.85
-      cost: 0.75
-      context: 0.7
-      reliability: 0.7
-      obedience: 0.75
+      review: 0.82
+      reliability: 0.82
+      cost: 0.72
     eligible_roles:
       - warrior
       - worker
+    skills:
+      - git-change-management
+      - conventional-commit
+      - verification-planning
+      - git-flow-safety
+      - pull-request-review
+      - github-flow-operations
     tools:
-      - file_read
-      - shell
-      - file_edit
+      - git-flow-engine
+      - opencode-correction
 ```
 
-## Roles
+- `profile` 是待证据校准的能力先验，不是事实评分。
+- `skills` 是成员可被派工时声明的能力；活动 Skill 包和版本由治理层管理。
+- `tools` 是启动期资产授权线索，执行器仍需按动作、风险和 Policy 独立校验。
+- `personality`、`lineage` 和 `lifecycle` 形成正式画像与成长边界；运行经历不会直接改 YAML。
 
-Roles define role fitness weights and permissions.
+状态为 `inactive` 或 `retired` 的成员不会参与正常派工。
+
+## Roles and Tribe
+
+Role 定义岗位能力权重、人数和权限；Tribe 定义 Chief、议事、求助、Review 和手动提案规则。
 
 ```yaml
 roles:
-  chief:
+  reviewer:
     required_capabilities:
-      reasoning: 0.35
-      review: 0.25
-      reliability: 0.25
-      obedience: 0.15
-    max_agents: 1
-    permissions:
-      - decide_plan
-      - accept_result
-      - propose_manual_entry
-
-  shaman:
-    required_capabilities:
-      reasoning: 0.4
-      reading: 0.25
-      review: 0.15
-      context: 0.2
-    max_agents: 1
-    permissions:
-      - propose_plan
-      - advise
-      - answer_help_request
-
-  warrior:
-    required_capabilities:
-      coding: 0.35
+      review: 0.45
+      reliability: 0.35
       reasoning: 0.2
-      tool_use: 0.2
-      reliability: 0.25
-    max_agents: 3
+    max_agents: 2
     permissions:
-      - execute_task
-      - request_help
+      - review_result
 
-  worker:
-    required_capabilities:
-      speed: 0.3
-      cost: 0.25
-      obedience: 0.25
-      reliability: 0.2
-    max_agents: 5
-    permissions:
-      - summarize
-      - run_check
-      - transfer_context
-      - request_help
-```
-
-## Tribe Rules
-
-Tribe rules define how a run operates.
-
-```yaml
 tribe:
-  id: default
-  name: Default Tribe
-
+  id: first_tribe
+  name: 初火部落
+  chief: deepseek_reasoner
   election:
     strategy: weighted_score
-    required_roles:
-      - chief
-      - shaman
-      - warrior
-
+    required_roles: [chief]
   council:
-    proposal_count: 3
+    proposal_count: 1
     chief_must_choose_one: true
-
   execution:
     max_retry_before_help: 2
-    help_targets:
-      - shaman
-      - chief
-
+    help_targets: [reviewer, chief]
   review:
     required: true
     reviewer: chief
-
   manual:
     allow_agent_proposals: true
     auto_apply: false
 ```
 
-## Provider Adapter Interface
+自然语言任务不能绕过这些配置获得额外权限。专业服务还会叠加 `ServiceBinding`、Workplace Policy 和资产动作门禁。
 
-The runtime should call providers through a unified interface.
+## Skill and Asset Packages
 
-```ts
-interface AgentProvider {
-  generate(input: AgentRequest): Promise<AgentResponse>
-}
+Skill 不内嵌在 `agents.yaml`：成员配置只引用稳定 Skill ID。规范包位于 `skills/<skill-id>/`，版本、风险、来源和装备证据由 `skill.yaml` 与 SQLite Proposal 管理。用户通过对话创建能力委任，不上传包；见 [Skill 对话治理](skill-governance.md)。
 
-interface AgentRequest {
-  messages: TribeMessage[]
-  systemPrompt: string
-  tools?: ToolDefinition[]
-  responseFormat?: "text" | "json"
-  maxTokens?: number
-  temperature?: number
-}
+共享资产目录位于 `assets/tool-assets.json`，资产图纸可在 `assets/<asset-id>/` 下维护。Skill 不自动授予资产，资产也不自动改变成员 Skill。
 
-interface AgentResponse {
-  content: string
-  toolCalls?: ToolCall[]
-  usage?: {
-    inputTokens: number
-    outputTokens: number
-    cost?: number
-  }
-  raw?: unknown
-}
+## Validation
+
+```bash
+bun run totemora providers list --config-dir configs/example
+bun run totemora agents list --config-dir configs/example
+bun run totemora tribe inspect --config-dir configs/example
+bun run typecheck
+bun test packages/core/src/config
 ```
 
-## Message Protocol
-
-Agents communicate through structured messages.
-
-```ts
-type TribeMessageRole =
-  | "proposal"
-  | "decision"
-  | "task_assignment"
-  | "progress"
-  | "blocker"
-  | "help_request"
-  | "review"
-  | "final_report"
-
-interface TribeMessage {
-  id: string
-  runId: string
-  fromAgent: string
-  toAgent?: string
-  role: TribeMessageRole
-  content: string
-  artifacts?: ArtifactRef[]
-  requiresResponse?: boolean
-}
-```
+配置加载失败应阻止启动；未知 Provider、Chief、导师或无效分值不能静默降级。真实 Provider 健康检查会产生模型调用，使用 `providers doctor` 时需明确预算。

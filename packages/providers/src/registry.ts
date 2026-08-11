@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
+import { parse } from "yaml";
 
 import type {
   AgentProvider,
@@ -17,13 +18,7 @@ export class ConfiguredProviderRegistry implements ProviderRegistry {
 
   constructor(config: LocalConfigSet, env: NodeJS.ProcessEnv = process.env) {
     for (const [id, provider] of Object.entries(config.providers.providers)) {
-      const settings = provider.settings_file
-        ? readClaudeSettings(provider.settings_file)
-        : undefined;
-      const baseUrl = provider.base_url ?? settings?.ANTHROPIC_BASE_URL;
-      const apiKey = provider.api_key_env
-        ? env[provider.api_key_env] ?? ""
-        : settings?.ANTHROPIC_AUTH_TOKEN ?? "";
+      const { baseUrl, apiKey } = resolveProviderConnection(id, provider, env);
       if (!baseUrl) {
         throw new Error(`Missing base URL for provider: ${id}`);
       }
@@ -53,19 +48,40 @@ export class ConfiguredProviderRegistry implements ProviderRegistry {
   }
 }
 
-interface ClaudeSettingsEnv {
+interface ProviderSettingsEnv {
   ANTHROPIC_AUTH_TOKEN?: string;
   ANTHROPIC_BASE_URL?: string;
+  apiKeys?: string[];
 }
 
-function readClaudeSettings(filePath: string): ClaudeSettingsEnv {
+export function resolveProviderConnection(
+  id: string,
+  provider: LocalConfigSet["providers"]["providers"][string],
+  env: NodeJS.ProcessEnv = process.env,
+): { baseUrl: string; apiKey: string } {
+  const settings = provider.settings_file ? readProviderSettings(provider.settings_file) : undefined;
+  const baseUrl = provider.base_url ?? settings?.ANTHROPIC_BASE_URL;
+  const apiKey = provider.api_key_env
+    ? env[provider.api_key_env] ?? ""
+    : settings?.ANTHROPIC_AUTH_TOKEN ?? settings?.apiKeys?.[0] ?? "";
+  if (!baseUrl) throw new Error(`Missing base URL for provider: ${id}`);
+  return { baseUrl, apiKey };
+}
+
+function readProviderSettings(filePath: string): ProviderSettingsEnv {
   const resolved = filePath.startsWith("~/")
     ? resolve(homedir(), filePath.slice(2))
     : resolve(filePath);
   try {
-    const parsed = JSON.parse(readFileSync(resolved, "utf8")) as {
-      env?: ClaudeSettingsEnv;
-    };
+    const source = readFileSync(resolved, "utf8");
+    if (resolved.endsWith(".yaml") || resolved.endsWith(".yml")) {
+      const parsed = parse(source) as { "api-keys"?: unknown };
+      const apiKeys = Array.isArray(parsed?.["api-keys"])
+        ? parsed["api-keys"].filter((value): value is string => typeof value === "string" && value.length > 0)
+        : [];
+      return { apiKeys };
+    }
+    const parsed = JSON.parse(source) as { env?: ProviderSettingsEnv };
     return parsed.env ?? {};
   } catch (error) {
     throw new Error(`Failed to read provider settings file: ${resolved}`, {

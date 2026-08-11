@@ -82,7 +82,8 @@ test("checks every configured provider with its first member", async () => {
     "deepseek: ready member=deepseek_reasoner",
   );
   expect(output.stdoutText()).toContain("xiaomi: ready member=mimo_scout");
-  expect(provider.requests).toHaveLength(3);
+  expect(output.stdoutText()).toContain("cpa: ready member=cpa_illustrator");
+  expect(provider.requests).toHaveLength(4);
 });
 
 test("runs the onboarding exam through the CLI and persists its trace", async () => {

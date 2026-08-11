@@ -12,6 +12,33 @@
     <form id="operator-form" class="operator"><div id="tribe-status" class="status">正在唤醒部落…</div><input id="operator-token" class="token-input" type="password" autocomplete="current-password" spellcheck="false" placeholder="操作员 Token（任务操作必需）"></form>
   </header>
   <main>
+    <section class="panel observatory-panel" aria-labelledby="observatory-title">
+      <div class="observatory-head">
+        <div>
+          <h2 id="observatory-title">部落证据台</h2>
+          <p>看见谁在值守、专业服务走到哪一步，以及哪些 Skill 和部落资产真正留下了结果。</p>
+        </div>
+        <div class="observatory-controls">
+          <span id="observatory-live" class="observatory-live" aria-live="polite">正在汇总部落现场…</span>
+          <button id="refresh-observatory" type="button" class="secondary">刷新现场</button>
+        </div>
+      </div>
+      <div id="observatory-summary" class="observatory-summary" aria-live="polite"></div>
+      <div class="observatory-grid">
+        <div>
+          <div class="observatory-subhead"><h3>常驻专业服务</h3><p>Chief 将委任交给固定专员，能力、资产和验收规则一起生效。</p></div>
+          <div id="service-observatory" class="service-observatory"></div>
+        </div>
+        <aside>
+          <div class="observatory-subhead"><h3>最近证据</h3><p>专业任务与确定性资产的真实动作记录。</p></div>
+          <div id="evidence-stream" class="evidence-stream"></div>
+        </aside>
+      </div>
+      <div class="feedback-principle" role="note">
+        <div><strong>情报反馈口径</strong><span>没空点击只是“未知”，不会降低兴趣判断；主动打开或标记“有价值”才作为高置信正向证据。</span></div>
+        <small id="feedback-evidence">正在读取最近反馈样本…</small>
+      </div>
+    </section>
     <section class="panel roster-panel">
       <div class="section-title"><span>01</span><h2>部落成员</h2></div>
       <div id="roster" class="roster"></div>
@@ -112,12 +139,40 @@ secrets/</textarea></label>
       <h3>扫描记录</h3>
       <div id="intelligence-history" class="intelligence-history"></div>
     </section>
+    <section class="panel content-panel" id="content-studio">
+      <div class="section-title"><span>07</span><h2>创作工坊</h2></div>
+      <p class="section-note">热点候选由至少两名成员共同完成研究、写作和独立审校；通过后可一键复制。对外发布仍保留单独门禁。</p>
+      <div class="content-workbench">
+        <aside class="content-controls">
+          <form id="content-create-form">
+            <h3>发起一次创作</h3>
+            <label>作品类型<select id="content-format"><option value="x_hot_post">X 热点短帖</option><option value="longform_tutorial">教程 / 经验长文</option></select></label>
+            <label>情报选题<select id="content-candidate"><option value="">自动选择高可信候选</option></select></label>
+            <label>补充方向（可选）<textarea id="content-topic" placeholder="例如：从常驻 Agent 的恢复能力切入"></textarea></label>
+            <button type="submit">召集创作小队</button>
+            <small id="content-create-status" class="form-status" aria-live="polite"></small>
+          </form>
+          <form id="content-schedule-form" class="content-schedule">
+            <h3>不定时创作</h3>
+            <label class="inline-check"><input id="content-schedule-enabled" type="checkbox">允许部落在候选充足时自动创作</label>
+            <div class="grid-two"><label>最短间隔（小时）<input id="content-min-hours" type="number" min="1" max="168" value="6"></label><label>最长间隔（小时）<input id="content-max-hours" type="number" min="1" max="168" value="18"></label></div>
+            <div class="inline-check"><label><input id="content-schedule-x" type="checkbox" checked>X 短帖</label><label><input id="content-schedule-long" type="checkbox" checked>教程长文</label></div>
+            <button type="submit" class="secondary">保存创作节律</button>
+            <small id="content-schedule-status" class="form-status" aria-live="polite"></small>
+          </form>
+        </aside>
+        <div class="content-library">
+          <div class="content-library-head"><div><h3>作品案卷</h3><small id="content-summary">正在读取创作记录…</small></div><div class="content-filters"><label>类型<select id="content-filter-format"><option value="all">全部类型</option><option value="x_hot_post">X 短帖</option><option value="longform_tutorial">教程长文</option></select></label><label>状态<select id="content-filter-status"><option value="all">全部状态</option><option value="ready">可复制</option><option value="active">创作中</option><option value="failed">失败</option></select></label></div></div>
+          <div id="content-works" class="content-works" aria-live="polite"></div>
+        </div>
+      </div>
+    </section>
     <section class="panel codex-panel">
-      <div class="section-title"><span>07</span><h2>人物图鉴</h2></div>
+      <div class="section-title"><span>08</span><h2>人物图鉴</h2></div>
       <div id="codex" class="codex"></div>
     </section>
     <section id="run-panel" class="panel run-panel hidden">
-      <div class="section-title"><span>08</span><h2>Run 现场</h2></div>
+      <div class="section-title"><span>09</span><h2>Run 现场</h2></div>
       <div class="run-head"><div><small>当前阶段</small><strong id="phase">QUEUED</strong></div><div id="run-message"></div></div>
       <button id="cancel-run" type="button" class="secondary hidden">取消 Run</button>
       <button id="retry-run" type="button" class="secondary hidden">重试 Run</button>

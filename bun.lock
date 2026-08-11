@@ -30,6 +30,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@totemora/core": "workspace:*",
+        "yaml": "^2.9.0",
       },
     },
     "packages/server": {

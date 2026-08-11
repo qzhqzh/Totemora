@@ -30,6 +30,8 @@ import { IntelligencePreferenceStore } from "./intelligence-preference-store";
 import { ActionJournal } from "./action-journal";
 import { SPECIALIST_SERVICES, SpecialistTaskRepository } from "./specialist-service";
 import { MemberProfileStore } from "./member-profile-store";
+import { ContentStudioService, type ContentIllustrationGenerator, type CreateContentInput } from "./content-studio-service";
+import { CpaIllustrationService } from "./cpa-illustration-service";
 
 export interface PlaygroundOptions {
   configDir: string;
@@ -37,6 +39,8 @@ export interface PlaygroundOptions {
   createProviderRegistry?: (config: LocalConfigSet) => ProviderRegistry;
   operatorToken?: string;
   projectRoot?: string;
+  fetchImpl?: typeof fetch;
+  createIllustrationGenerator?: (config: LocalConfigSet) => ContentIllustrationGenerator | undefined;
 }
 
 interface RunJob {
@@ -187,6 +191,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
     conversations: MemberConversationService;
     evolution: MemberEvolutionService;
     intelligence: IntelligenceService;
+    content: ContentStudioService;
   }> | undefined;
   let bindingsRegistered = false;
   const getConfig = async () => {
@@ -202,6 +207,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
     const chief = config.tribe.tribe.chief ?? "deepseek_reasoner";
     const gitMember = config.agents.agents.find((member) => member.skills?.includes("git-flow-safety"));
     const intelligenceMember = config.agents.agents.find((member) => member.id === "qwen_intelligence");
+    const contentWriter = config.agents.agents.find((member) => member.skills?.includes("tutorial-writing"));
     if (gitMember) specialistTasks.registerBinding({
       service_id: "git.flow", chief_member_id: chief, specialist_member_id: gitMember.id,
       routing_reason: "当前唯一具备 git-flow-safety 且处于 active 状态的成员",
@@ -210,7 +216,14 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
     if (intelligenceMember) specialistTasks.registerBinding({
       service_id: "intelligence.watch", chief_member_id: chief, specialist_member_id: intelligenceMember.id,
       routing_reason: "Chief 已批准的常驻听风岗位；定时巡查复用委任，不重复调用 Chief",
-      capability_evidence: ["news-intelligence"], tool_grants: ["news-intelligence", "aihot-public-feed", "internal-bark"],
+      capability_evidence: ["news-intelligence"],
+      tool_grants: ["news-intelligence", "aihot-public-feed", "internal-bark", "telegram-bot"],
+    });
+    if (contentWriter) specialistTasks.registerBinding({
+      service_id: "content.studio", chief_member_id: chief, specialist_member_id: contentWriter.id,
+      routing_reason: "Chief 批准的内容写作常驻委任；研究、审校与配图成员在单次任务 assignments 中独立记录",
+      capability_evidence: (contentWriter.skills ?? []).filter((skill) => ["structured-writing", "tutorial-writing"].includes(skill)),
+      tool_grants: (contentWriter.tools ?? []).filter((tool) => tool === "content-studio"),
     });
     bindingsRegistered = true;
   };
@@ -231,6 +244,18 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
       const config = await getConfig();
       const providers = options.createProviderRegistry?.(config) ?? new ConfiguredProviderRegistry(config);
       const state = new MemberStateStore(options.dataDir, config);
+      const illustrationGenerator = options.createIllustrationGenerator?.(config)
+        ?? (!options.createProviderRegistry && config.providers.providers.cpa
+          ? new CpaIllustrationService(config, options.dataDir, options.fetchImpl ?? fetch)
+          : undefined);
+      const content = new ContentStudioService(
+        config, providers, state, options.dataDir, illustrationGenerator, getAssetRegistry(),
+      );
+      for (const work of content.list(500)) {
+        if (work.status === "failed" && work.error?.startsWith("Gateway restarted while content members were collaborating")) {
+          failInterruptedSpecialistTask(work.id, work.error);
+        }
+      }
       return {
         state,
         conversations: new MemberConversationService(config, providers, state, options.dataDir),
@@ -238,7 +263,9 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
         intelligence: new IntelligenceService(
           config, providers, state, options.dataDir,
           options.projectRoot ?? resolve(import.meta.dir, "../../.."),
+          options.fetchImpl ?? fetch,
         ),
+        content,
       };
     })();
     return memberServicesPromise;
@@ -357,6 +384,53 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
     })();
     return task;
   };
+  const enqueueContentWork = async (
+    input: CreateContentInput,
+    trigger: "manual" | "scheduled" | "web" = "web",
+  ) => {
+    await ensureServiceBindings();
+    const services = await getMemberServices();
+    const work = await services.content.createQueued(input);
+    let serviceTask = specialistTasks.create({
+      id: work.id, service_id: "content.studio", service_version: 1,
+      operation: work.format, trigger, status: "queued", current_stage: "routing",
+      member_id: work.assignments.find((item) => item.role === "writer")?.member_id,
+      chief_member_id: work.chief_member_id, idempotency_key: work.id, input,
+    });
+    void (async () => {
+      serviceTask = specialistTasks.update(serviceTask.id, serviceTask.revision, {
+        status: "running", current_stage: "research", actor_id: work.chief_member_id,
+        summary: `Chief 已委任 ${work.assignments.length} 名成员协作创作`,
+      });
+      const result = await services.content.execute(work.id);
+      specialistTasks.update(serviceTask.id, serviceTask.revision, result.status === "ready" ? {
+        status: "completed", current_stage: "copy_ready", result, result_ref: result.id,
+        member_id: result.assignments.find((item) => item.role === "writer")?.member_id,
+        actor_id: result.review?.outcome === "accepted"
+          ? result.assignments.find((item) => item.role === "researcher_reviewer")?.member_id
+          : undefined,
+        summary: result.illustration?.status === "ready"
+          ? "研究、写作、独立审校与配图均已完成，内容进入图文可用状态"
+          : `文字协作已完成；配图${result.illustration?.status === "failed" ? "未通过门禁，可人工重试" : "未启用"}`,
+      } : {
+        status: "failed", current_stage: "review", result, result_ref: result.id,
+        error: result.error, summary: `内容协作失败：${result.error ?? "unknown error"}`,
+      });
+    })().catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      const current = specialistTasks.get(work.id);
+      if (!current || ["completed", "failed", "cancelled"].includes(current.status)) return;
+      try {
+        specialistTasks.update(current.id, current.revision, {
+          status: "failed", current_stage: "failed", error: message,
+          summary: `内容后台任务异常收敛：${message.slice(0, 300)}`,
+        });
+      } catch (updateError) {
+        console.error(`Unable to persist failed content specialist task ${work.id}: ${updateError instanceof Error ? updateError.message : String(updateError)}`);
+      }
+    });
+    return work;
+  };
   const syncDevelopmentSpecialistTask = (proposal: {
     id: string; status: string; specialist_member_id: string; error?: string;
   }) => {
@@ -456,6 +530,10 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
       }
       return result;
     },
+    async runScheduledContent() {
+      const input = await (await getMemberServices()).content.dueInput();
+      return input ? enqueueContentWork(input, "scheduled") : undefined;
+    },
     async fetch(request: Request): Promise<Response> {
       await hydration;
       const url = new URL(request.url);
@@ -485,7 +563,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
         if (request.method === "GET" && url.pathname === "/api/status") {
           const config = await getConfig();
           return json({
-            version: "0.9.0-durable-specialist-services",
+            version: "0.10.0-collaborative-content-studio",
             settlement: "ready",
             active_members: config.agents.agents.filter((member) => !["inactive", "retired"].includes(member.status ?? "active")).length,
             capabilities: {
@@ -503,6 +581,8 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
               intelligence_candidate_pool: "sqlite_feedback_retry_circuit_v2",
               durable_state: "sqlite_wal_v1",
               internal_bark: "self_hosted_v2_api",
+              telegram_bot: "group_commands_feedback_v1",
+              content_studio: "three_member_text_visual_evidence_v2",
               specialist_services: "typed_contract_v1",
             },
           });
@@ -577,9 +657,90 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
           });
         }
 
+        if (request.method === "GET" && url.pathname === "/api/content/works") {
+          requireOperator(request, options.operatorToken);
+          return json({ works: (await getMemberServices()).content.list(Number(url.searchParams.get("limit") ?? 100)) });
+        }
+
+        if (request.method === "POST" && url.pathname === "/api/content/works") {
+          requireOperator(request, options.operatorToken);
+          return json(await enqueueContentWork(await request.json() as CreateContentInput, "web"), 202);
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/content/preferences") {
+          return json((await getMemberServices()).content.preferences());
+        }
+
+        if (request.method === "PUT" && url.pathname === "/api/content/preferences") {
+          requireOperator(request, options.operatorToken);
+          return json((await getMemberServices()).content.savePreferences(await request.json()));
+        }
+
+        const contentCopiedMatch = url.pathname.match(/^\/api\/content\/works\/([^/]+)\/copied$/);
+        if (request.method === "POST" && contentCopiedMatch) {
+          requireOperator(request, options.operatorToken);
+          return json(await (await getMemberServices()).content.markCopied(contentCopiedMatch[1]!));
+        }
+
+        const contentIllustrationRetryMatch = url.pathname.match(/^\/api\/content\/works\/([^/]+)\/illustration\/retry$/);
+        if (request.method === "POST" && contentIllustrationRetryMatch) {
+          requireOperator(request, options.operatorToken);
+          const content = (await getMemberServices()).content;
+          const work = content.get(contentIllustrationRetryMatch[1]!);
+          if (!work) return json({ error: "Content work not found" }, 404);
+          if (work.status !== "ready" || !work.body) return json({ error: "Only ready content can regenerate an illustration" }, 409);
+          void content.retryIllustration(work.id).catch((error) => {
+            console.error(`Illustration retry failed: ${error instanceof Error ? error.message : String(error)}`);
+          });
+          return json(work, 202);
+        }
+
+        const contentIllustrationMatch = url.pathname.match(/^\/api\/content\/works\/([^/]+)\/illustration$/);
+        if (request.method === "GET" && contentIllustrationMatch) {
+          requireOperator(request, options.operatorToken);
+          const illustration = await (await getMemberServices()).content.readIllustration(contentIllustrationMatch[1]!);
+          if (!illustration) return json({ error: "Content illustration not found" }, 404);
+          return new Response(Buffer.from(illustration.data), { headers: {
+            "content-type": illustration.mimeType,
+            "content-disposition": `inline; filename="${illustration.filename}"`,
+            "cache-control": "private, no-store",
+            "x-content-type-options": "nosniff",
+          } });
+        }
+
+        const contentWorkMatch = url.pathname.match(/^\/api\/content\/works\/([^/]+)$/);
+        if (request.method === "GET" && contentWorkMatch) {
+          requireOperator(request, options.operatorToken);
+          const work = (await getMemberServices()).content.get(contentWorkMatch[1]!);
+          return work ? json(work) : json({ error: "Content work not found" }, 404);
+        }
+
         if (request.method === "GET" && url.pathname === "/api/intelligence/bark") {
           requireOperator(request, options.operatorToken);
           return json(await (await getMemberServices()).intelligence.barkStatus(url.searchParams.get("health") === "1"));
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/intelligence/telegram") {
+          requireOperator(request, options.operatorToken);
+          return json(await (await getMemberServices()).intelligence.telegramStatus(url.searchParams.get("health") === "1"));
+        }
+
+        if (request.method === "POST" && url.pathname === "/api/integrations/telegram/webhook") {
+          const intelligence = (await getMemberServices()).intelligence;
+          try {
+            await intelligence.verifyTelegramWebhook(
+              request.headers.get("x-telegram-bot-api-secret-token"),
+            );
+          } catch {
+            throw new HttpError(401, "Telegram webhook authorization failed");
+          }
+          const contentLength = Number(request.headers.get("content-length") ?? 0);
+          if (contentLength > 128_000) throw new HttpError(413, "Telegram update is too large");
+          const rawUpdate = await request.text();
+          if (Buffer.byteLength(rawUpdate) > 128_000) throw new HttpError(413, "Telegram update is too large");
+          const update = JSON.parse(rawUpdate) as { update_id?: number };
+          if (!Number.isSafeInteger(update.update_id)) throw new HttpError(400, "Telegram update_id is required");
+          return json(await intelligence.handleTelegramUpdate(update as Parameters<typeof intelligence.handleTelegramUpdate>[0]));
         }
 
         const candidateFeedbackMatch = url.pathname.match(/^\/api\/intelligence\/candidates\/([^/]+)\/feedback$/);
