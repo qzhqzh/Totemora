@@ -113,6 +113,18 @@ export class TotemoraGatewayClient {
     return this.request("/api/intelligence/candidates");
   }
 
+  async listFinanceBriefs() {
+    return this.request("/api/finance");
+  }
+
+  async listFinanceCandidates() {
+    return this.request("/api/finance/candidates");
+  }
+
+  async listFinanceSources() {
+    return this.request("/api/finance/sources");
+  }
+
   async listActions() {
     return this.request("/api/actions");
   }
@@ -125,6 +137,16 @@ export class TotemoraGatewayClient {
 
   async getIntelligenceTask(taskId: string) {
     return this.request(`/api/intelligence/tasks/${encodeURIComponent(taskId)}`);
+  }
+
+  async runFinanceBrief(messageCount: number, idempotencyKey?: string, deliveryMode: "candidate_pool" | "direct_push" = "candidate_pool") {
+    return this.request("/api/finance/tasks", {
+      method: "POST", body: JSON.stringify({ message_count: messageCount, idempotency_key: idempotencyKey, delivery_mode: deliveryMode }),
+    });
+  }
+
+  async getFinanceTask(taskId: string) {
+    return this.request(`/api/finance/tasks/${encodeURIComponent(taskId)}`);
   }
 
   async startGitFlow(

@@ -16,6 +16,9 @@ MCP 对外发布的是一个持久的“部落 Git Flow 能力”。调用方 AI
 | `totemora_list_intelligence_briefs` | 查看听风台历史情报与通知通道证据 |
 | `totemora_list_intelligence_candidates` | 查看候选消息评分、重复抑制理由和派发状态 |
 | `totemora_run_intelligence_brief` / `totemora_get_intelligence_task` | 创建并轮询持久扫描任务；默认进入候选池，由常驻派发器送往已配置的 Bark / Telegram，显式 `direct_push` 走兼容直推 |
+| `totemora_list_finance_briefs` / `totemora_list_finance_candidates` | 查看观潮的财经简报、证据等级、市场/证券和派发状态 |
+| `totemora_list_finance_sources` | 查看财经来源目录、S0–S4 等级、接入状态和最近健康证据 |
+| `totemora_run_finance_watch` / `totemora_get_finance_task` | 创建并轮询独立的财经扫描任务；Chief 委任观潮，候选按 finance 领域派发 |
 | `totemora_list_actions` | 查看外部副作用的幂等动作日志 |
 | `totemora_start_git_flow` | 委托一个 `commit`、`pull_request` 或 `merge` 结果，立即返回 `task_id` |
 | `totemora_get_task` | 查询 Chief 路由和规划任务 |
@@ -27,7 +30,7 @@ MCP 对外发布的是一个持久的“部落 Git Flow 能力”。调用方 AI
 部落内部状态机。模型调用或客户端断开不会丢失 `.totemora/development-tasks/` 中的任务。
 Git Flow Engine 是部落共享资产，当前由执简获授；以后其他成员只需经过配置授权即可复用同一确定性能力。
 
-情报能力同样是一个长期部落服务。调用方默认只发起一次 `candidate_pool` 扫描并保存 `task_id`；听风负责聚类和价值评估，确定性门禁负责阈值与去重，常驻派发器负责至少一分钟的外发间隔。
+情报能力同样是长期部落服务。调用方默认只发起一次 `candidate_pool` 扫描并保存 `task_id`；听风负责 AI / 技术变化，观潮负责财经官方证据。两者有独立候选与反馈历史，确定性门禁负责阈值与去重，常驻派发器负责至少一分钟的外发间隔和多设备领域路由。
 
 ## 启动与配置
 

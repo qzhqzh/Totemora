@@ -22,18 +22,18 @@ test("exposes tribe and completes a playground run", async () => {
   expect(tribe.status).toBe(200);
   expect((await tribe.json()).members.length).toBeGreaterThan(1);
   expect(await (await app.fetch(new Request("http://local/api/status"))).json()).toMatchObject({
-    version: "0.10.0-collaborative-content-studio", active_members: 6,
+    version: "0.11.0-finance-intelligence-vertical", active_members: 7,
     capabilities: { inspect: "enabled", change: "git_flow_existing_changes", specialist_self_review: "enabled", member_chat: "mentor_escalation_v1" },
   });
   const tribeData = await (await app.fetch(new Request("http://local/api/tribe"))).json();
-  expect(tribeData.members.filter((member: any) => !["inactive", "retired"].includes(member.status))).toHaveLength(6);
+  expect(tribeData.members.filter((member: any) => !["inactive", "retired"].includes(member.status))).toHaveLength(7);
   expect(tribeData.members.find((member: any) => member.id === "deepseek_reasoner").persona).toContain("深思");
   const embers = await (await app.fetch(new Request("http://local/api/embers"))).json();
   expect(embers.embers).toHaveLength(5);
   expect(embers.embers.find((ember: any) => ember.provider_id === "deepseek")).toMatchObject({
     id: "deepseek/deepseek-v4-pro[1m]", status: "available", member_ids: ["deepseek_reasoner", "deepseek_git_steward"],
   });
-  expect(embers.embers.find((ember: any) => ember.provider_id === "qwen").member_ids).toEqual(["qwen_worker", "qwen_intelligence"]);
+  expect(embers.embers.find((ember: any) => ember.provider_id === "qwen").member_ids).toEqual(["qwen_worker", "qwen_intelligence", "qwen_finance"]);
 
   const workplaceResponse = await app.fetch(new Request("http://local/api/workplaces", {
     method: "POST", headers: authorized(),
@@ -65,7 +65,7 @@ test("exposes tribe and completes a playground run", async () => {
   expect(job.status).toBe("completed");
   expect(job.run.schema_version).toBe(2);
   expect(job.run.plan.assignments[0].assignment_reason).toContain("匹配");
-  expect(job.run.plan.candidate_ranking).toHaveLength(5);
+  expect(job.run.plan.candidate_ranking).toHaveLength(6);
   expect(job.run.independent_review).toMatchObject({ reviewer_member_id: "qwen_worker", outcome: "accepted" });
   expect(job.run.final_report.findings[0].evidence[0]).toContain("README.md");
   const history = await app.fetch(new Request("http://local/api/runs"));
@@ -288,6 +288,94 @@ test("restart recovery keeps domain and specialist task status aligned", async (
     headers: authorized(),
   }));
   expect(await contentTask.json()).toMatchObject({ status: "failed", current_stage: "failed" });
+  await rm(dataDir, { recursive: true, force: true });
+});
+
+test("finance task endpoint reuses a domain idempotency key instead of scheduling duplicate work", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-finance-idempotency-"));
+  const app = createPlaygroundApp({
+    configDir: resolve(import.meta.dir, "../../../configs/example"), dataDir,
+    operatorToken: "operator-secret",
+    createProviderRegistry: () => ({ get: () => new PlaygroundProvider() }),
+    fetchImpl: (async () => new Response("offline", { status: 503 })) as unknown as typeof fetch,
+  });
+  const request = () => app.fetch(new Request("http://local/api/finance/tasks", {
+    method: "POST", headers: authorized(),
+    body: JSON.stringify({ idempotency_key: "mcp-finance-same", message_count: 1 }),
+  }));
+  const first = await (await request()).json();
+  const second = await (await request()).json();
+  expect(second.id).toBe(first.id);
+  const conflicting = await app.fetch(new Request("http://local/api/finance/tasks", {
+    method: "POST", headers: authorized(),
+    body: JSON.stringify({ idempotency_key: "mcp-finance-same", message_count: 2, delivery_mode: "direct_push" }),
+  }));
+  expect(conflicting.status).toBe(409);
+  expect((await conflicting.json()).error).toContain("reused with different");
+  expect(new SpecialistTaskRepository(dataDir).list().filter((task) =>
+    task.service_id === "finance.watch" && task.idempotency_key === "mcp-finance-same",
+  )).toHaveLength(1);
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const task = await (await app.fetch(new Request(`http://local/api/finance/tasks/${first.id}`, { headers: authorized() }))).json();
+    if (["completed", "failed"].includes(task.status)) break;
+    await Bun.sleep(5);
+  }
+  await rm(dataDir, { recursive: true, force: true });
+});
+
+test("operator manages and tests Bark devices without exposing device keys", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-bark-panel-api-"));
+  await mkdir(join(dataDir, "secrets"), { recursive: true });
+  await writeFile(join(dataDir, "secrets", "bark-device-key"), "primary-device-secret\n");
+  const requests: Array<{ url: string; body?: Record<string, unknown> }> = [];
+  const app = createPlaygroundApp({
+    configDir: resolve(import.meta.dir, "../../../configs/example"), dataDir,
+    operatorToken: "operator-secret",
+    createProviderRegistry: () => ({ get: () => new PlaygroundProvider() }),
+    fetchImpl: (async (input, init) => {
+      requests.push({
+        url: String(input),
+        body: init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined,
+      });
+      return Response.json({ code: 200 });
+    }) as typeof fetch,
+  });
+  expect((await app.fetch(new Request("http://local/api/notifications/bark/targets"))).status).toBe(401);
+  const createdResponse = await app.fetch(new Request("http://local/api/notifications/bark/targets", {
+    method: "POST", headers: authorized(), body: JSON.stringify({
+      id: "second-phone", label: "第二台手机", device_key: "second-device-secret-9876",
+      domains: ["finance"], enabled: true, server_url: "http://127.0.0.1:18080",
+    }),
+  }));
+  expect(createdResponse.status).toBe(201);
+  expect(await createdResponse.json()).toMatchObject({ id: "second-phone", key_suffix: "9876", source: "managed" });
+  expect((await app.fetch(new Request("http://local/api/notifications/bark/targets", {
+    method: "POST", headers: authorized(), body: JSON.stringify({
+      id: "second-phone", label: "重复手机", device_key: "replacement-secret", domains: ["ai"],
+    }),
+  }))).status).toBe(409);
+  expect((await app.fetch(new Request("http://local/api/notifications/bark/targets/missing-phone", {
+    method: "PUT", headers: authorized(), body: JSON.stringify({ enabled: false }),
+  }))).status).toBe(404);
+  const statusResponse = await app.fetch(new Request("http://local/api/notifications/bark/targets?health=1", { headers: authorized() }));
+  const statusBody = await statusResponse.json();
+  expect(statusBody.targets).toHaveLength(2);
+  expect(JSON.stringify(statusBody)).not.toContain("device-secret");
+
+  const tested = await app.fetch(new Request("http://local/api/notifications/bark/targets/second-phone/test", {
+    method: "POST", headers: authorized(), body: JSON.stringify({ idempotency_key: "panel-test-second" }),
+  }));
+  expect(await tested.json()).toEqual({ target_id: "second-phone", accepted: true, replayed: false });
+  expect(requests.find((request) => request.url.endsWith("/push"))?.body).toMatchObject({
+    device_key: "second-device-secret-9876", title: "Totemora 设备测试",
+  });
+  const disabled = await app.fetch(new Request("http://local/api/notifications/bark/targets/second-phone", {
+    method: "PUT", headers: authorized(), body: JSON.stringify({ enabled: false }),
+  }));
+  expect(await disabled.json()).toMatchObject({ enabled: false, key_suffix: "9876" });
+  const audit = await (await app.fetch(new Request("http://local/api/notifications/bark/audit", { headers: authorized() }))).json();
+  expect(audit.events.map((event: any) => event.action)).toEqual(expect.arrayContaining(["created", "updated", "tested"]));
+  expect(JSON.stringify(audit)).not.toContain("second-device-secret");
   await rm(dataDir, { recursive: true, force: true });
 });
 

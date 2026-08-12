@@ -45,9 +45,14 @@ test("exposes living members, intelligence and persistent Git Flow through MCP",
     if (url.pathname === "/api/members/qwen_intelligence/chat") return Response.json({ reply: { content: "情报已收到" } });
     if (url.pathname === "/api/intelligence") return Response.json({ briefs: [] });
     if (url.pathname === "/api/intelligence/candidates") return Response.json({ candidates: [], counts: { queued: 0 } });
+    if (url.pathname === "/api/finance") return Response.json({ briefs: [] });
+    if (url.pathname === "/api/finance/candidates") return Response.json({ candidates: [], counts: { queued: 0 } });
+    if (url.pathname === "/api/finance/sources") return Response.json({ sources: [{ id: "cninfo-disclosures", tier: "S0", status: "ready" }] });
     if (url.pathname === "/api/actions") return Response.json({ actions: [] });
     if (url.pathname === "/api/intelligence/tasks" && init?.method === "POST") return Response.json({ id: "intel-task-1", kind: "intelligence_brief", status: "queued" });
     if (url.pathname === "/api/intelligence/tasks/intel-task-1") return Response.json({ id: "intel-task-1", kind: "intelligence_brief", status: "completed", result: { id: "brief-1", pushed_messages: 3 } });
+    if (url.pathname === "/api/finance/tasks" && init?.method === "POST") return Response.json({ id: "finance-task-1", kind: "finance_watch", status: "queued" });
+    if (url.pathname === "/api/finance/tasks/finance-task-1") return Response.json({ id: "finance-task-1", kind: "finance_watch", status: "completed", result: { id: "finance-brief-1", queued_messages: 2 } });
     if (url.pathname === "/api/development/tasks" && init?.method === "POST") {
       return Response.json({ id: "task-1", kind: "git_flow", status: "queued", workplace_id: "workplace-1", goal: proposal.goal, mode: "merge", issue_mode: "auto" });
     }
@@ -83,9 +88,14 @@ test("exposes living members, intelligence and persistent Git Flow through MCP",
     "totemora_chat_with_member",
     "totemora_list_intelligence_briefs",
     "totemora_list_intelligence_candidates",
+    "totemora_list_finance_briefs",
+    "totemora_list_finance_candidates",
+    "totemora_list_finance_sources",
     "totemora_list_actions",
     "totemora_run_intelligence_brief",
     "totemora_get_intelligence_task",
+    "totemora_run_finance_watch",
+    "totemora_get_finance_task",
     "totemora_start_git_flow",
     "totemora_get_task",
     "totemora_list_git_flows",
@@ -100,6 +110,12 @@ test("exposes living members, intelligence and persistent Git Flow through MCP",
   expect(intelligence.structuredContent).toMatchObject({ id: "intel-task-1", status: "queued" });
   const intelligenceDone = await client.callTool({ name: "totemora_get_intelligence_task", arguments: { task_id: "intel-task-1" } });
   expect(intelligenceDone.structuredContent).toMatchObject({ status: "completed", result: { pushed_messages: 3 } });
+  const sources = await client.callTool({ name: "totemora_list_finance_sources", arguments: {} });
+  expect(sources.structuredContent).toMatchObject({ sources: [{ id: "cninfo-disclosures", tier: "S0", status: "ready" }] });
+  const finance = await client.callTool({ name: "totemora_run_finance_watch", arguments: { message_count: 3, idempotency_key: "finance-test" } });
+  expect(finance.structuredContent).toMatchObject({ id: "finance-task-1", status: "queued" });
+  const financeDone = await client.callTool({ name: "totemora_get_finance_task", arguments: { task_id: "finance-task-1" } });
+  expect(financeDone.structuredContent).toMatchObject({ status: "completed", result: { queued_messages: 2 } });
 
   const prepared = await client.callTool({
     name: "totemora_start_git_flow",

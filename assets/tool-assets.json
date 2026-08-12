@@ -70,6 +70,40 @@
       }
     },
     {
+      "id": "finance-intelligence",
+      "name": "Finance Intelligence Watch",
+      "kind": "tool_service",
+      "maturity": "experimental",
+      "version": 1,
+      "summary": "以官方披露、监管和宏观数据为证据主干，按市场、自选标的、事件类型与证据等级形成克制的财经候选池。",
+      "executor": "builtin:FinanceIntelligenceService",
+      "actions": ["collect", "summarize", "push_bark", "push_telegram"],
+      "risk": "medium",
+      "default_access": "deny",
+      "policy_requirements": ["official_source_first", "domain_isolation", "no_investment_advice", "secret_isolation", "action_journal"],
+      "blueprint": {
+        "source": "docs/adr/0017-finance-intelligence-vertical.md",
+        "notes": "模型负责事件理解和极简解释；来源白名单、证据等级、去重、阈值与逐目标投递由确定性程序控制。"
+      }
+    },
+    {
+      "id": "official-finance-sources",
+      "name": "Official Finance Source Registry",
+      "kind": "tool_adapter",
+      "maturity": "experimental",
+      "version": 1,
+      "summary": "受控采集巨潮、证监会、人民银行、国家统计局、SEC、美联储和香港金融管理局，并记录逐源健康与缓存证据。",
+      "executor": "builtin:FinanceSourceRegistry",
+      "actions": ["read_disclosures", "read_regulation", "read_macro", "inspect_source_health"],
+      "risk": "low",
+      "default_access": "deny",
+      "policy_requirements": ["https_source_allowlist", "bounded_fetch", "source_attribution", "cache_age_limit", "original_source_verification"],
+      "blueprint": {
+        "source": "docs/finance-intelligence.md",
+        "notes": "S0/S1 可作为事实证据；商业媒体和行情接口只在取得许可或凭据后启用，社交来源永不单独证明事实。"
+      }
+    },
+    {
       "id": "telegram-bot",
       "name": "Telegram Tribe Bot",
       "kind": "infrastructure",

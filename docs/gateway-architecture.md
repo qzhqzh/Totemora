@@ -40,7 +40,7 @@ Web / MCP / Telegram / Cron / Webhook / IDE / Gateway CLI
 
 - Gateway：Bun HTTP 常驻服务，Web 静态资源与 JSON API 同源。
 - 状态：`.totemora/totemora.db` 使用 SQLite WAL；不可变 Run 证据、Secrets、Operator Token 和静态资产目录保留为文件。
-- Web：任务大厅、证据台、成员营帐、火种、资产、听风台、内容工坊与治理审批。
+- Web：任务大厅、证据台、成员营帐、火种、资产、AI / 财经双域情报台、内容工坊与治理审批。
 - CLI：配置、Provider 检查和通用 Run 仍本地直连；Gateway 管理和专业任务命令调用常驻 Gateway。
 - MCP：Streamable HTTP `/mcp` 与 stdio bridge，暴露结果导向的专业服务，不暴露任意 prompt 或 Shell。
 - Telegram/Bark：受控通知、命令与反馈通道，不创建第二份情报队列。
@@ -50,7 +50,7 @@ Web / MCP / Telegram / Cron / Webhook / IDE / Gateway CLI
 
 ## 专业服务与资产
 
-专业服务向调用方暴露一个长期结果目标，内部由 Chief 路由给专员。每次执行形成 `SpecialistTask`；服务定义、长期绑定和单次任务分离。Git、听风、内容各自拥有状态机，统一任务信封、事件、幂等、恢复、验收和经验信用。
+专业服务向调用方暴露一个长期结果目标，内部由 Chief 路由给专员。每次执行形成 `SpecialistTask`；服务定义、长期绑定和单次任务分离。Git、AI 情报、财经情报和内容各自拥有状态机，统一任务信封、事件、幂等、恢复、验收和经验信用。财经垂直作为首个新增样本，验证了新成员可复用候选、派发、资产和成长内核，同时保留自己的证据等级和风险门禁。
 
 确定性执行器属于部落资产，不属于成员。`assets/tool-assets.json` 保存图纸、动作、风险和授权；动作账本记录成员、工作流、幂等键、结果和证据。Skill 说明如何判断和工作，资产执行受控动作，专业服务提供稳定契约。
 

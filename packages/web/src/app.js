@@ -11,6 +11,8 @@ let activeMemberId;
 let contentWorks = [];
 const contentIllustrationUrls = new Map();
 let observatoryLoading = false;
+let barkTargets = [];
+let editingBarkTargetId;
 
 $("operator-token").value = sessionStorage.getItem("totemora_operator_token") || "";
 $("operator-token").addEventListener("change", () => {
@@ -20,6 +22,9 @@ $("operator-token").addEventListener("change", () => {
   void loadDevelopmentHistory();
   void loadObservatory();
   void loadContentStudio();
+  void loadIntelligence();
+  void loadFinance();
+  void loadBarkTargets();
 });
 
 $("refresh-observatory").addEventListener("click", () => void loadObservatory());
@@ -34,7 +39,10 @@ async function loadTribe() {
       <small>${member.skills.map(escapeHtml).join(" · ") || "暂无 Skill"}</small>
     </article>`).join("");
   renderCodex();
-  await Promise.all([loadEmbers(), loadAssets(), loadMemberDossiers(), loadIntelligence(), loadIntelligencePreferences(), loadContentStudio()]);
+  await Promise.all([
+    loadEmbers(), loadAssets(), loadMemberDossiers(), loadIntelligence(), loadIntelligencePreferences(),
+    loadFinance(), loadFinancePreferences(), loadContentStudio(), loadBarkTargets(),
+  ]);
   await loadObservatory();
   $("chief").innerHTML = tribe.members.filter((m) => m.roles.includes("chief") && !["inactive", "retired"].includes(m.status))
     .map((m) => `<option value="${escapeHtml(m.id)}" ${m.id === tribe.tribe.chief ? "selected" : ""}>${escapeHtml(m.name)} · ${escapeHtml(m.model)}</option>`).join("");
@@ -50,9 +58,9 @@ async function loadObservatory({ quiet = false } = {}) {
   refreshButton.disabled = true;
   if (!quiet) $("observatory-live").textContent = "正在汇总部落现场…";
   try {
-    const [latestStatus, serviceData, dossierData, assetData, candidatePool] = await Promise.all([
+    const [latestStatus, serviceData, dossierData, assetData, candidatePool, financePool] = await Promise.all([
       api("/api/status"), api("/api/services"), api("/api/members/dossiers"),
-      api("/api/assets"), api("/api/intelligence/candidates"),
+      api("/api/assets"), api("/api/intelligence/candidates"), api("/api/finance/candidates"),
     ]);
     let serviceTasks = [];
     let actions = [];
@@ -70,7 +78,7 @@ async function loadObservatory({ quiet = false } = {}) {
     renderObservatorySummary(latestStatus, serviceData, dossierData.members, assetData.assets, serviceTasks, protectedEvidenceError);
     renderServiceObservatory(serviceData, serviceTasks, protectedEvidenceError);
     renderEvidenceStream(serviceData.services, serviceTasks, actions, dossierData.members, protectedEvidenceError);
-    renderFeedbackEvidence(candidatePool.candidates);
+    renderFeedbackEvidence([...candidatePool.candidates, ...financePool.candidates]);
     $("observatory-live").classList.remove("error");
     $("observatory-live").textContent = `现场更新于 ${formatObservatoryTime(new Date().toISOString())} · 30 秒自动刷新`;
   } catch (error) {
@@ -305,16 +313,12 @@ $("member-chat-form").addEventListener("submit", async (event) => {
 
 async function loadIntelligence() {
   const [{ briefs }, pool] = await Promise.all([api("/api/intelligence"), api("/api/intelligence/candidates")]);
-  $("candidate-summary").textContent = `待推送 ${pool.counts.queued || 0} · 重试等待 ${pool.counts.retry_wait || 0} · 通道阻塞 ${pool.counts.channel_blocked || 0} · 已抑制 ${pool.counts.held || 0} · 已推送 ${pool.counts.pushed || 0} · 永久失败 ${pool.counts.failed || 0} · 状态未知 ${pool.counts.delivery_unknown || 0}`;
-  $("intelligence-candidates").innerHTML = pool.candidates.slice(0, 12).map((item) => `<article class="brief ${escapeHtml(item.status)}" data-candidate="${escapeHtml(item.id)}"><h3>${escapeHtml(item.headline)}</h3><p>${escapeHtml(item.brief)}</p><div class="chips">${escapeHtml(item.status)} · 总分 ${Math.round(item.scores.total * 100)}（模型 ${Math.round((item.scores.base_total ?? item.scores.total) * 100)} / 反馈 ${Math.round((item.scores.feedback_adjustment || 0) * 100)}） · 重要 ${Math.round(item.scores.importance * 100)} · 兴趣 ${Math.round(item.scores.interest * 100)} · 可信 ${Math.round(item.scores.confidence * 100)} · 新颖 ${Math.round(item.scores.novelty * 100)}</div><small>${escapeHtml(item.decision)} · ${escapeHtml(item.rationale)}</small><div class="candidate-feedback" role="group" aria-label="评价这条候选消息"><button type="button" data-feedback="valuable">有价值 ${item.feedback?.valuable || ""}</button><button type="button" data-feedback="not_valuable">没价值 ${item.feedback?.not_valuable || ""}</button><button type="button" data-feedback="duplicate">重复 ${item.feedback?.duplicate || ""}</button><button type="button" data-feedback="too_late">太晚 ${item.feedback?.too_late || ""}</button></div><small class="feedback-status" aria-live="polite">${item.feedback?.opened ? `Bark 已打开 ${item.feedback.opened} 次；这是高置信正向证据` : "未反馈不会扣分；主动反馈才会校正后续相似消息"}</small></article>`).join("") || "<p class=\"section-note\">候选池为空。可以立即扫描；如果来源或模型失败，失败原因会留在扫描记录中。</p>";
-  $("intelligence-history").innerHTML = briefs.slice(0, 8).map((brief) => `<article class="brief ${escapeHtml(brief.status)}"><h3>${escapeHtml(brief.title)}</h3><p>${escapeHtml(brief.summary || brief.error || "")}</p><div class="chips">${escapeHtml(brief.created_at)} · 来源 ${brief.sources.length} · 通知 ${brief.pushed_messages}</div>${brief.items.map((item) => `<p><b>${escapeHtml(item.headline)}</b><br><small>${escapeHtml(item.brief)}</small></p>`).join("")}</article>`).join("") || "<p class=\"section-note\">听风尚未带回情报。</p>";
+  renderCandidatePool(pool, "candidate-summary", "intelligence-candidates");
+  renderBriefs(briefs, "intelligence-history", "听风尚未带回情报。");
   if ($("operator-token").value) {
     try {
       const bark = await operatorApi("/api/intelligence/bark?health=1");
-      $("bark-status").className = `channel-status ${bark.healthy ? "ready" : bark.channel_status}`;
-      $("bark-status").textContent = bark.configured
-        ? `内部 Bark ${bark.healthy ? "在线" : bark.channel_status} · ${bark.server_url || ""} · 连续失败 ${bark.consecutive_failures}${bark.retry_after ? ` · ${bark.retry_after} 后重试` : ""}`
-        : "内部 Bark 尚未配置 device key；扫描仍会继续，候选不会丢失";
+      renderBarkStatus("bark-status", bark, "AI");
     } catch (error) {
       $("bark-status").className = "channel-status error";
       $("bark-status").textContent = `Bark 状态读取失败：${error.message}`;
@@ -324,7 +328,211 @@ async function loadIntelligence() {
   }
 }
 
-$("intelligence-candidates").addEventListener("click", async (event) => {
+function renderCandidatePool(pool, summaryId, containerId) {
+  $(summaryId).textContent = `待推送 ${pool.counts.queued || 0} · 重试 ${pool.counts.retry_wait || 0} · 通道阻塞 ${pool.counts.channel_blocked || 0} · 投递未知 ${pool.counts.delivery_unknown || 0} · 抑制 ${pool.counts.held || 0} · 已推送 ${pool.counts.pushed || 0} · 失败 ${pool.counts.failed || 0}`;
+  $(containerId).innerHTML = pool.candidates.slice(0, 6).map((item) => {
+    const evidence = [item.evidence_tier, item.market, ...(item.symbols || []), item.event_type].filter(Boolean).map(escapeHtml).join(" · ");
+    return `<article class="brief ${escapeHtml(item.status)}" data-candidate="${escapeHtml(item.id)}"><h3>${externalLink(item.url, item.headline)}</h3><p>${escapeHtml(item.brief)}</p><div class="chips">${evidence ? `${evidence} · ` : ""}${escapeHtml(item.status)} · 总分 ${Math.round(item.scores.total * 100)}（模型 ${Math.round((item.scores.base_total ?? item.scores.total) * 100)} / 反馈 ${Math.round((item.scores.feedback_adjustment || 0) * 100)}） · 可信 ${Math.round(item.scores.confidence * 100)}</div><small>${escapeHtml(item.decision)} · ${escapeHtml(item.rationale)}</small><div class="candidate-feedback" role="group" aria-label="评价这条候选消息"><button type="button" data-feedback="valuable">有价值 ${item.feedback?.valuable || ""}</button><button type="button" data-feedback="not_valuable">没价值 ${item.feedback?.not_valuable || ""}</button><button type="button" data-feedback="duplicate">重复 ${item.feedback?.duplicate || ""}</button><button type="button" data-feedback="too_late">太晚 ${item.feedback?.too_late || ""}</button></div><small class="feedback-status" aria-live="polite">${item.feedback?.opened ? `Bark 已打开 ${item.feedback.opened} 次；这是高置信正向证据` : "未反馈不会扣分；主动反馈才会校正后续相似消息"}</small></article>`;
+  }).join("") || "<p class=\"section-note\">候选池为空。可以立即扫描；失败原因会留在扫描记录中。</p>";
+}
+
+function renderBriefs(briefs, containerId, emptyText) {
+  $(containerId).innerHTML = briefs.slice(0, 4).map((brief) => `<article class="brief ${escapeHtml(brief.status)}"><h3>${escapeHtml(brief.title)}</h3><p>${escapeHtml(brief.summary || brief.error || "")}</p><div class="chips">${escapeHtml(brief.created_at)} · 来源 ${brief.sources?.length || 0} · 通知 ${brief.pushed_messages || 0}</div>${(brief.items || []).map((item) => `<p><b>${externalLink(item.url, item.headline)}</b><br><small>${escapeHtml(item.brief)}</small></p>`).join("")}</article>`).join("") || `<p class="section-note">${escapeHtml(emptyText)}</p>`;
+}
+
+function renderBarkStatus(elementId, bark, domainLabel) {
+  const targets = (bark.targets || []).filter((target) => target.enabled);
+  const ready = targets.length > 0 && targets.every((target) => target.healthy !== false && target.channel_status === "ready");
+  $(elementId).className = `channel-status ${ready ? "ready" : bark.channel_status}`;
+  $(elementId).textContent = bark.configured
+    ? `${domainLabel} 路由 ${targets.length} 台设备 · ${targets.map((target) => `${target.id} ${target.healthy === false ? "离线" : target.channel_status}`).join(" · ") || "无启用目标"}`
+    : "Bark 尚未配置；扫描仍会继续，候选不会丢失";
+}
+
+async function loadBarkTargets() {
+  const summary = $("bark-target-summary");
+  if (!$("operator-token").value.trim()) {
+    barkTargets = [];
+    summary.className = "notification-summary";
+    summary.textContent = "输入操作员 Token 后可查看、添加和测试通知设备。";
+    $("bark-target-list").innerHTML = '<div class="notification-empty"><b>设备配置已保护</b><p>Device key 和路由设置只对操作员开放。</p></div>';
+    $("bark-target-audit").innerHTML = '<p class="notification-empty">输入操作员 Token 后显示最近配置与测试记录。</p>';
+    setBarkEditorAvailability(false, "需要操作员 Token");
+    return;
+  }
+  summary.className = "notification-summary loading";
+  summary.textContent = "正在检查 Bark 设备与独立熔断状态…";
+  try {
+    const [status, audit] = await Promise.all([
+      operatorApi("/api/notifications/bark/targets?health=1"),
+      operatorApi("/api/notifications/bark/audit"),
+    ]);
+    barkTargets = status.targets || [];
+    renderBarkTargets(status, audit.events || []);
+  } catch (error) {
+    barkTargets = [];
+    summary.className = "notification-summary error";
+    summary.textContent = `设备配置读取失败：${error.message}`;
+    $("bark-target-list").innerHTML = '<div class="notification-empty"><b>暂时无法读取设备</b><p>检查操作员 Token 或 Gateway 状态后重试。</p></div>';
+    $("bark-target-audit").innerHTML = '<p class="notification-empty">设备审计记录已锁定。</p>';
+    setBarkEditorAvailability(false, "设备状态不可用");
+  }
+}
+
+function renderBarkTargets(status, auditEvents) {
+  const enabled = barkTargets.filter((target) => target.enabled);
+  const ready = enabled.filter((target) => target.channel_status === "ready" && target.healthy !== false);
+  const attention = enabled.length - ready.length;
+  const summary = $("bark-target-summary");
+  summary.className = `notification-summary ${attention ? "attention" : enabled.length ? "ready" : ""}`;
+  summary.textContent = barkTargets.length
+    ? `${barkTargets.length} 台已登记 · ${enabled.length} 台启用 · ${ready.length} 台可投递${attention ? ` · ${attention} 台需关注` : ""} · 配置保存后即时生效`
+    : "尚未接入 Bark 设备；填写左侧信息即可添加第一台。";
+  setBarkEditorAvailability(status.write_enabled, status.write_reason);
+  $("bark-target-list").innerHTML = barkTargets.map((target) => {
+    const state = !target.enabled
+      ? { className: "disabled", label: "已停用" }
+      : target.healthy === false
+        ? { className: "attention", label: "健康检查失败" }
+        : target.channel_status === "ready"
+          ? { className: "ready", label: "可投递" }
+          : { className: "attention", label: target.channel_status === "open" ? "熔断等待" : "通道降级" };
+    const source = target.source === "legacy" ? "旧主设备" : target.source === "environment" ? "环境配置" : "面板管理";
+    const managed = target.source === "managed" && status.write_enabled;
+    return `<article class="notification-target ${state.className}" data-bark-target="${escapeHtml(target.id)}">
+      <div class="notification-target-head"><div><h5>${escapeHtml(target.label || target.id)}</h5><small>${escapeHtml(target.id)} · ${source}</small></div><span class="notification-target-state">${state.label}</span></div>
+      <dl><div><dt>接收</dt><dd>${target.domains.map((domain) => domain === "ai" ? "AI / 技术" : "财经 / 市场").join(" · ") || "未选择领域"}</dd></div><div><dt>密钥</dt><dd>••••${escapeHtml(target.key_suffix || "未知")}</dd></div><div><dt>服务</dt><dd>${escapeHtml(target.server_url)}</dd></div></dl>
+      ${target.error ? `<p class="notification-target-error">${escapeHtml(target.error)}</p>` : ""}
+      <div class="notification-target-actions"><button type="button" class="secondary" data-bark-test ${target.enabled ? "" : "disabled"}>发送测试</button>${managed ? '<button type="button" class="secondary" data-bark-edit>修改</button><button type="button" class="secondary" data-bark-toggle>' + (target.enabled ? "停用" : "启用") + "</button>" : ""}</div>
+      <small class="notification-target-feedback" role="status" aria-live="polite">${target.retry_after ? `下次尝试 ${escapeHtml(new Date(target.retry_after).toLocaleString())}` : "每台设备独立记录健康与熔断状态"}</small>
+    </article>`;
+  }).join("") || '<div class="notification-empty"><b>还没有通知设备</b><p>先在 Bark App 中添加自建服务器，再把注册得到的 device key 填入左侧。</p></div>';
+  $("bark-target-audit").innerHTML = auditEvents.slice(0, 12).map((event) => {
+    const action = ({ created: "接入设备", updated: "更新路由", tested: "测试成功", test_failed: "测试失败" })[event.action] || event.action;
+    return `<div class="notification-audit-row"><div><b>${escapeHtml(action)}</b><span>${escapeHtml(event.target_id)}</span></div><time datetime="${escapeHtml(event.at)}">${escapeHtml(new Date(event.at).toLocaleString())}</time>${event.detail ? `<small>${escapeHtml(event.detail)}</small>` : ""}</div>`;
+  }).join("") || '<p class="notification-empty">还没有配置或测试记录。</p>';
+}
+
+function setBarkEditorAvailability(writeEnabled, reason) {
+  const editor = $("bark-target-form");
+  const statusNode = $("bark-target-form-status");
+  editor.querySelectorAll("input, button").forEach((control) => { control.disabled = !writeEnabled; });
+  if (writeEnabled) {
+    $("bark-target-id").disabled = Boolean(editingBarkTargetId);
+    $("bark-target-key").required = !editingBarkTargetId;
+    if (["需要操作员 Token", "设备状态不可用", "当前配置只读"].includes(statusNode.textContent)) {
+      statusNode.textContent = "";
+    }
+  } else {
+    statusNode.textContent = reason || "当前配置只读";
+  }
+}
+
+function resetBarkTargetForm() {
+  editingBarkTargetId = undefined;
+  $("bark-target-form").reset();
+  $("bark-target-id").disabled = false;
+  $("bark-target-key").required = true;
+  $("bark-target-key").placeholder = "只会写入服务器，不会回显";
+  $("bark-editor-title").textContent = "接入一台设备";
+  $("bark-editor-note").textContent = "在 Bark App 添加自建服务器后，把注册得到的 device key 填在这里。";
+  $("save-bark-target").textContent = "添加设备";
+  $("cancel-bark-edit").classList.add("hidden");
+}
+
+$("refresh-bark-targets").addEventListener("click", async (event) => {
+  event.currentTarget.disabled = true;
+  try { await loadBarkTargets(); }
+  finally { event.currentTarget.disabled = false; }
+});
+
+$("cancel-bark-edit").addEventListener("click", () => {
+  resetBarkTargetForm();
+  $("bark-target-form-status").textContent = "已取消编辑";
+});
+
+$("bark-target-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = event.submitter;
+  const statusNode = $("bark-target-form-status");
+  const domains = [$("bark-domain-ai").checked && "ai", $("bark-domain-finance").checked && "finance"].filter(Boolean);
+  if (!domains.length) { statusNode.classList.add("error"); statusNode.textContent = "至少选择一个接收领域"; return; }
+  button.disabled = true;
+  statusNode.classList.remove("error");
+  statusNode.textContent = editingBarkTargetId ? "正在更新设备路由…" : "正在安全写入设备配置…";
+  const id = editingBarkTargetId || $("bark-target-id").value.trim();
+  try {
+    const payload = {
+      id, label: $("bark-target-label").value.trim(),
+      device_key: $("bark-target-key").value.trim() || undefined,
+      server_url: $("bark-target-server").value.trim(), domains,
+      enabled: $("bark-target-enabled").checked,
+    };
+    await operatorApi(editingBarkTargetId
+      ? `/api/notifications/bark/targets/${encodeURIComponent(id)}`
+      : "/api/notifications/bark/targets", {
+      method: editingBarkTargetId ? "PUT" : "POST", body: JSON.stringify(payload),
+    });
+    resetBarkTargetForm();
+    statusNode.textContent = "设备配置已保存并即时生效，无需重启 Gateway";
+    await Promise.all([loadBarkTargets(), loadIntelligence(), loadFinance()]);
+  } catch (error) {
+    statusNode.classList.add("error");
+    statusNode.textContent = `保存失败：${error.message}`;
+  } finally { button.disabled = false; }
+});
+
+$("bark-target-list").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-bark-test],[data-bark-edit],[data-bark-toggle]");
+  if (!button) return;
+  const card = button.closest("[data-bark-target]");
+  const target = barkTargets.find((candidate) => candidate.id === card.dataset.barkTarget);
+  if (!target) return;
+  const feedback = card.querySelector(".notification-target-feedback");
+  if (button.matches("[data-bark-edit]")) {
+    editingBarkTargetId = target.id;
+    $("bark-target-id").value = target.id;
+    $("bark-target-id").disabled = true;
+    $("bark-target-label").value = target.label || target.id;
+    $("bark-target-key").value = "";
+    $("bark-target-key").required = false;
+    $("bark-target-key").placeholder = `留空保持当前密钥 ••••${target.key_suffix || ""}`;
+    $("bark-target-server").value = target.server_url;
+    $("bark-domain-ai").checked = target.domains.includes("ai");
+    $("bark-domain-finance").checked = target.domains.includes("finance");
+    $("bark-target-enabled").checked = target.enabled;
+    $("bark-editor-title").textContent = `修改 ${target.label || target.id}`;
+    $("bark-editor-note").textContent = "只修改需要变化的路由；device key 留空会安全保留原值。";
+    $("save-bark-target").textContent = "保存修改";
+    $("cancel-bark-edit").classList.remove("hidden");
+    $("bark-target-label").focus();
+    $("bark-target-form").scrollIntoView({ block: "nearest" });
+    return;
+  }
+  button.disabled = true;
+  feedback.classList.remove("error");
+  try {
+    if (button.matches("[data-bark-toggle]")) {
+      feedback.textContent = target.enabled ? "正在停用设备…" : "正在启用设备…";
+      await operatorApi(`/api/notifications/bark/targets/${encodeURIComponent(target.id)}`, {
+        method: "PUT", body: JSON.stringify({ enabled: !target.enabled }),
+      });
+      feedback.textContent = target.enabled ? "设备已停用；候选与其他设备不受影响" : "设备已启用并即时加入路由";
+    } else {
+      feedback.textContent = "正在发送测试通知…";
+      await operatorApi(`/api/notifications/bark/targets/${encodeURIComponent(target.id)}/test`, {
+        method: "POST", body: JSON.stringify({ idempotency_key: `web-bark-test:${target.id}:${Date.now()}` }),
+      });
+      feedback.textContent = "Bark 服务已接受测试；请检查手机通知";
+    }
+    await Promise.all([loadBarkTargets(), loadIntelligence(), loadFinance()]);
+  } catch (error) {
+    feedback.classList.add("error");
+    feedback.textContent = `${button.matches("[data-bark-toggle]") ? "更新" : "测试"}失败：${error.message}`;
+  } finally { button.disabled = false; }
+});
+
+async function handleCandidateFeedback(event) {
   const button = event.target.closest("[data-feedback]");
   if (!button) return;
   const card = button.closest("[data-candidate]");
@@ -337,13 +545,16 @@ $("intelligence-candidates").addEventListener("click", async (event) => {
       method: "POST", body: JSON.stringify({ signal: button.dataset.feedback }),
     });
     statusNode.textContent = result.inserted ? "反馈已记录；下一轮相似消息评估会使用这条证据" : "这条反馈已记录过，没有重复计权";
-    await Promise.all([loadIntelligence(), loadMemberDossiers()]);
+    await Promise.all([loadIntelligence(), loadFinance(), loadMemberDossiers()]);
   } catch (error) {
     statusNode.classList.add("error");
     statusNode.textContent = `反馈失败：${error.message}。可再次点击重试。`;
     card.querySelectorAll("[data-feedback]").forEach((item) => { item.disabled = false; });
   }
-});
+}
+
+$("intelligence-candidates").addEventListener("click", handleCandidateFeedback);
+$("finance-candidates").addEventListener("click", handleCandidateFeedback);
 
 async function loadIntelligencePreferences() {
   const value = await api("/api/intelligence/preferences");
@@ -383,7 +594,7 @@ $("intelligence-preferences").addEventListener("submit", async (event) => {
 });
 
 $("run-intelligence").addEventListener("click", async () => {
-  const button = $("run-intelligence"); button.disabled = true; $("intelligence-status").textContent = "听风正在扫描、聚类并评估候选消息…";
+  const button = $("run-intelligence"); button.disabled = true; $("intelligence-status").classList.remove("error"); $("intelligence-status").textContent = "听风正在扫描、聚类并评估候选消息…";
   try {
     const task = await operatorApi("/api/intelligence/tasks", {
       method: "POST", body: JSON.stringify({ message_count: 3, delivery_mode: "candidate_pool", idempotency_key: `web-scan-${Date.now()}` }),
@@ -400,6 +611,130 @@ $("run-intelligence").addEventListener("click", async () => {
     $("intelligence-status").textContent = `扫描完成：${brief.title}，形成 ${brief.candidate_ids?.length || 0} 条候选，${brief.queued_messages || 0} 条进入推送队列${growth}`;
     await Promise.all([loadIntelligence(), loadMemberDossiers(), loadAssets()]);
   } catch (error) { $("intelligence-status").textContent = error.message; $("intelligence-status").classList.add("error"); }
+  finally { button.disabled = false; }
+});
+
+async function loadFinance() {
+  const [{ briefs }, pool, { sources }] = await Promise.all([
+    api("/api/finance"), api("/api/finance/candidates"), api("/api/finance/sources"),
+  ]);
+  renderCandidatePool(pool, "finance-candidate-summary", "finance-candidates");
+  renderBriefs(briefs, "finance-history", "观潮尚未完成首次巡查。");
+  $("finance-source-ledger").innerHTML = sources.map((source) => `<div class="source-row"><strong>${externalLink(source.url, source.name)}</strong><span class="source-state ${escapeHtml(source.status)}">${escapeHtml(source.tier)} · ${escapeHtml(source.status)}</span><p>${escapeHtml(source.summary)}</p><small>${source.last_success_at ? `上次成功 ${escapeHtml(source.last_success_at)}` : escapeHtml(source.error || "等待接入")}</small><small>${escapeHtml(source.availability)}</small></div>`).join("");
+  if ($("operator-token").value) {
+    try { renderBarkStatus("finance-bark-status", await operatorApi("/api/finance/bark?health=1"), "财经"); }
+    catch (error) {
+      $("finance-bark-status").className = "channel-status error";
+      $("finance-bark-status").textContent = `财经 Bark 状态读取失败：${error.message}`;
+    }
+  } else {
+    $("finance-bark-status").textContent = "输入操作员 Token 后可检查财经 Bark 设备路由";
+  }
+}
+
+async function loadFinancePreferences() {
+  const value = await api("/api/finance/preferences");
+  $("finance-interests").value = value.interests.join("\n");
+  $("finance-watchlist").value = value.watchlist.map((item) => `${item.market}:${item.symbol}${item.name ? ` ${item.name}` : ""}`).join("\n");
+  $("market-cn").checked = value.markets.includes("CN");
+  $("market-hk").checked = value.markets.includes("HK");
+  $("market-us").checked = value.markets.includes("US");
+  $("market-jp").checked = value.markets.includes("JP");
+  $("market-kr").checked = value.markets.includes("KR");
+  $("finance-disclosures").checked = value.channels.disclosures;
+  $("finance-regulation").checked = value.channels.regulation;
+  $("finance-macro").checked = value.channels.macro;
+  $("finance-global").checked = value.channels.global_official;
+  $("finance-market-media").checked = value.channels.market_media;
+  $("finance-asia-brief-enabled").checked = value.morning_briefings.asia_preopen.enabled;
+  $("finance-asia-brief-time").value = value.morning_briefings.asia_preopen.time;
+  $("finance-us-brief-enabled").checked = value.morning_briefings.us_overnight.enabled;
+  $("finance-us-brief-time").value = value.morning_briefings.us_overnight.time;
+  $("finance-scan-interval").value = value.scan_interval_minutes;
+  $("finance-push-interval").value = value.push_interval_seconds;
+  $("finance-push-threshold").value = value.push_threshold;
+}
+
+function readFinanceWatchlist() {
+  return $("finance-watchlist").value.split("\n").map((line) => line.trim()).filter(Boolean).map((line, index) => {
+    const match = line.match(/^(CN|HK|US|JP|KR):([^\s]+)(?:\s+(.+))?$/i);
+    if (!match) throw new Error(`自选清单第 ${index + 1} 行格式不正确`);
+    return { market: match[1].toUpperCase(), symbol: match[2].toUpperCase(), name: match[3]?.trim() || undefined };
+  });
+}
+
+$("finance-preferences").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = event.submitter; button.disabled = true;
+  try {
+    const markets = [["CN", "market-cn"], ["HK", "market-hk"], ["US", "market-us"], ["JP", "market-jp"], ["KR", "market-kr"]].filter(([, id]) => $(id).checked).map(([market]) => market);
+    await operatorApi("/api/finance/preferences", { method: "PUT", body: JSON.stringify({
+      interests: $("finance-interests").value.split("\n").map((item) => item.trim()).filter(Boolean),
+      watchlist: readFinanceWatchlist(), markets,
+      channels: {
+        disclosures: $("finance-disclosures").checked, regulation: $("finance-regulation").checked,
+        macro: $("finance-macro").checked, global_official: $("finance-global").checked,
+        market_media: $("finance-market-media").checked,
+      },
+      scan_interval_minutes: Number($("finance-scan-interval").value),
+      push_interval_seconds: Number($("finance-push-interval").value),
+      push_threshold: Number($("finance-push-threshold").value), novelty_history_hours: 168,
+      morning_briefings: {
+        timezone: "Asia/Shanghai",
+        asia_preopen: { enabled: $("finance-asia-brief-enabled").checked, time: $("finance-asia-brief-time").value },
+        us_overnight: { enabled: $("finance-us-brief-enabled").checked, time: $("finance-us-brief-time").value },
+      },
+    }) });
+    $("finance-preference-status").textContent = "范围已保存；观潮下一轮巡查生效";
+    await loadFinance();
+  } catch (error) { $("finance-preference-status").textContent = error.message; }
+  finally { button.disabled = false; }
+});
+
+document.querySelectorAll("[data-finance-briefing]").forEach((button) => button.addEventListener("click", async () => {
+  const briefingType = button.dataset.financeBriefing;
+  button.disabled = true;
+  $("finance-status").classList.remove("error");
+  $("finance-status").textContent = "观潮正在采集结构化行情、新闻证据并生成测试晨报…";
+  try {
+    const task = await operatorApi("/api/finance/tasks", {
+      method: "POST", body: JSON.stringify({
+        message_count: 1, delivery_mode: "direct_push", briefing_type: briefingType,
+        idempotency_key: `web-finance-${briefingType}-${Date.now()}`,
+      }),
+    });
+    let current = task;
+    while (!["completed", "failed"].includes(current.status)) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      current = await operatorApi(`/api/finance/tasks/${encodeURIComponent(task.id)}`);
+      $("finance-status").textContent = `晨报任务 ${current.status}…`;
+    }
+    if (current.status === "failed") throw new Error(current.error || "财经晨报任务失败");
+    $("finance-status").textContent = `${current.result.title} 已完成，向财经设备发送 ${current.result.pushed_messages || 0} 条`;
+    await Promise.all([loadFinance(), loadMemberDossiers(), loadAssets()]);
+  } catch (error) {
+    $("finance-status").textContent = error.message;
+    $("finance-status").classList.add("error");
+  } finally { button.disabled = false; }
+}));
+
+$("run-finance").addEventListener("click", async () => {
+  const button = $("run-finance"); button.disabled = true; $("finance-status").classList.remove("error"); $("finance-status").textContent = "观潮正在读取权威来源与市场线索、核对事件并评估候选…";
+  try {
+    const task = await operatorApi("/api/finance/tasks", {
+      method: "POST", body: JSON.stringify({ message_count: 5, delivery_mode: "candidate_pool", idempotency_key: `web-finance-${Date.now()}` }),
+    });
+    let current = task;
+    while (!["completed", "failed"].includes(current.status)) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      current = await operatorApi(`/api/finance/tasks/${encodeURIComponent(task.id)}`);
+      $("finance-status").textContent = `观潮任务 ${current.status}…`;
+    }
+    if (current.status === "failed") throw new Error(current.error || "财经情报任务失败");
+    const brief = current.result;
+    $("finance-status").textContent = `扫描完成：${brief.title}，形成 ${brief.candidate_ids?.length || 0} 条候选，${brief.queued_messages || 0} 条进入推送队列`;
+    await Promise.all([loadFinance(), loadMemberDossiers(), loadAssets()]);
+  } catch (error) { $("finance-status").textContent = error.message; $("finance-status").classList.add("error"); }
   finally { button.disabled = false; }
 });
 
@@ -868,6 +1203,13 @@ async function operatorFetch(url, options = {}) {
   return response;
 }
 function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, (char) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", "'":"&#39;", "\"":"&quot;" })[char]); }
+function externalLink(value, label) {
+  try {
+    const url = new URL(String(value));
+    if (url.protocol !== "https:") return escapeHtml(label);
+    return `<a href="${escapeHtml(url.toString())}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`;
+  } catch { return escapeHtml(label); }
+}
 
 loadTribe().then(analyzeIntake).catch((error) => { $("tribe-status").textContent = error.message; $("tribe-status").classList.add("error"); });
 window.setInterval(() => { if (!document.hidden) void loadObservatory({ quiet: true }); }, 30_000);

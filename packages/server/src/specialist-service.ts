@@ -5,7 +5,7 @@ export type SpecialistTaskStatus =
   | "completed" | "failed" | "cancelled";
 
 export interface SpecialistServiceDefinition {
-  id: "git.flow" | "intelligence.watch" | "content.studio";
+  id: "git.flow" | "intelligence.watch" | "finance.watch" | "content.studio";
   version: number;
   title: string;
   summary: string;
@@ -58,6 +58,16 @@ export const SPECIALIST_SERVICES: SpecialistServiceDefinition[] = [
     risk: "external_side_effects",
     acceptance_policy: "扫描只算操作完成；候选获得明确正向反馈或专业任务验收后才形成成长信用。",
     stages: ["collect", "summarize", "candidate_gate", "dispatch", "feedback"],
+  },
+  {
+    id: "finance.watch", version: 1, title: "观潮财经值守",
+    summary: "常驻财经情报员按官方披露、监管与宏观来源扫描；市场、自选标的、事件和证据等级进入独立候选门禁。",
+    operations: ["scan"],
+    required_capabilities: ["financial-intelligence-briefing"],
+    allowed_assets: ["finance-intelligence", "official-finance-sources", "internal-bark", "telegram-bot"],
+    risk: "external_side_effects",
+    acceptance_policy: "扫描只算操作；明确用户正向反馈才形成成长信用。不得生成买卖建议，S2-S4 信息不能替代官方事实证据。",
+    stages: ["collect", "source_health", "summarize", "candidate_gate", "dispatch", "feedback"],
   },
   {
     id: "content.studio", version: 1, title: "部落内容工坊",

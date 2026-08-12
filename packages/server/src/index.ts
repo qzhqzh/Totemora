@@ -50,6 +50,18 @@ const intelligenceTimer = setInterval(() => {
 }, 60_000);
 intelligenceTimer.unref();
 
+let scheduledFinanceRunning = false;
+const financeTimer = setInterval(() => {
+  if (scheduledFinanceRunning) return;
+  scheduledFinanceRunning = true;
+  void app.runScheduledFinance().catch((error) => {
+    console.error(`Scheduled finance intelligence failed: ${error instanceof Error ? error.message : String(error)}`);
+  }).finally(() => {
+    scheduledFinanceRunning = false;
+  });
+}, 60_000);
+financeTimer.unref();
+
 let scheduledContentRunning = false;
 const contentTimer = setInterval(() => {
   if (scheduledContentRunning) return;

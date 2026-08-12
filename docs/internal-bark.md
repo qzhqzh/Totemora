@@ -20,8 +20,19 @@ HTTPS 反向代理或 Tailscale 访问；仅在可信局域网临时注册时，
 
 ## 2. 让 Bark App 注册设备
 
-在 Bark App 中添加上述可从手机访问的服务地址。注册成功后，把返回的 device key
-写入本机秘密文件：
+在 Bark App 中添加上述可从手机访问的服务地址。当前正式地址是
+`https://bark.qzhqzh.com`。注册成功后，优先通过 Web 的“双域情报台 → 通知设备”
+接入：
+
+1. 打开 Totemora Web，在页头输入 `.totemora/operator-token` 的内容。
+2. 在“通知设备”填写稳定的设备 ID、名称和 Bark 返回的 device key。
+3. 选择该手机接收 AI、财经或两个领域，保存后点击“发送测试”。
+
+Device key 只会通过受 Operator Token 保护的接口写入服务器，页面和 API
+此后只返回末四位。配置保存后 Gateway 会在下一次投递时重新读取，无需重启
+Gateway 或 Bark 容器。
+
+如果需要脱离 Web 手工维护，现有单设备仍可写入本机秘密文件：
 
 ```bash
 mkdir -p .totemora/secrets
@@ -34,6 +45,33 @@ chmod 600 .totemora/secrets/bark-device-key
 `8080`。服务地址默认是 `http://127.0.0.1:18080`；需要覆盖时写入
 `.totemora/secrets/bark-server-url`。公网地址必须使用 HTTPS。本机 Basic Auth
 分别放在 `bark-basic-auth-user` 和 `bark-basic-auth-password`。
+
+为避免设备密钥或 Basic Auth 被发送到未授权主机，Web 只能保存与
+`TOTEMORA_BARK_SERVER_URL`（或 `bark-server-url`）同源的地址。确需管理多个 Bark
+服务时，用逗号分隔的 `TOTEMORA_BARK_ALLOWED_ORIGINS` 显式加入可信 origin；不要
+把普通网站或不受控服务加入该名单。
+
+现有单 key 会自动成为只读目标 `primary`，同时接收 AI 和财经通知。Web 面板
+添加的设备保存在权限为 `0600` 的 `.totemora/secrets/bark-targets.json`。手工配置格式为：
+
+```json
+[
+  {
+    "id": "finance-phone",
+    "label": "财经手机",
+    "device_key": "在服务器本地填写第二台手机的 key",
+    "domains": ["finance"],
+    "enabled": true,
+    "server_url": "http://127.0.0.1:18080"
+  }
+]
+```
+
+这样 `primary` 继续接收 AI 和财经，`finance-phone` 只接收财经。若第二台也要接收两类通知，将 `domains` 改成 `["ai", "finance"]`。也可以通过 `TOTEMORA_BARK_TARGETS_JSON` 提供同一 JSON；环境变量一旦设置即成为权威只读来源，Web 只能查看和测试，不能覆盖它。生产环境优先使用权限为 `600` 的 Secret 文件，避免环境诊断输出密钥。
+
+目标 ID 必须唯一；相同 Bark 服务和 device key 的重复目标会被去重。Web 会展示
+目标 ID、名称、领域、服务器、健康/熔断状态和密钥末四位，永不返回完整 device key。
+每次新增、更新和测试都会留下不含密钥的审计记录。
 
 ## 3. 点击反馈
 
@@ -51,7 +89,7 @@ TOTEMORA_PUBLIC_BASE_URL=https://totemora.example
 
 - Bark 接受请求只记为“通道已接受”，不声称用户已看到。
 - 网络、429 和 5xx 按 1、5、15、60 分钟退避。
-- 连续 3 次通道失败后熔断 30 分钟；扫描继续，候选保留在 SQLite。
+- 每个目标连续 3 次通道失败后独立熔断 30 分钟；其他手机继续接收，候选保留在 SQLite 并按目标幂等重试。
 - 不会静默回退到 `api.day.app`。只有显式设置
   `TOTEMORA_BARK_ALLOW_LEGACY=true` 时，才读取旧的
   `.totemora/secrets/bark-url` 作为应急兼容输入。

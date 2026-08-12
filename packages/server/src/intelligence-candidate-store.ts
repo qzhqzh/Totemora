@@ -7,9 +7,12 @@ export type CandidateStatus =
   | "queued" | "held" | "pushing" | "retry_wait" | "channel_blocked"
   | "pushed" | "failed" | "delivery_unknown";
 export type CandidateFeedbackSignal = "valuable" | "not_valuable" | "duplicate" | "too_late" | "opened";
+export type IntelligenceDomain = "ai" | "finance";
+export type EvidenceTier = "S0" | "S1" | "S2" | "S3" | "S4";
 
 export interface IntelligenceCandidate {
   id: string;
+  domain: IntelligenceDomain;
   scan_id: string;
   member_id: string;
   event_key: string;
@@ -17,6 +20,11 @@ export interface IntelligenceCandidate {
   brief: string;
   url: string;
   source: string;
+  source_id?: string;
+  market?: string;
+  symbols: string[];
+  event_type?: string;
+  evidence_tier?: EvidenceTier;
   scores: {
     importance: number;
     interest: number;
@@ -47,6 +55,11 @@ export interface CandidateEvaluation {
   brief: string;
   url: string;
   source: string;
+  source_id?: string;
+  market?: string;
+  symbols?: string[];
+  event_type?: string;
+  evidence_tier?: EvidenceTier;
   importance: number;
   interest: number;
   confidence: number;
@@ -57,8 +70,9 @@ export interface CandidateEvaluation {
 }
 
 interface CandidateRow {
-  id: string; scan_id: string; member_id: string; event_key: string; headline: string; brief: string;
+  id: string; domain: IntelligenceDomain; scan_id: string; member_id: string; event_key: string; headline: string; brief: string;
   url: string; source: string; importance: number; interest: number; confidence: number; novelty: number;
+  source_id: string | null; market: string | null; symbols_json: string; event_type: string | null; evidence_tier: EvidenceTier | null;
   base_total: number; feedback_adjustment: number; total: number; rationale: string; is_update: number;
   status: CandidateStatus; decision: string; duplicate_of: string | null; attempt_count: number;
   next_attempt_at: string | null; claim_token: string | null; created_at: string; updated_at: string;
@@ -75,6 +89,7 @@ export class IntelligenceCandidateStore {
   }
 
   async ingest(input: {
+    domain?: IntelligenceDomain;
     scan_id: string;
     member_id: string;
     evaluations: CandidateEvaluation[];
@@ -83,6 +98,7 @@ export class IntelligenceCandidateStore {
     now?: Date;
   }): Promise<IntelligenceCandidate[]> {
     const now = input.now ?? new Date();
+    const domain = input.domain ?? "ai";
     const cutoff = new Date(now.getTime() - input.history_hours * 3_600_000).toISOString();
     return this.state.db.transaction(() => input.evaluations.map((evaluation) => {
       const priorRows = this.state.db.query(`
@@ -90,17 +106,17 @@ export class IntelligenceCandidateStore {
           SELECT 1 FROM candidate_feedback f WHERE f.candidate_id=c.id AND f.signal='duplicate'
         ) duplicate_feedback
         FROM intelligence_candidates c
-        WHERE c.created_at >= ? AND (c.event_key = ? OR c.url = ?)
+        WHERE c.domain = ? AND c.created_at >= ? AND (c.event_key = ? OR c.url = ?)
         ORDER BY created_at DESC LIMIT 20
-      `).all(cutoff, evaluation.event_key, evaluation.url) as CandidateRow[];
+      `).all(domain, cutoff, evaluation.event_key, evaluation.url) as CandidateRow[];
       const nearbyRows = this.state.db.query(`
         SELECT c.*,EXISTS(
           SELECT 1 FROM candidate_feedback f WHERE f.candidate_id=c.id AND f.signal='duplicate'
         ) duplicate_feedback
         FROM intelligence_candidates c
-        WHERE c.created_at >= ? AND c.source = ?
+        WHERE c.domain = ? AND c.created_at >= ? AND c.source = ?
         ORDER BY created_at DESC LIMIT 100
-      `).all(cutoff, evaluation.source) as CandidateRow[];
+      `).all(domain, cutoff, evaluation.source) as CandidateRow[];
       const prior = [...priorRows, ...nearbyRows].find((row, index, rows) =>
         rows.findIndex((candidate) => candidate.id === row.id) === index
         && (
@@ -110,7 +126,7 @@ export class IntelligenceCandidateStore {
         && ["queued", "pushing", "retry_wait", "channel_blocked", "pushed", "failed", "delivery_unknown"].includes(row.status),
       );
       const baseTotal = weightedScore(evaluation);
-      const adjustment = this.feedbackAdjustment(evaluation, cutoff);
+      const adjustment = this.feedbackAdjustment(domain, evaluation, cutoff);
       const total = clampScore(baseTotal + adjustment);
       const substantiveUpdate = Boolean(prior?.status === "pushed" && evaluation.is_update && evaluation.novelty >= 0.75);
       const eligible = evaluation.push_worthy && total >= input.push_threshold && evaluation.confidence >= 0.55
@@ -121,9 +137,11 @@ export class IntelligenceCandidateStore {
           ? `达到推送阈值 ${input.push_threshold}${adjustment ? `（用户反馈校正 ${signed(adjustment)}）` : ""}`
           : `价值或新颖度未达到推送阈值 ${input.push_threshold}`;
       const candidate: IntelligenceCandidate = {
-        id: crypto.randomUUID(), scan_id: input.scan_id, member_id: input.member_id,
+        id: crypto.randomUUID(), domain, scan_id: input.scan_id, member_id: input.member_id,
         event_key: evaluation.event_key, headline: evaluation.headline, brief: evaluation.brief,
-        url: evaluation.url, source: evaluation.source,
+        url: evaluation.url, source: evaluation.source, source_id: evaluation.source_id,
+        market: evaluation.market, symbols: normalizeSymbols(evaluation.symbols),
+        event_type: evaluation.event_type, evidence_tier: evaluation.evidence_tier,
         scores: {
           importance: clamp(evaluation.importance), interest: clamp(evaluation.interest),
           confidence: clamp(evaluation.confidence), novelty: clamp(evaluation.novelty),
@@ -139,7 +157,7 @@ export class IntelligenceCandidateStore {
     }))();
   }
 
-  async claimNext(minimumIntervalMs: number, now = new Date()): Promise<IntelligenceCandidate | undefined> {
+  async claimNext(minimumIntervalMs: number, now = new Date(), domain?: IntelligenceDomain): Promise<IntelligenceCandidate | undefined> {
     return this.state.db.transaction(() => {
       const staleCutoff = new Date(now.getTime() - 5 * 60_000).toISOString();
       this.state.db.query(`
@@ -148,23 +166,25 @@ export class IntelligenceCandidateStore {
             decision='服务在外发确认前中断；为避免重复打扰，不自动重推',
             claim_token=NULL, updated_at=?
         WHERE status='pushing' AND (claimed_at IS NULL OR claimed_at <= ?)
-      `).run(now.toISOString(), staleCutoff);
+          AND (? IS NULL OR domain = ?)
+      `).run(now.toISOString(), staleCutoff, domain ?? null, domain ?? null);
       const inFlight = this.state.db.query(`
         SELECT 1 active FROM intelligence_candidates
-        WHERE status='pushing' LIMIT 1
-      `).get() as { active: number } | null;
+        WHERE status='pushing' AND (? IS NULL OR domain = ?) LIMIT 1
+      `).get(domain ?? null, domain ?? null) as { active: number } | null;
       if (inFlight) return undefined;
       const last = this.state.db.query(`
         SELECT pushed_at FROM intelligence_candidates
-        WHERE pushed_at IS NOT NULL ORDER BY pushed_at DESC LIMIT 1
-      `).get() as { pushed_at: string } | null;
+        WHERE pushed_at IS NOT NULL AND (? IS NULL OR domain = ?) ORDER BY pushed_at DESC LIMIT 1
+      `).get(domain ?? null, domain ?? null) as { pushed_at: string } | null;
       if (last && now.getTime() - Date.parse(last.pushed_at) < minimumIntervalMs) return undefined;
       const row = this.state.db.query(`
         SELECT * FROM intelligence_candidates
         WHERE status IN ('queued','retry_wait')
           AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+          AND (? IS NULL OR domain = ?)
         ORDER BY total DESC, created_at ASC LIMIT 1
-      `).get(now.toISOString()) as CandidateRow | null;
+      `).get(now.toISOString(), domain ?? null, domain ?? null) as CandidateRow | null;
       if (!row) return undefined;
       const token = crypto.randomUUID();
       const result = this.state.db.query(`
@@ -195,7 +215,15 @@ export class IntelligenceCandidateStore {
   }
 
   async block(id: string, claimToken: string | undefined, error: string, retryAt: Date, now = new Date()): Promise<void> {
-    this.finishFailure(id, claimToken, "channel_blocked", error, retryAt.toISOString(), now);
+    const where = claimToken ? "id=? AND claim_token=?" : "id=?";
+    const args = claimToken ? [id, claimToken] : [id];
+    const result = this.state.db.query(`
+      UPDATE intelligence_candidates
+      SET status='channel_blocked', error=?, next_attempt_at=?, updated_at=?, claim_token=NULL,
+          attempt_count=MAX(0, attempt_count-1)
+      WHERE ${where}
+    `).run(error.slice(0, 500), retryAt.toISOString(), now.toISOString(), ...args);
+    if (result.changes !== 1) throw new Error(`Intelligence candidate claim was lost: ${id}`);
   }
 
   async fail(id: string, error: string, now = new Date(), claimToken?: string): Promise<void> {
@@ -224,6 +252,7 @@ export class IntelligenceCandidateStore {
   }
 
   createOpenCallback(candidateId: string, targetUrl: string): string {
+    assertSafeExternalUrl(targetUrl);
     const token = randomBytes(24).toString("base64url");
     const hash = createHash("sha256").update(token).digest("hex");
     this.state.db.query(`
@@ -241,6 +270,7 @@ export class IntelligenceCandidateStore {
         SELECT candidate_id,target_url,opened_at FROM feedback_callbacks WHERE token_hash=?
       `).get(hash) as { candidate_id: string; target_url: string; opened_at: string | null } | null;
       if (!row) return undefined;
+      try { assertSafeExternalUrl(row.target_url); } catch { return undefined; }
       const inserted = this.state.db.query(`
         INSERT OR IGNORE INTO candidate_feedback(id,candidate_id,signal,source,created_at)
         VALUES(?,?,'opened','bark_click',?)
@@ -258,21 +288,25 @@ export class IntelligenceCandidateStore {
     return row ? this.withFeedback(fromRow(row)) : undefined;
   }
 
-  async list(limit = 200): Promise<IntelligenceCandidate[]> {
+  async list(limit = 200, domain?: IntelligenceDomain): Promise<IntelligenceCandidate[]> {
     const rows = this.state.db.query(`
-      SELECT * FROM intelligence_candidates ORDER BY created_at DESC LIMIT ?
-    `).all(Math.max(1, Math.min(1_000, limit))) as CandidateRow[];
+      SELECT * FROM intelligence_candidates
+      WHERE (? IS NULL OR domain = ?)
+      ORDER BY created_at DESC LIMIT ?
+    `).all(domain ?? null, domain ?? null, Math.max(1, Math.min(1_000, limit))) as CandidateRow[];
     return rows.map((row) => this.withFeedback(fromRow(row)));
   }
 
-  async counts(): Promise<Record<CandidateStatus, number>> {
+  async counts(domain?: IntelligenceDomain): Promise<Record<CandidateStatus, number>> {
     const counts = {
       queued: 0, held: 0, pushing: 0, retry_wait: 0, channel_blocked: 0,
       pushed: 0, failed: 0, delivery_unknown: 0,
     } satisfies Record<CandidateStatus, number>;
     const rows = this.state.db.query(`
-      SELECT status,COUNT(*) count FROM intelligence_candidates GROUP BY status
-    `).all() as Array<{ status: CandidateStatus; count: number }>;
+      SELECT status,COUNT(*) count FROM intelligence_candidates
+      WHERE (? IS NULL OR domain = ?)
+      GROUP BY status
+    `).all(domain ?? null, domain ?? null) as Array<{ status: CandidateStatus; count: number }>;
     for (const row of rows) counts[row.status] = row.count;
     return counts;
   }
@@ -288,13 +322,13 @@ export class IntelligenceCandidateStore {
     if (result.changes !== 1) throw new Error(`Intelligence candidate claim was lost: ${id}`);
   }
 
-  private feedbackAdjustment(evaluation: CandidateEvaluation, cutoff: string): number {
+  private feedbackAdjustment(domain: IntelligenceDomain, evaluation: CandidateEvaluation, cutoff: string): number {
     const rows = this.state.db.query(`
       SELECT c.event_key,c.url,c.headline,c.source,f.signal
       FROM candidate_feedback f JOIN intelligence_candidates c ON c.id=f.candidate_id
-      WHERE f.created_at >= ?
+      WHERE c.domain = ? AND f.created_at >= ?
       ORDER BY f.created_at DESC LIMIT 500
-    `).all(cutoff) as Array<{ event_key: string; url: string; headline: string; source: string; signal: CandidateFeedbackSignal }>;
+    `).all(domain, cutoff) as Array<{ event_key: string; url: string; headline: string; source: string; signal: CandidateFeedbackSignal }>;
     let adjustment = 0;
     let matches = 0;
     for (const row of rows) {
@@ -318,14 +352,16 @@ export class IntelligenceCandidateStore {
   private insert(candidate: IntelligenceCandidate): void {
     this.state.db.query(`
       INSERT OR IGNORE INTO intelligence_candidates(
-        id,scan_id,member_id,event_key,headline,brief,url,source,
+        id,domain,scan_id,member_id,event_key,headline,brief,url,source,source_id,market,symbols_json,event_type,evidence_tier,
         importance,interest,confidence,novelty,base_total,feedback_adjustment,total,
         rationale,is_update,status,decision,duplicate_of,attempt_count,next_attempt_at,
         claim_token,created_at,updated_at,pushed_at,error
-      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
-      candidate.id, candidate.scan_id, candidate.member_id, candidate.event_key, candidate.headline,
-      candidate.brief, candidate.url, candidate.source, candidate.scores.importance,
+      candidate.id, candidate.domain ?? "ai", candidate.scan_id, candidate.member_id, candidate.event_key, candidate.headline,
+      candidate.brief, candidate.url, candidate.source, candidate.source_id ?? null, candidate.market ?? null,
+      JSON.stringify(normalizeSymbols(candidate.symbols)), candidate.event_type ?? null, candidate.evidence_tier ?? null,
+      candidate.scores.importance,
       candidate.scores.interest, candidate.scores.confidence, candidate.scores.novelty,
       candidate.scores.base_total ?? candidate.scores.total, candidate.scores.feedback_adjustment ?? 0,
       candidate.scores.total, candidate.rationale, candidate.is_update ? 1 : 0, candidate.status,
@@ -345,6 +381,8 @@ export class IntelligenceCandidateStore {
       },
       (candidate) => this.insert({
         ...candidate,
+        domain: candidate.domain ?? "ai",
+        symbols: normalizeSymbols(candidate.symbols),
         attempt_count: candidate.attempt_count ?? (candidate.status === "failed" ? 1 : 0),
         scores: {
           ...candidate.scores,
@@ -353,6 +391,15 @@ export class IntelligenceCandidateStore {
         },
       }),
     );
+  }
+}
+
+function assertSafeExternalUrl(value: string): void {
+  let url: URL;
+  try { url = new URL(value); }
+  catch { throw new Error("Candidate callback target URL is invalid"); }
+  if (url.protocol !== "https:" || url.username || url.password) {
+    throw new Error("Candidate callback target must use an HTTPS URL without credentials");
   }
 }
 
@@ -366,8 +413,11 @@ const FEEDBACK_WEIGHT: Record<CandidateFeedbackSignal, number> = {
 
 function fromRow(row: CandidateRow): IntelligenceCandidate {
   return {
-    id: row.id, scan_id: row.scan_id, member_id: row.member_id, event_key: row.event_key,
+    id: row.id, domain: row.domain ?? "ai", scan_id: row.scan_id, member_id: row.member_id, event_key: row.event_key,
     headline: row.headline, brief: row.brief, url: row.url, source: row.source,
+    source_id: row.source_id ?? undefined, market: row.market ?? undefined,
+    symbols: parseSymbols(row.symbols_json), event_type: row.event_type ?? undefined,
+    evidence_tier: row.evidence_tier ?? undefined,
     scores: {
       importance: row.importance, interest: row.interest, confidence: row.confidence,
       novelty: row.novelty, base_total: row.base_total,
@@ -379,6 +429,15 @@ function fromRow(row: CandidateRow): IntelligenceCandidate {
     claim_token: row.claim_token ?? undefined, created_at: row.created_at, updated_at: row.updated_at,
     pushed_at: row.pushed_at ?? undefined, error: row.error ?? undefined,
   };
+}
+
+function normalizeSymbols(value: string[] | undefined): string[] {
+  return [...new Set((value ?? []).map((symbol) => String(symbol).trim().toUpperCase()).filter(Boolean))].slice(0, 20);
+}
+
+function parseSymbols(value: string | undefined): string[] {
+  try { return normalizeSymbols(JSON.parse(value ?? "[]") as string[]); }
+  catch { return []; }
 }
 
 function weightedScore(value: CandidateEvaluation): number {

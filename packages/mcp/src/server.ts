@@ -12,7 +12,7 @@ const capabilityText = [
 
 export function createTotemoraMcpServer(gateway: TotemoraGatewayClient): McpServer {
   const server = new McpServer({ name: "totemora-tribe", version: "0.6.0-living-tribe" }, {
-    instructions: "Discover tribe assets and members, talk to a specialist with optional mentor escalation, run the intelligence watch, or delegate a gated Git management outcome.",
+    instructions: "Discover tribe assets and members, talk to a specialist with optional mentor escalation, run AI or finance intelligence watches, or delegate a gated Git management outcome.",
   });
 
   server.registerResource("totemora-capabilities", "totemora://capabilities", {
@@ -80,6 +80,24 @@ export function createTotemoraMcpServer(gateway: TotemoraGatewayClient): McpServ
     annotations: readOnlyAnnotations("Inspect intelligence candidate pool"),
   }, async () => toolCall(() => gateway.listIntelligenceCandidates()));
 
+  server.registerTool("totemora_list_finance_briefs", {
+    title: "List tribe finance briefs",
+    description: "Inspect 观潮's recent finance briefs, official-source evidence, warnings and candidate decisions. The output is informational and not investment advice.",
+    annotations: readOnlyAnnotations("List finance briefs"),
+  }, async () => toolCall(() => gateway.listFinanceBriefs()));
+
+  server.registerTool("totemora_list_finance_candidates", {
+    title: "Inspect finance candidate pool",
+    description: "Inspect finance candidates with market, symbols, event type, evidence tier, scores, deduplication state and user feedback.",
+    annotations: readOnlyAnnotations("Inspect finance candidate pool"),
+  }, async () => toolCall(() => gateway.listFinanceCandidates()));
+
+  server.registerTool("totemora_list_finance_sources", {
+    title: "Inspect finance source ledger",
+    description: "Inspect official, credentialed and commercial finance sources with evidence tier, coverage, health, latency, cache state and last success.",
+    annotations: readOnlyAnnotations("Inspect finance sources"),
+  }, async () => toolCall(() => gateway.listFinanceSources()));
+
   server.registerTool("totemora_list_actions", {
     title: "Inspect tribe action journal",
     description: "Inspect recent external side effects, idempotency keys, attempts, outcomes and bounded evidence. Requires the MCP operator credential.",
@@ -94,7 +112,7 @@ export function createTotemoraMcpServer(gateway: TotemoraGatewayClient): McpServ
       idempotency_key: z.string().min(1).max(200).optional(),
       delivery_mode: z.enum(["candidate_pool", "direct_push"]).default("candidate_pool"),
     },
-    annotations: { title: "Run intelligence watch", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { title: "Run intelligence watch", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, async ({ message_count, idempotency_key, delivery_mode }) => toolCall(() => gateway.runIntelligenceBrief(message_count, idempotency_key, delivery_mode)));
 
   server.registerTool("totemora_get_intelligence_task", {
@@ -103,6 +121,26 @@ export function createTotemoraMcpServer(gateway: TotemoraGatewayClient): McpServ
     inputSchema: { task_id: z.string().min(1) },
     annotations: readOnlyAnnotations("Get intelligence task"),
   }, async ({ task_id }) => toolCall(() => gateway.getIntelligenceTask(task_id)));
+
+  server.registerTool("totemora_run_finance_watch", {
+    title: "Run the tribe finance watch",
+    description: "Queue a durable official-source scan for 观潮. Results enter a finance-isolated, scored and deduplicated candidate pool before domain-routed Bark and Telegram delivery. This does not provide investment advice.",
+    inputSchema: {
+      message_count: z.number().int().min(1).max(5).default(1),
+      idempotency_key: z.string().min(1).max(200).optional(),
+      delivery_mode: z.enum(["candidate_pool", "direct_push"]).default("candidate_pool"),
+    },
+    annotations: { title: "Run finance watch", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, async ({ message_count, idempotency_key, delivery_mode }) => toolCall(() =>
+    gateway.runFinanceBrief(message_count, idempotency_key, delivery_mode),
+  ));
+
+  server.registerTool("totemora_get_finance_task", {
+    title: "Get a finance intelligence task",
+    description: "Poll a durable 观潮 task until official-source collection, candidate gating and optional notification dispatch completes or fails.",
+    inputSchema: { task_id: z.string().min(1) },
+    annotations: readOnlyAnnotations("Get finance task"),
+  }, async ({ task_id }) => toolCall(() => gateway.getFinanceTask(task_id)));
 
   server.registerTool("totemora_start_git_flow", {
     title: "Delegate a Git Flow outcome to the tribe",
@@ -120,7 +158,7 @@ export function createTotemoraMcpServer(gateway: TotemoraGatewayClient): McpServ
 
   server.registerTool("totemora_get_task", {
     title: "Get a Totemora specialist task",
-    description: "Inspect the shared durable envelope for a Git Flow or intelligence specialist task, including member assignment, stage, revision and domain result reference.",
+    description: "Inspect the shared durable envelope for a Git Flow, AI intelligence or finance intelligence specialist task, including member assignment, stage, revision and domain result reference.",
     inputSchema: { task_id: z.string().min(1) },
     annotations: readOnlyAnnotations("Get specialist task"),
   }, async ({ task_id }) => toolCall(() => gateway.getSpecialistTask(task_id)));
