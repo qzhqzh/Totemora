@@ -31,11 +31,16 @@ test("market snapshot parses deterministic benchmark and sector moves", () => {
     title: "Bank of Japan releases Monetary Policy Meeting materials", link: "https://www.boj.or.jp/en/mopo/mpmsche_minu/index.htm",
     source: "日本银行", source_id: "boj-whats-new:policy", source_url: "https://www.boj.or.jp/en/rss/whatsnew.xml",
     evidence_tier: "S1", market: "JP", symbols: [], event_type: "monetary_policy",
+  }, {
+    title: "机构建议立即买入并设置目标价", link: "https://finance.sina.com.cn/stock/example.shtml",
+    source: "新浪财经滚动", source_id: "sina-finance-roll:unsafe", source_url: "https://feed.mix.sina.com.cn/api/roll/get",
+    evidence_tier: "S4", market: "JP", symbols: [], event_type: "market_attention",
   }]);
   expect(text).toContain("当前为盘前");
   expect(text).toContain("板块领涨");
   expect(text).toContain("EXM -8.20%");
   expect(text).toContain("[S1 日本银行] Bank of Japan releases Monetary Policy Meeting materials");
+  expect(text).not.toContain("建议立即买入");
   expect(usMarketSession(snapshot)).toEqual({ fresh: true, date: "2026-08-11" });
 });
 

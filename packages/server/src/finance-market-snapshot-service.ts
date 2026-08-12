@@ -230,7 +230,7 @@ export function usMarketSession(snapshot: FinanceMarketSnapshot): { fresh: boole
 function morningSourceLines(sources: FinanceSourceItem[], type: FinanceBriefingType): string[] {
   const markets = type === "asia_preopen" ? new Set(["JP", "KR"]) : new Set(["US"]);
   return sources
-    .filter((source) => markets.has(source.market) && !source.source_id.startsWith("xueqiu-hot-stock:"))
+    .filter((source) => markets.has(source.market) && ["S0", "S1"].includes(source.evidence_tier))
     .sort((left, right) => {
       const tier = left.evidence_tier.localeCompare(right.evidence_tier);
       return tier || String(right.published_at ?? "").localeCompare(String(left.published_at ?? ""));
