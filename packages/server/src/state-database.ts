@@ -231,6 +231,26 @@ export class StateDatabase {
       this.db.query("INSERT INTO schema_migrations(version,name,applied_at) VALUES(1,?,?)")
         .run("initial durable tribe state", new Date().toISOString());
     }
+    const intelligenceDomain = this.db.query("SELECT version FROM schema_migrations WHERE version = 2").get() as { version: number } | null;
+    if (!intelligenceDomain) {
+      this.db.transaction(() => {
+        const columns = new Set((this.db.query("PRAGMA table_info(intelligence_candidates)").all() as Array<{ name: string }>).map((column) => column.name));
+        if (!columns.has("domain")) this.db.exec("ALTER TABLE intelligence_candidates ADD COLUMN domain TEXT NOT NULL DEFAULT 'ai'");
+        if (!columns.has("market")) this.db.exec("ALTER TABLE intelligence_candidates ADD COLUMN market TEXT");
+        if (!columns.has("symbols_json")) this.db.exec("ALTER TABLE intelligence_candidates ADD COLUMN symbols_json TEXT NOT NULL DEFAULT '[]'");
+        if (!columns.has("event_type")) this.db.exec("ALTER TABLE intelligence_candidates ADD COLUMN event_type TEXT");
+        if (!columns.has("evidence_tier")) this.db.exec("ALTER TABLE intelligence_candidates ADD COLUMN evidence_tier TEXT");
+        if (!columns.has("source_id")) this.db.exec("ALTER TABLE intelligence_candidates ADD COLUMN source_id TEXT");
+        this.db.exec(`
+          CREATE INDEX IF NOT EXISTS candidate_domain_dispatch
+            ON intelligence_candidates(domain, status, next_attempt_at, total DESC, created_at);
+          CREATE INDEX IF NOT EXISTS candidate_domain_event_history
+            ON intelligence_candidates(domain, event_key, created_at DESC);
+        `);
+        this.db.query("INSERT INTO schema_migrations(version,name,applied_at) VALUES(2,?,?)")
+          .run("domain-aware intelligence candidates", new Date().toISOString());
+      })();
+    }
   }
 
   importJsonFile<T>(sourcePath: string, parse: (value: unknown) => T[], insert: (row: T) => void): LegacyImportResult {

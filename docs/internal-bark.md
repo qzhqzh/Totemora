@@ -35,6 +35,24 @@ chmod 600 .totemora/secrets/bark-device-key
 `.totemora/secrets/bark-server-url`。公网地址必须使用 HTTPS。本机 Basic Auth
 分别放在 `bark-basic-auth-user` 和 `bark-basic-auth-password`。
 
+现有单 key 会自动成为目标 `primary`，同时接收 AI 和财经通知。增加第二台手机时，不需要改动现有 key；把新手机注册后得到的 key 写入 `.totemora/secrets/bark-targets.json`：
+
+```json
+[
+  {
+    "id": "finance-phone",
+    "device_key": "在服务器本地填写第二台手机的 key",
+    "domains": ["finance"],
+    "enabled": true,
+    "server_url": "http://127.0.0.1:18080"
+  }
+]
+```
+
+这样 `primary` 继续接收 AI 和财经，`finance-phone` 只接收财经。若第二台也要接收两类通知，将 `domains` 改成 `["ai", "finance"]`。也可以通过 `TOTEMORA_BARK_TARGETS_JSON` 提供同一 JSON；生产环境优先使用权限为 `600` 的 Secret 文件，避免环境诊断输出密钥。
+
+目标 ID 必须唯一；相同 Bark 服务和 device key 的重复目标会被去重。Web 只展示目标 ID、领域、服务器和健康状态，永不返回 device key。配置修改后需要重启 Gateway，Bark 容器不需要重启。
+
 ## 3. 点击反馈
 
 如果手机能够访问 Totemora Gateway，设置：
@@ -51,7 +69,7 @@ TOTEMORA_PUBLIC_BASE_URL=https://totemora.example
 
 - Bark 接受请求只记为“通道已接受”，不声称用户已看到。
 - 网络、429 和 5xx 按 1、5、15、60 分钟退避。
-- 连续 3 次通道失败后熔断 30 分钟；扫描继续，候选保留在 SQLite。
+- 每个目标连续 3 次通道失败后独立熔断 30 分钟；其他手机继续接收，候选保留在 SQLite 并按目标幂等重试。
 - 不会静默回退到 `api.day.app`。只有显式设置
   `TOTEMORA_BARK_ALLOW_LEGACY=true` 时，才读取旧的
   `.totemora/secrets/bark-url` 作为应急兼容输入。

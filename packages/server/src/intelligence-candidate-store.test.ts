@@ -23,6 +23,38 @@ test("candidate pool queues value, holds duplicate and spaces pushes", async () 
   await rm(dataDir, { recursive: true, force: true });
 });
 
+test("AI and finance candidates keep deduplication and feedback histories isolated", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-candidate-domains-"));
+  const store = new IntelligenceCandidateStore(dataDir);
+  const [ai] = await store.ingest({
+    domain: "ai", scan_id: "ai-scan", member_id: "qwen_intelligence",
+    evaluations: [strong], push_threshold: 0.7, history_hours: 72,
+  });
+  const [finance] = await store.ingest({
+    domain: "finance", scan_id: "finance-scan", member_id: "qwen_finance",
+    evaluations: [{ ...strong, market: "US", evidence_tier: "S1" }],
+    push_threshold: 0.7, history_hours: 72,
+  });
+  expect(ai?.status).toBe("queued");
+  expect(finance?.status).toBe("queued");
+  await store.recordFeedback(finance!.id, "valuable", "web");
+  const [nextAi] = await store.ingest({
+    domain: "ai", scan_id: "ai-scan-2", member_id: "qwen_intelligence",
+    evaluations: [{ ...strong, event_key: "ai-update", headline: "AI Agent 发布更新", url: "https://example.com/ai-2", is_update: true }],
+    push_threshold: 0.7, history_hours: 72,
+  });
+  const [nextFinance] = await store.ingest({
+    domain: "finance", scan_id: "finance-scan-2", member_id: "qwen_finance",
+    evaluations: [{ ...strong, event_key: "finance-update", headline: "AI Agent 发布更新", url: "https://example.com/finance-2", is_update: true }],
+    push_threshold: 0.7, history_hours: 72,
+  });
+  expect(nextAi?.scores.feedback_adjustment).toBe(0);
+  expect(nextFinance?.scores.feedback_adjustment).toBe(0.08);
+  expect(await store.list(10, "ai")).toHaveLength(2);
+  expect(await store.list(10, "finance")).toHaveLength(2);
+  await rm(dataDir, { recursive: true, force: true });
+});
+
 test("candidate pool allows a substantive update to a pushed event", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "totemora-candidate-update-"));
   const store = new IntelligenceCandidateStore(dataDir);
@@ -134,5 +166,6 @@ test("opaque Bark open callback is idempotent", async () => {
   expect((await store.consumeOpenCallback(token))?.inserted).toBe(true);
   expect((await store.consumeOpenCallback(token))?.inserted).toBe(false);
   expect((await store.get(candidate!.id))?.feedback?.opened).toBe(1);
+  expect(() => store.createOpenCallback(candidate!.id, "http://127.0.0.1/private")).toThrow("HTTPS URL");
   await rm(dataDir, { recursive: true, force: true });
 });

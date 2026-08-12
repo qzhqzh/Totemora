@@ -27,6 +27,8 @@ import { MemberConversationService } from "./member-conversation-service";
 import { MemberEvolutionService } from "./member-evolution-service";
 import { IntelligenceService } from "./intelligence-service";
 import { IntelligencePreferenceStore } from "./intelligence-preference-store";
+import { FinanceIntelligenceService } from "./finance-intelligence-service";
+import { FinancePreferenceStore } from "./finance-preference-store";
 import { ActionJournal } from "./action-journal";
 import { SPECIALIST_SERVICES, SpecialistTaskRepository } from "./specialist-service";
 import { MemberProfileStore } from "./member-profile-store";
@@ -98,20 +100,26 @@ interface DevelopmentTaskInput {
 
 interface IntelligenceTask {
   id: string;
-  kind: "intelligence_brief";
+  kind: "intelligence_brief" | "finance_brief";
+  domain: "ai" | "finance";
   status: "queued" | "running" | "completed" | "failed";
   created_at: string;
   updated_at: string;
   message_count: number;
   idempotency_key: string;
   delivery_mode: "candidate_pool" | "direct_push";
-  result?: Awaited<ReturnType<IntelligenceService["run"]>>;
+  result?: Awaited<ReturnType<IntelligenceService["run"]>> | Awaited<ReturnType<FinanceIntelligenceService["run"]>>;
   error?: string;
   retryable?: boolean;
   growth_review?: { status: "not_due" | "proposed" | "failed"; proposal_id?: string; error?: string };
 }
 
-interface IntelligenceTaskInput { message_count?: number; idempotency_key?: string; delivery_mode?: "candidate_pool" | "direct_push" }
+interface IntelligenceTaskInput {
+  domain?: "ai" | "finance";
+  message_count?: number;
+  idempotency_key?: string;
+  delivery_mode?: "candidate_pool" | "direct_push";
+}
 
 class HttpError extends Error {
   constructor(readonly status: number, message: string) {
@@ -173,6 +181,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
   const intelligenceHydration = intelligenceTaskStore.list().then(async (records) => {
     for (const record of records) {
       const task = record.job;
+      task.domain ??= task.kind === "finance_brief" ? "finance" : "ai";
       if (["queued", "running"].includes(task.status)) {
         task.status = "failed";
         task.error = "Gateway restarted while the intelligence task was running; start a new task with a new idempotency key";
@@ -191,6 +200,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
     conversations: MemberConversationService;
     evolution: MemberEvolutionService;
     intelligence: IntelligenceService;
+    finance: FinanceIntelligenceService;
     content: ContentStudioService;
   }> | undefined;
   let bindingsRegistered = false;
@@ -207,6 +217,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
     const chief = config.tribe.tribe.chief ?? "deepseek_reasoner";
     const gitMember = config.agents.agents.find((member) => member.skills?.includes("git-flow-safety"));
     const intelligenceMember = config.agents.agents.find((member) => member.id === "qwen_intelligence");
+    const financeMember = config.agents.agents.find((member) => (member.tools ?? []).includes("finance-intelligence"));
     const contentWriter = config.agents.agents.find((member) => member.skills?.includes("tutorial-writing"));
     if (gitMember) specialistTasks.registerBinding({
       service_id: "git.flow", chief_member_id: chief, specialist_member_id: gitMember.id,
@@ -218,6 +229,12 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
       routing_reason: "Chief 已批准的常驻听风岗位；定时巡查复用委任，不重复调用 Chief",
       capability_evidence: ["news-intelligence"],
       tool_grants: ["news-intelligence", "aihot-public-feed", "internal-bark", "telegram-bot"],
+    });
+    if (financeMember) specialistTasks.registerBinding({
+      service_id: "finance.watch", chief_member_id: chief, specialist_member_id: financeMember.id,
+      routing_reason: "Chief 已批准的常驻观潮岗位；财经领域与听风候选、反馈和成长证据保持隔离",
+      capability_evidence: (financeMember.skills ?? []).filter((skill) => ["financial-intelligence-briefing", "finance-source-verification"].includes(skill)),
+      tool_grants: (financeMember.tools ?? []).filter((tool) => ["finance-intelligence", "official-finance-sources", "internal-bark", "telegram-bot"].includes(tool)),
     });
     if (contentWriter) specialistTasks.registerBinding({
       service_id: "content.studio", chief_member_id: chief, specialist_member_id: contentWriter.id,
@@ -261,6 +278,11 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
         conversations: new MemberConversationService(config, providers, state, options.dataDir),
         evolution: new MemberEvolutionService(config, providers, state),
         intelligence: new IntelligenceService(
+          config, providers, state, options.dataDir,
+          options.projectRoot ?? resolve(import.meta.dir, "../../.."),
+          options.fetchImpl ?? fetch,
+        ),
+        finance: new FinanceIntelligenceService(
           config, providers, state, options.dataDir,
           options.projectRoot ?? resolve(import.meta.dir, "../../.."),
           options.fetchImpl ?? fetch,
@@ -323,33 +345,53 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
     return task;
   };
   const enqueueIntelligenceTask = async (input: IntelligenceTaskInput): Promise<IntelligenceTask> => {
+    const domain = input.domain ?? "ai";
+    const messageCount = Math.max(1, Math.min(5, input.message_count ?? 1));
+    const deliveryMode = input.delivery_mode ?? "candidate_pool";
+    await intelligenceHydration;
+    if (input.idempotency_key) {
+      const existing = [...intelligenceTasks.values()].find((task) =>
+        task.domain === domain && task.idempotency_key === input.idempotency_key,
+      );
+      if (existing) {
+        if (existing.message_count !== messageCount || existing.delivery_mode !== deliveryMode) {
+          throw new HttpError(409, `Idempotency key ${input.idempotency_key} was reused with different intelligence task input`);
+        }
+        return existing;
+      }
+    }
+    const finance = domain === "finance";
+    const serviceId = finance ? "finance.watch" : "intelligence.watch";
+    const memberId = finance ? "qwen_finance" : "qwen_intelligence";
+    const memberName = finance ? "观潮" : "听风";
     const now = new Date().toISOString();
     const task: IntelligenceTask = {
-      id: crypto.randomUUID(), kind: "intelligence_brief", status: "queued",
+      id: crypto.randomUUID(), kind: finance ? "finance_brief" : "intelligence_brief", domain, status: "queued",
       created_at: now, updated_at: now,
-      message_count: Math.max(1, Math.min(5, input.message_count ?? 1)),
-      idempotency_key: input.idempotency_key ?? `intelligence-${crypto.randomUUID()}`,
-      delivery_mode: input.delivery_mode ?? "candidate_pool",
+      message_count: messageCount,
+      idempotency_key: input.idempotency_key ?? `${domain}-intelligence-${crypto.randomUUID()}`,
+      delivery_mode: deliveryMode,
     };
     intelligenceTasks.set(task.id, task);
     await intelligenceTaskStore.save(task, input);
     await ensureServiceBindings();
     let serviceTask = specialistTasks.create({
-      id: task.id, service_id: "intelligence.watch", service_version: 1, operation: "scan",
+      id: task.id, service_id: serviceId, service_version: 1, operation: "scan",
       trigger: "manual", status: "queued", current_stage: "collect",
-      member_id: "qwen_intelligence", chief_member_id: (await getConfig()).tribe.tribe.chief,
+      member_id: memberId, chief_member_id: (await getConfig()).tribe.tribe.chief,
       idempotency_key: task.idempotency_key, input,
     });
     void (async () => {
       task.status = "running"; task.updated_at = new Date().toISOString();
       await intelligenceTaskStore.save(task, input);
       serviceTask = specialistTasks.update(task.id, serviceTask.revision, {
-        status: "running", current_stage: "collect", summary: "听风开始采集白名单来源",
-        member_id: "qwen_intelligence",
+        status: "running", current_stage: "collect", summary: `${memberName}开始采集白名单来源`,
+        member_id: memberId,
       });
       try {
         const services = await getMemberServices();
-        task.result = await services.intelligence.run({
+        const runner = finance ? services.finance : services.intelligence;
+        task.result = await runner.run({
           message_count: task.message_count, idempotency_key: task.idempotency_key, reason: "manual",
           defer_push: task.delivery_mode === "candidate_pool",
         });
@@ -364,7 +406,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
       Object.assign(task, terminal);
       specialistTasks.update(task.id, serviceTask.revision, task.error ? {
         status: "failed", current_stage: "failed", error: task.error,
-        summary: `听风扫描失败：${task.error}`,
+        summary: `${memberName}扫描失败：${task.error}`,
       } : {
         status: "completed", current_stage: "candidate_gate", result: task.result,
         result_ref: task.result?.id, summary: "扫描完成；候选已进入价值门禁，扫描本身不产生成长信用",
@@ -530,6 +572,28 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
       }
       return result;
     },
+    async runScheduledFinance() {
+      await ensureServiceBindings();
+      const services = await getMemberServices();
+      const result = await services.finance.runDue();
+      if (result?.scan) {
+        const task = specialistTasks.create({
+          id: crypto.randomUUID(), service_id: "finance.watch", service_version: 1,
+          operation: "scan", trigger: "scheduled", status: "completed", current_stage: "candidate_gate",
+          member_id: result.scan.member_id, chief_member_id: (await getConfig()).tribe.tribe.chief,
+          idempotency_key: `scheduled:${result.scan.id}`, input: { reason: "scheduled", domain: "finance" },
+          result: result.scan, result_ref: result.scan.id,
+        });
+        void task;
+        void services.evolution.proposeIfEligible(result.scan.member_id).catch(async (error) => {
+          await services.state.remember({
+            member_id: result.scan!.member_id, kind: "system_failure", verified: true, source_id: result.scan!.id,
+            summary: `财经成员自动成长评审失败：${(error instanceof Error ? error.message : String(error)).slice(0, 300)}`,
+          });
+        });
+      }
+      return result;
+    },
     async runScheduledContent() {
       const input = await (await getMemberServices()).content.dueInput();
       return input ? enqueueContentWork(input, "scheduled") : undefined;
@@ -563,7 +627,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
         if (request.method === "GET" && url.pathname === "/api/status") {
           const config = await getConfig();
           return json({
-            version: "0.10.0-collaborative-content-studio",
+            version: "0.11.0-finance-intelligence-vertical",
             settlement: "ready",
             active_members: config.agents.agents.filter((member) => !["inactive", "retired"].includes(member.status ?? "active")).length,
             capabilities: {
@@ -579,8 +643,10 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
               member_chat: "mentor_escalation_v1",
               intelligence_watch: "ten_minute_candidate_pool_v3",
               intelligence_candidate_pool: "sqlite_feedback_retry_circuit_v2",
+              finance_intelligence_watch: "official_source_domain_v1",
+              finance_source_ledger: "tiered_health_cache_v1",
               durable_state: "sqlite_wal_v1",
-              internal_bark: "self_hosted_v2_api",
+              internal_bark: "self_hosted_multi_target_v3_api",
               telegram_bot: "group_commands_feedback_v1",
               content_studio: "three_member_text_visual_evidence_v2",
               specialist_services: "typed_contract_v1",
@@ -657,6 +723,22 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
           });
         }
 
+        if (request.method === "GET" && url.pathname === "/api/finance") {
+          return json({ briefs: await (await getMemberServices()).finance.list() });
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/finance/candidates") {
+          const finance = (await getMemberServices()).finance;
+          const [candidates, counts] = await Promise.all([
+            finance.listCandidates(), finance.candidateCounts(),
+          ]);
+          return json({ candidates, counts });
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/finance/sources") {
+          return json({ sources: await (await getMemberServices()).finance.sourceStatus() });
+        }
+
         if (request.method === "GET" && url.pathname === "/api/content/works") {
           requireOperator(request, options.operatorToken);
           return json({ works: (await getMemberServices()).content.list(Number(url.searchParams.get("limit") ?? 100)) });
@@ -720,6 +802,11 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
           return json(await (await getMemberServices()).intelligence.barkStatus(url.searchParams.get("health") === "1"));
         }
 
+        if (request.method === "GET" && url.pathname === "/api/finance/bark") {
+          requireOperator(request, options.operatorToken);
+          return json(await (await getMemberServices()).finance.barkStatus(url.searchParams.get("health") === "1"));
+        }
+
         if (request.method === "GET" && url.pathname === "/api/intelligence/telegram") {
           requireOperator(request, options.operatorToken);
           return json(await (await getMemberServices()).intelligence.telegramStatus(url.searchParams.get("health") === "1"));
@@ -775,6 +862,15 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
           return json(await new IntelligencePreferenceStore(options.dataDir).save(await request.json()));
         }
 
+        if (request.method === "GET" && url.pathname === "/api/finance/preferences") {
+          return json(await new FinancePreferenceStore(options.dataDir).get());
+        }
+
+        if (request.method === "PUT" && url.pathname === "/api/finance/preferences") {
+          requireOperator(request, options.operatorToken);
+          return json(await new FinancePreferenceStore(options.dataDir).save(await request.json()));
+        }
+
         if (request.method === "GET" && url.pathname === "/api/actions") {
           requireOperator(request, options.operatorToken);
           return json({ actions: (await new ActionJournal(options.dataDir).list()).slice(-100).reverse() });
@@ -790,10 +886,26 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
           }), 201);
         }
 
+        if (request.method === "POST" && url.pathname === "/api/finance/run") {
+          requireOperator(request, options.operatorToken);
+          const input = await request.json().catch(() => ({})) as { message_count?: number; idempotency_key?: string };
+          return json(await (await getMemberServices()).finance.run({
+            message_count: input.message_count,
+            idempotency_key: input.idempotency_key,
+            reason: "manual",
+          }), 201);
+        }
+
         if (request.method === "POST" && url.pathname === "/api/intelligence/tasks") {
           requireOperator(request, options.operatorToken);
           const input = await request.json().catch(() => ({})) as IntelligenceTaskInput;
-          return json(await enqueueIntelligenceTask(input), 202);
+          return json(await enqueueIntelligenceTask({ ...input, domain: "ai" }), 202);
+        }
+
+        if (request.method === "POST" && url.pathname === "/api/finance/tasks") {
+          requireOperator(request, options.operatorToken);
+          const input = await request.json().catch(() => ({})) as IntelligenceTaskInput;
+          return json(await enqueueIntelligenceTask({ ...input, domain: "finance" }), 202);
         }
 
         const intelligenceTaskMatch = url.pathname.match(/^\/api\/intelligence\/tasks\/([^/]+)$/);
@@ -801,6 +913,13 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
           requireOperator(request, options.operatorToken);
           const task = intelligenceTasks.get(intelligenceTaskMatch[1]!);
           return task ? json(task) : json({ error: "Intelligence task not found" }, 404);
+        }
+
+        const financeTaskMatch = url.pathname.match(/^\/api\/finance\/tasks\/([^/]+)$/);
+        if (request.method === "GET" && financeTaskMatch) {
+          requireOperator(request, options.operatorToken);
+          const task = intelligenceTasks.get(financeTaskMatch[1]!);
+          return task?.domain === "finance" ? json(task) : json({ error: "Finance task not found" }, 404);
         }
 
         if (request.method === "GET" && url.pathname === "/api/assets") {

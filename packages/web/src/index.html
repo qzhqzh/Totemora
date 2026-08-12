@@ -119,25 +119,53 @@ secrets/</textarea></label>
       </div>
     </section>
     <section class="panel intelligence-panel">
-      <div class="section-title"><span>06</span><h2>听风台</h2></div>
-      <p class="section-note">情报员默认每 10 分钟巡查白名单信息源；消息先进入候选池，经过兴趣、重要性、可信度和新颖度评估，再按至少一分钟一条推送。</p>
-      <form id="intelligence-preferences" class="intelligence-preferences">
-        <label>我关注的方向<textarea id="intelligence-interests" placeholder="每行一个，例如：AI Agent&#10;生物信息学&#10;开发工具"></textarea></label>
-        <div class="inline-check"><label><input id="channel-rss" type="checkbox"> 新闻 / 技术 RSS</label><label><input id="channel-ai-hot" type="checkbox"> AI HOT 精选</label><label><input id="channel-x" type="checkbox"> X 热点</label><label><input id="channel-weibo" type="checkbox"> 微博热点</label></div>
-        <label>X 地区 WOEID<input id="x-woeid" type="number" min="1" value="1"></label>
-        <div class="grid-three"><label>扫描间隔（分钟）<input id="scan-interval" type="number" min="5" max="60" value="10"></label><label>推送间隔（秒）<input id="push-interval" type="number" min="60" max="3600" value="60"></label><label>推送阈值<input id="push-threshold" type="number" min="0.5" max="0.95" step="0.01" value="0.72"></label></div>
-        <small id="social-credential-status"></small>
-        <button type="submit" class="secondary">保存听风偏好</button>
-        <small id="intelligence-preference-status"></small>
-      </form>
-      <button id="run-intelligence" type="button">立即扫描候选池</button>
-      <small id="intelligence-status"></small>
-      <div id="bark-status" class="channel-status">Bark 状态等待检查</div>
-      <h3>候选消息池</h3>
-      <div id="candidate-summary" class="chips"></div>
-      <div id="intelligence-candidates" class="intelligence-history"></div>
-      <h3>扫描记录</h3>
-      <div id="intelligence-history" class="intelligence-history"></div>
+      <div class="section-title"><span>06</span><h2>双域情报台</h2></div>
+      <p class="section-note">听风追踪 AI 与技术变化；观潮独立追踪财经官方披露和宏观事件。两名成员各自积累经验、候选池和偏好，只共享通知基础设施。</p>
+      <div class="intelligence-domains">
+        <article class="intelligence-domain" aria-labelledby="ai-intelligence-title">
+          <header class="domain-head"><div><small>AI / TECHNOLOGY</small><h3 id="ai-intelligence-title">听风 · AI 情报</h3></div><span>发现与趋势</span></header>
+          <p class="domain-note">每 10 分钟巡查白名单来源；按兴趣、重要性、可信度和新颖度评估。</p>
+          <form id="intelligence-preferences" class="intelligence-preferences">
+            <label>我关注的方向<textarea id="intelligence-interests" placeholder="每行一个，例如：AI Agent&#10;生物信息学&#10;开发工具"></textarea></label>
+            <div class="inline-check"><label><input id="channel-rss" type="checkbox"> 新闻 / 技术 RSS</label><label><input id="channel-ai-hot" type="checkbox"> AI HOT 精选</label><label><input id="channel-x" type="checkbox"> X 热点</label><label><input id="channel-weibo" type="checkbox"> 微博热点</label></div>
+            <label>X 地区 WOEID<input id="x-woeid" type="number" min="1" value="1"></label>
+            <div class="domain-metrics"><label>扫描间隔（分钟）<input id="scan-interval" type="number" min="5" max="60" value="10"></label><label>推送间隔（秒）<input id="push-interval" type="number" min="60" max="3600" value="60"></label><label>推送阈值<input id="push-threshold" type="number" min="0.5" max="0.95" step="0.01" value="0.72"></label></div>
+            <small id="social-credential-status"></small>
+            <button type="submit" class="secondary">保存听风偏好</button>
+            <small id="intelligence-preference-status" role="status" aria-live="polite"></small>
+          </form>
+          <button id="run-intelligence" type="button">让听风立即扫描</button>
+          <small id="intelligence-status" class="domain-status" role="status" aria-live="polite"></small>
+          <div id="bark-status" class="channel-status" role="status" aria-live="polite">Bark 状态等待检查</div>
+          <h4>候选消息池</h4>
+          <div id="candidate-summary" class="chips" role="status" aria-live="polite"></div>
+          <div id="intelligence-candidates" class="intelligence-history"></div>
+          <h4>扫描记录</h4>
+          <div id="intelligence-history" class="intelligence-history"></div>
+        </article>
+        <article class="intelligence-domain finance-domain" aria-labelledby="finance-intelligence-title">
+          <header class="domain-head"><div><small>FINANCE / MARKETS</small><h3 id="finance-intelligence-title">观潮 · 财经情报</h3></div><span>证据与事件</span></header>
+          <p class="domain-note">优先法定披露、监管与宏观官方来源。观潮只报告事实、影响路径和待观察项，不给买卖建议。</p>
+          <form id="finance-preferences" class="intelligence-preferences">
+            <label>我关注的财经方向<textarea id="finance-interests" placeholder="每行一个，例如：半导体&#10;货币政策&#10;公司治理"></textarea></label>
+            <label>自选清单<textarea id="finance-watchlist" placeholder="每行一个：CN:600519 贵州茅台&#10;HK:00700 腾讯&#10;US:NVDA NVIDIA"></textarea><small>格式为 市场:代码 名称；名称可省略。</small></label>
+            <div class="inline-check"><label><input id="market-cn" type="checkbox"> A 股</label><label><input id="market-hk" type="checkbox"> 港股</label><label><input id="market-us" type="checkbox"> 美股</label></div>
+            <div class="inline-check"><label><input id="finance-disclosures" type="checkbox"> 公司披露</label><label><input id="finance-regulation" type="checkbox"> 监管政策</label><label><input id="finance-macro" type="checkbox"> 宏观数据</label><label><input id="finance-global" type="checkbox"> 全球央行</label></div>
+            <div class="domain-metrics"><label>扫描间隔（分钟）<input id="finance-scan-interval" type="number" min="5" max="60" value="10"></label><label>推送间隔（秒）<input id="finance-push-interval" type="number" min="60" max="3600" value="60"></label><label>推送阈值<input id="finance-push-threshold" type="number" min="0.5" max="0.95" step="0.01" value="0.78"></label></div>
+            <button type="submit" class="secondary">保存观潮范围</button>
+            <small id="finance-preference-status" role="status" aria-live="polite"></small>
+          </form>
+          <button id="run-finance" type="button">让观潮立即扫描</button>
+          <small id="finance-status" class="domain-status" role="status" aria-live="polite"></small>
+          <div id="finance-bark-status" class="channel-status" role="status" aria-live="polite">财经 Bark 路由等待检查</div>
+          <details class="source-ledger"><summary>查看信息源证据账本</summary><div id="finance-source-ledger"></div></details>
+          <h4>候选消息池</h4>
+          <div id="finance-candidate-summary" class="chips" role="status" aria-live="polite"></div>
+          <div id="finance-candidates" class="intelligence-history"></div>
+          <h4>扫描记录</h4>
+          <div id="finance-history" class="intelligence-history"></div>
+        </article>
+      </div>
     </section>
     <section class="panel content-panel" id="content-studio">
       <div class="section-title"><span>07</span><h2>创作工坊</h2></div>

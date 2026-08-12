@@ -459,7 +459,8 @@ export class ContentStudioService {
     if (candidate) return candidate;
     if (!topic?.trim()) throw new Error("source_candidate_id or topic is required when the candidate pool is empty");
     return {
-      id: "", scan_id: "manual", member_id: "operator", event_key: `manual:${topic.trim()}`,
+      id: "", scan_id: "manual", member_id: "operator", domain: "ai", symbols: [],
+      event_key: `manual:${topic.trim()}`,
       headline: topic.trim(), brief: "用户提供的选题；写作成员必须显式说明暂无外部来源证据。",
       url: "", source: "operator", scores: {
         importance: 0.5, interest: 1, confidence: 0.5, novelty: 1,

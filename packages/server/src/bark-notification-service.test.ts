@@ -21,6 +21,12 @@ test("self-hosted Bark uses V2 JSON without putting the device key in the URL", 
   expect(JSON.parse(String(requests[0]!.init?.body))).toMatchObject({
     device_key: "device-secret", id: "candidate-1", group: "Totemora 部落情报",
   });
+  expect(await service.targetIds()).toEqual(["primary"]);
+  expect(await service.targetIds("ai")).toEqual(["primary"]);
+  expect(await service.targets()).toMatchObject([{
+    id: "primary", domains: ["ai", "finance"], enabled: true,
+  }]);
+  expect(JSON.stringify(await service.status())).not.toContain("device-secret");
   await rm(dataDir, { recursive: true, force: true });
 });
 
@@ -41,5 +47,106 @@ test("Bark opens a thirty-minute circuit after three retryable channel failures"
   });
   await expect(service.push({ title: "测试", body: "正文" })).rejects.toThrow("circuit is open");
   expect(requests).toBe(3);
+  await rm(dataDir, { recursive: true, force: true });
+});
+
+test("Bark routes multiple configured targets by domain and returns target receipts without secrets", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-bark-targets-"));
+  await mkdir(join(dataDir, "secrets"), { recursive: true });
+  await writeFile(join(dataDir, "secrets", "bark-targets.json"), JSON.stringify([
+    { id: "ai-phone", device_key: "ai-device-secret", domains: ["ai"], enabled: true, server_url: "https://ai.example.test" },
+    { id: "finance-phone", device_key: "finance-device-secret", domains: ["finance"], enabled: true, server_url: "https://finance.example.test" },
+    { id: "disabled-phone", device_key: "disabled-device-secret", domains: ["ai", "finance"], enabled: false, server_url: "https://disabled.example.test" },
+  ]));
+  const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
+  const service = new BarkNotificationService(dataDir, (async (input, init) => {
+    requests.push({ url: String(input), body: JSON.parse(String(init?.body)) as Record<string, unknown> });
+    return Response.json({ code: 200 }, { status: 200 });
+  }) as typeof fetch);
+
+  expect(await service.targetIds()).toEqual(["ai-phone", "finance-phone"]);
+  expect(await service.targetIds("ai")).toEqual(["ai-phone"]);
+  expect(await service.targetIds("finance")).toEqual(["finance-phone"]);
+  expect((await service.status(false, "ai")).targets.map((target) => target.id)).toEqual(["ai-phone", "disabled-phone"]);
+
+  const receipt = await service.push({ domain: "finance", title: "财务", body: "正文" });
+  expect(receipt).toMatchObject({ target_id: "finance-phone", status: 200, accepted: true });
+  expect(requests).toMatchObject([{
+    url: "https://finance.example.test/push",
+    body: { device_key: "finance-device-secret" },
+  }]);
+
+  const publicState = JSON.stringify({ targets: await service.targets(), status: await service.status() });
+  expect(publicState).not.toContain("device-secret");
+  expect(publicState).not.toContain("authorization");
+  await rm(dataDir, { recursive: true, force: true });
+});
+
+test("Bark deduplicates targets by server URL and device key while rejecting duplicate IDs", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-bark-dedupe-"));
+  await mkdir(join(dataDir, "secrets"), { recursive: true });
+  await writeFile(join(dataDir, "secrets", "bark-targets.json"), JSON.stringify([
+    { id: "first", device_key: "same-device", domains: ["ai"], enabled: true, server_url: "https://same.example.test" },
+    { id: "second", device_key: "same-device", domains: ["finance"], enabled: true, server_url: "https://same.example.test/" },
+  ]));
+  const service = new BarkNotificationService(
+    dataDir,
+    (async () => Response.json({ code: 200 })) as unknown as typeof fetch,
+  );
+  expect((await service.targets()).map((target) => target.id)).toEqual(["first"]);
+
+  await writeFile(join(dataDir, "secrets", "bark-targets.json"), JSON.stringify([
+    { id: "duplicate", device_key: "one", domains: ["ai"], enabled: true, server_url: "https://one.example.test" },
+    { id: "duplicate", device_key: "two", domains: ["finance"], enabled: true, server_url: "https://two.example.test" },
+  ]));
+  await expect(service.targets()).rejects.toThrow("id is duplicated");
+  await rm(dataDir, { recursive: true, force: true });
+});
+
+test("Bark isolates per-target failures and circuits", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-bark-isolation-"));
+  await mkdir(join(dataDir, "secrets"), { recursive: true });
+  await writeFile(join(dataDir, "secrets", "bark-targets.json"), JSON.stringify([
+    { id: "unavailable", device_key: "unavailable-secret", domains: ["ai"], enabled: true, server_url: "https://unavailable.example.test" },
+    { id: "healthy", device_key: "healthy-secret", domains: ["ai"], enabled: true, server_url: "https://healthy.example.test" },
+  ]));
+  const requests: string[] = [];
+  const service = new BarkNotificationService(dataDir, (async (input) => {
+    const url = String(input);
+    requests.push(url);
+    return url.includes("unavailable.example.test")
+      ? new Response("unavailable", { status: 503 })
+      : Response.json({ code: 200 }, { status: 200 });
+  }) as typeof fetch);
+
+  const first = await service.push({ domain: "ai", title: "测试", body: "正文" });
+  expect(first).toMatchObject({ target_id: "healthy", accepted: true });
+  expect(first.receipts).toHaveLength(1);
+  expect(first.failures).toMatchObject([{ target_id: "unavailable", status: 503, retryable: true }]);
+  for (let index = 0; index < 2; index += 1) {
+    await expect(service.pushTo("unavailable", { title: "测试", body: "正文" })).rejects.toBeInstanceOf(BarkDeliveryError);
+  }
+  expect((await service.status()).targets).toMatchObject([
+    { id: "unavailable", channel_status: "open", consecutive_failures: 3 },
+    { id: "healthy", channel_status: "ready", consecutive_failures: 0 },
+  ]);
+  const beforeHealthy = requests.filter((url) => url.includes("healthy.example.test")).length;
+  await service.pushTo("healthy", { title: "继续", body: "健康目标仍可发送" });
+  expect(requests.filter((url) => url.includes("healthy.example.test"))).toHaveLength(beforeHealthy + 1);
+  await rm(dataDir, { recursive: true, force: true });
+});
+
+test("Bark rejects unsupported domains and non-HTTPS non-local servers", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-bark-validation-"));
+  await mkdir(join(dataDir, "secrets"), { recursive: true });
+  await writeFile(join(dataDir, "secrets", "bark-targets.json"), JSON.stringify([
+    { id: "bad-domain", device_key: "secret", domains: ["sports"], enabled: true, server_url: "https://example.test" },
+  ]));
+  const service = new BarkNotificationService(dataDir);
+  await expect(service.status()).rejects.toThrow("unsupported domain");
+  await writeFile(join(dataDir, "secrets", "bark-targets.json"), JSON.stringify([
+    { id: "bad-server", device_key: "secret", domains: ["ai"], enabled: true, server_url: "http://example.test" },
+  ]));
+  await expect(service.status()).rejects.toThrow("HTTPS");
   await rm(dataDir, { recursive: true, force: true });
 });

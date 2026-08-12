@@ -1,0 +1,109 @@
+import { StateDatabase } from "./state-database";
+
+export type FinanceMarket = "CN" | "HK" | "US";
+
+export interface FinanceWatchItem {
+  market: FinanceMarket;
+  symbol: string;
+  name?: string;
+}
+
+export interface FinancePreferences {
+  interests: string[];
+  watchlist: FinanceWatchItem[];
+  markets: FinanceMarket[];
+  channels: {
+    disclosures: boolean;
+    regulation: boolean;
+    macro: boolean;
+    global_official: boolean;
+  };
+  scan_interval_minutes: number;
+  push_interval_seconds: number;
+  push_threshold: number;
+  novelty_history_hours: number;
+  updated_at: string;
+}
+
+const DEFAULT_PREFERENCES: FinancePreferences = {
+  interests: ["宏观政策", "资本市场监管", "上市公司重大事项", "人工智能与科技产业"],
+  watchlist: [],
+  markets: ["CN", "HK", "US"],
+  channels: { disclosures: true, regulation: true, macro: true, global_official: true },
+  scan_interval_minutes: 10,
+  push_interval_seconds: 60,
+  push_threshold: 0.78,
+  novelty_history_hours: 168,
+  updated_at: new Date(0).toISOString(),
+};
+
+export class FinancePreferenceStore {
+  private readonly state: StateDatabase;
+
+  constructor(dataDir: string) {
+    this.state = StateDatabase.open(dataDir);
+  }
+
+  async get(): Promise<FinancePreferences> {
+    return validate(this.state.listRecords<FinancePreferences>("settings")
+      .find((item) => "watchlist" in item && "markets" in item) ?? structuredClone(DEFAULT_PREFERENCES));
+  }
+
+  async save(input: unknown): Promise<FinancePreferences> {
+    const value = validate(input);
+    value.updated_at = new Date().toISOString();
+    this.state.putRecord("settings", "finance_intelligence_preferences", value, value.updated_at, value.updated_at);
+    return value;
+  }
+}
+
+function validate(input: unknown): FinancePreferences {
+  const value = input as Partial<FinancePreferences> | undefined;
+  const interests = Array.isArray(value?.interests)
+    ? value.interests.map(String).map((item) => item.trim()).filter(Boolean).slice(0, 30)
+    : DEFAULT_PREFERENCES.interests;
+  if (interests.some((item) => item.length > 80)) throw new Error("Each finance interest must be at most 80 characters");
+  const markets = [...new Set((Array.isArray(value?.markets) ? value.markets : DEFAULT_PREFERENCES.markets)
+    .map(String).filter((market): market is FinanceMarket => ["CN", "HK", "US"].includes(market)))] as FinanceMarket[];
+  if (!markets.length) throw new Error("At least one finance market is required");
+  const watchlist = (Array.isArray(value?.watchlist) ? value.watchlist : []).flatMap((raw): FinanceWatchItem[] => {
+    if (!raw || typeof raw !== "object") return [];
+    const item = raw as Partial<FinanceWatchItem>;
+    const market = String(item.market ?? "").toUpperCase();
+    const symbol = String(item.symbol ?? "").trim().toUpperCase();
+    const name = String(item.name ?? "").trim();
+    if (!["CN", "HK", "US"].includes(market) || !/^[A-Z0-9._-]{1,20}$/.test(symbol)) return [];
+    return [{ market: market as FinanceMarket, symbol, ...(name ? { name: name.slice(0, 80) } : {}) }];
+  });
+  const uniqueWatchlist = watchlist.filter((item, index, rows) =>
+    rows.findIndex((other) => other.market === item.market && other.symbol === item.symbol) === index,
+  ).slice(0, 100);
+  const pushThreshold = Number(value?.push_threshold ?? DEFAULT_PREFERENCES.push_threshold);
+  if (!Number.isFinite(pushThreshold) || pushThreshold < 0.6 || pushThreshold > 0.95) {
+    throw new Error("push_threshold must be between 0.6 and 0.95");
+  }
+  return {
+    interests,
+    watchlist: uniqueWatchlist,
+    markets,
+    channels: {
+      disclosures: value?.channels?.disclosures !== false,
+      regulation: value?.channels?.regulation !== false,
+      macro: value?.channels?.macro !== false,
+      global_official: value?.channels?.global_official !== false,
+    },
+    scan_interval_minutes: boundedInteger(value?.scan_interval_minutes, 5, 60, DEFAULT_PREFERENCES.scan_interval_minutes, "scan_interval_minutes"),
+    push_interval_seconds: boundedInteger(value?.push_interval_seconds, 60, 3_600, DEFAULT_PREFERENCES.push_interval_seconds, "push_interval_seconds"),
+    push_threshold: pushThreshold,
+    novelty_history_hours: boundedInteger(value?.novelty_history_hours, 24, 720, DEFAULT_PREFERENCES.novelty_history_hours, "novelty_history_hours"),
+    updated_at: typeof value?.updated_at === "string" ? value.updated_at : DEFAULT_PREFERENCES.updated_at,
+  };
+}
+
+function boundedInteger(value: unknown, minimum: number, maximum: number, fallback: number, name: string): number {
+  const result = Number(value ?? fallback);
+  if (!Number.isInteger(result) || result < minimum || result > maximum) {
+    throw new Error(`${name} must be an integer between ${minimum} and ${maximum}`);
+  }
+  return result;
+}

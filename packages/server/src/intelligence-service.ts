@@ -5,8 +5,9 @@ import { resolve } from "node:path";
 import type { AgentConfig, LocalConfigSet, ProviderRegistry } from "@totemora/core";
 
 import { ActionJournal, UncertainExternalEffectError } from "./action-journal";
-import { BarkDeliveryError, BarkNotificationService } from "./bark-notification-service";
+import { BarkNotificationService } from "./bark-notification-service";
 import { IntelligenceCandidateStore, type CandidateEvaluation, type CandidateFeedbackSignal, type IntelligenceCandidate } from "./intelligence-candidate-store";
+import { IntelligenceDispatcher } from "./intelligence-dispatcher";
 import { IntelligencePreferenceStore } from "./intelligence-preference-store";
 import { MemberStateStore } from "./member-state-store";
 import { StateDatabase } from "./state-database";
@@ -14,7 +15,6 @@ import { SpecialistTaskRepository } from "./specialist-service";
 import {
   parseTelegramFeedback,
   TelegramBotService,
-  TelegramDeliveryError,
   type TelegramUpdate,
 } from "./telegram-bot-service";
 import { ToolAssetRegistry } from "./tool-asset-registry";
@@ -73,6 +73,7 @@ export class IntelligenceService {
   private readonly preferences: IntelligencePreferenceStore;
   private readonly candidates: IntelligenceCandidateStore;
   private readonly bark: BarkNotificationService;
+  private readonly dispatcher: IntelligenceDispatcher;
   private readonly telegram: TelegramBotService;
   private readonly state: StateDatabase;
   private readonly specialistTasks: SpecialistTaskRepository;
@@ -90,6 +91,7 @@ export class IntelligenceService {
     this.preferences = new IntelligencePreferenceStore(dataDir);
     this.candidates = new IntelligenceCandidateStore(dataDir);
     this.bark = new BarkNotificationService(dataDir, fetchImpl);
+    this.dispatcher = new IntelligenceDispatcher(dataDir, memberState, fetchImpl);
     this.telegram = new TelegramBotService(dataDir, fetchImpl);
     this.state = StateDatabase.open(dataDir);
     this.specialistTasks = new SpecialistTaskRepository(dataDir);
@@ -135,7 +137,7 @@ export class IntelligenceService {
         upstream_score: item.upstream_score,
       }));
       const historyCutoff = Date.now() - preferences.novelty_history_hours * 3_600_000;
-      const recentPushed = (await this.candidates.list(200)).filter((item) => item.status === "pushed" && Date.parse(item.pushed_at ?? item.created_at) >= historyCutoff).slice(0, 30).map((item) => ({
+      const recentPushed = (await this.candidates.list(200, "ai")).filter((item) => item.status === "pushed" && Date.parse(item.pushed_at ?? item.created_at) >= historyCutoff).slice(0, 30).map((item) => ({
         event_key: item.event_key, headline: item.headline, brief: item.brief, pushed_at: item.pushed_at,
       }));
       let summary: Pick<IntelligenceBrief, "title" | "summary" | "items"> | undefined;
@@ -177,7 +179,7 @@ export class IntelligenceService {
       brief.items = summary.items;
       if (input.defer_push) {
         const accepted = await this.candidates.ingest({
-          scan_id: brief.id, member_id: member.id,
+          domain: "ai", scan_id: brief.id, member_id: member.id,
           evaluations: brief.items.map((item, index) => toCandidateEvaluation(item, index, brief.sources)),
           push_threshold: preferences.push_threshold, history_hours: preferences.novelty_history_hours,
         });
@@ -245,11 +247,11 @@ export class IntelligenceService {
   }
 
   async listCandidates(limit = 200): Promise<IntelligenceCandidate[]> {
-    return this.candidates.list(limit);
+    return this.candidates.list(limit, "ai");
   }
 
   async candidateCounts() {
-    return this.candidates.counts();
+    return this.candidates.counts("ai");
   }
 
   async list(): Promise<IntelligenceBrief[]> {
@@ -258,7 +260,7 @@ export class IntelligenceService {
   }
 
   async barkStatus(checkHealth = false) {
-    return this.bark.status(checkHealth);
+    return this.dispatcher.barkStatus("ai", checkHealth);
   }
 
   async telegramStatus(checkHealth = false) {
@@ -303,7 +305,8 @@ export class IntelligenceService {
           return "ignored unsupported callback";
         }
         const recorded = await this.recordFeedback(feedback.candidateId, feedback.signal, "telegram");
-        await this.telegram.answerCallback(callback.id, recorded.inserted ? "反馈已交给听风" : "这条反馈已经记录");
+        const memberName = recorded.candidate.domain === "finance" ? "观潮" : "听风";
+        await this.telegram.answerCallback(callback.id, recorded.inserted ? `反馈已交给${memberName}` : "这条反馈已经记录");
         return `recorded ${feedback.signal} feedback for candidate ${feedback.candidateId}`;
       }
       let reply: string;
@@ -311,7 +314,8 @@ export class IntelligenceService {
         reply = [
           "Totemora 部落已驻扎。",
           "/tribe — 查看当前在线成员",
-          "/news — 查看最近 3 条情报候选",
+          "/news — 查看最近 3 条 AI 情报候选",
+          "/finance — 查看最近 3 条财经情报候选",
           "情报消息下方按钮可反馈价值、重复或时效。",
           "涉及执行和修改的任务仍通过 MCP / Web 进入 Chief 门禁。",
         ].join("\n");
@@ -322,12 +326,19 @@ export class IntelligenceService {
           ...active.map((member) => `• ${member.name ?? member.id}（${member.id}）· ${member.status ?? "active"}`),
         ].join("\n");
       } else if (command === "/news") {
-        const candidates = (await this.candidates.list(20))
+        const candidates = (await this.candidates.list(20, "ai"))
           .filter((candidate) => ["queued", "pushed", "retry_wait", "channel_blocked"].includes(candidate.status))
           .slice(0, 3);
         reply = candidates.length
-          ? ["最近情报候选：", ...candidates.map((candidate) => `• [${candidate.status}] ${candidate.headline}\n  ${candidate.url}`)].join("\n")
-          : "当前没有可展示的情报候选。";
+          ? ["最近 AI 情报候选：", ...candidates.map((candidate) => `• [${candidate.status}] ${candidate.headline}\n  ${candidate.url}`)].join("\n")
+          : "当前没有可展示的 AI 情报候选。";
+      } else if (command === "/finance") {
+        const candidates = (await this.candidates.list(20, "finance"))
+          .filter((candidate) => ["queued", "pushed", "retry_wait", "channel_blocked"].includes(candidate.status))
+          .slice(0, 3);
+        reply = candidates.length
+          ? ["最近财经情报候选：", ...candidates.map((candidate) => `• [${candidate.status}] ${candidate.headline}\n  ${candidate.url}`)].join("\n")
+          : "当前没有可展示的财经情报候选。";
       } else {
         reply = "未知命令。发送 /help 查看可用交互。";
       }
@@ -358,7 +369,8 @@ export class IntelligenceService {
         summary: `用户反馈候选情报“${result.candidate.headline}”：${signal}`,
         verified: true, source_type: "candidate_feedback", source_id: `${candidateId}:${signal}`,
       });
-      const task = this.specialistTasks.findByResultRef("intelligence.watch", result.candidate.scan_id);
+      const serviceId = result.candidate.domain === "finance" ? "finance.watch" : "intelligence.watch";
+      const task = this.specialistTasks.findByResultRef(serviceId, result.candidate.scan_id);
       if (task) this.specialistTasks.appendEvent(task.id, {
         type: "user_feedback", stage: "feedback", actor_id: "user",
         summary: `候选 ${candidateId} 收到 ${signal} 反馈`,
@@ -379,7 +391,8 @@ export class IntelligenceService {
         verified: true, source_type: "candidate_feedback", source_id: `${candidate.id}:opened`,
       });
       if (candidate) {
-        const task = this.specialistTasks.findByResultRef("intelligence.watch", candidate.scan_id);
+        const serviceId = candidate.domain === "finance" ? "finance.watch" : "intelligence.watch";
+        const task = this.specialistTasks.findByResultRef(serviceId, candidate.scan_id);
         if (task) this.specialistTasks.appendEvent(task.id, {
           type: "user_feedback", stage: "feedback", actor_id: "user",
           summary: `候选 ${candidate.id} 从 Bark 被打开`,
@@ -516,64 +529,11 @@ export class IntelligenceService {
   }
 
   private async pushNextCandidate(minimumIntervalMs: number): Promise<IntelligenceCandidate | undefined> {
-    if (!(await this.notificationConfigured())) return undefined;
-    await this.candidates.releaseBlocked();
-    const candidate = await this.candidates.claimNext(minimumIntervalMs);
-    if (!candidate) return undefined;
-    try {
-      if (await this.bark.configured()) {
-        await this.journal.executeEffectOnce({
-          idempotency_key: `candidate:${candidate.id}:bark`, asset_id: "internal-bark",
-          member_id: candidate.member_id, action: "push_notification",
-          request: { candidate_id: candidate.id, title: candidate.headline, item_url: candidate.url },
-        }, async () => {
-          const result = await this.bark.push({
-            title: candidate.headline, body: candidate.brief,
-            url: this.callbackUrl(candidate), id: candidate.id,
-          });
-          return `Bark accepted request with status ${result.status}`;
-        });
-      }
-      for (const chatId of await this.telegram.chatIds()) {
-        await this.journal.executeEffectOnce({
-          idempotency_key: `candidate:${candidate.id}:telegram:${chatId}`, asset_id: "telegram-bot",
-          member_id: candidate.member_id, action: "push_notification",
-          request: { candidate_id: candidate.id, chat_id: chatId, item_url: candidate.url },
-        }, async () => {
-          const result = await this.telegram.pushCandidate(chatId, {
-            id: candidate.id, title: candidate.headline, body: candidate.brief, url: candidate.url,
-          });
-          return `Telegram chat ${chatId} accepted message ${result.message_id}`;
-        });
-      }
-      await this.candidates.complete(candidate.id, candidate.claim_token);
-      const task = this.specialistTasks.findByResultRef("intelligence.watch", candidate.scan_id);
-      if (task) this.specialistTasks.appendEvent(task.id, {
-        type: "external_receipt", stage: "dispatch", actor_id: candidate.member_id,
-        summary: `已配置通知通道均接受候选 ${candidate.id}；这不等同于用户已阅读`,
-      });
-      return { ...candidate, status: "pushed", pushed_at: new Date().toISOString() };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const deliveryError = error instanceof BarkDeliveryError || error instanceof TelegramDeliveryError ? error : undefined;
-      const delays = [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000];
-      if (deliveryError?.retryable && candidate.attempt_count < delays.length) {
-        const status = error instanceof TelegramDeliveryError ? await this.telegram.status() : await this.bark.status();
-        const retryAt = status.channel_status === "open" && status.retry_after
-          ? new Date(status.retry_after)
-          : new Date(Date.now() + delays[Math.max(0, candidate.attempt_count - 1)]!);
-        if (status.channel_status === "open") await this.candidates.block(candidate.id, candidate.claim_token, message, retryAt);
-        else await this.candidates.retry(candidate.id, candidate.claim_token, message, retryAt);
-      } else {
-        await this.candidates.fail(candidate.id, message, new Date(), candidate.claim_token);
-      }
-      await this.memberState.remember({ member_id: candidate.member_id, kind: "system_failure", summary: `候选消息推送失败：${message.slice(0, 300)}`, verified: true, source_id: candidate.id });
-      throw error;
-    }
+    return this.dispatcher.pushNext("ai", minimumIntervalMs, "intelligence.watch");
   }
 
   private async notificationConfigured(): Promise<boolean> {
-    return (await this.bark.configured()) || (await this.telegram.configured());
+    return this.dispatcher.notificationConfigured("ai");
   }
 
   private async pushDirectMessage(
@@ -582,29 +542,7 @@ export class IntelligenceService {
     memberId: string,
     message: { title: string; body: string; url?: string },
   ): Promise<void> {
-    if (await this.bark.configured()) {
-      await this.journal.executeEffectOnce({
-        idempotency_key: `${workflowId}:bark:${index}`, asset_id: "internal-bark",
-        member_id: memberId, action: "push_notification",
-        request: { index, title: message.title, item_url: message.url },
-      }, async () => {
-        const result = await this.bark.push(message);
-        return `Bark accepted request with status ${result.status}`;
-      });
-    }
-    for (const chatId of await this.telegram.chatIds()) {
-      await this.journal.executeEffectOnce({
-        idempotency_key: `${workflowId}:telegram:${index}:${chatId}`, asset_id: "telegram-bot",
-        member_id: memberId, action: "push_notification",
-        request: { index, chat_id: chatId, title: message.title, item_url: message.url },
-      }, async () => {
-        const result = await this.telegram.sendText(
-          chatId,
-          [message.title, "", message.body, message.url ? `\n${message.url}` : ""].join("\n").trim(),
-        );
-        return `Telegram chat ${chatId} accepted message ${result.message_id}`;
-      });
-    }
+    return this.dispatcher.pushDirect("ai", workflowId, index, memberId, message);
   }
 
   private async claimScheduledWindow(window: string): Promise<boolean> {

@@ -22,13 +22,13 @@ Totemora 是一个**预算约束下的异构智能部落**，不是通用聊天�
 
 ## 当前产品形态
 
-当前提供 CLI、本地 Web 和 MCP 三种主要入口，并通过 Telegram、Bark 承接受控通知与反馈。Web、MCP、Telegram、Bark 与 Cron 共用常驻 Gateway、SQLite 状态、成员经历和专业服务；外部 AI 通过 MCP 委托结果，不拥有第二套 Runtime。通用 `totemora run` 与 `onboarding-exam` 仍是直接创建本地 `TribeRuntime + FileRunStore` 的兼容入口，尚未迁移到 Gateway。Web 已提供任务大厅、证据台、成员营帐、火种、资产、听风台、内容工坊和审批入口，后续继续补 Skill 议事与效果对照，而不是另建一套控制面。
+当前提供 CLI、本地 Web 和 MCP 三种主要入口，并通过 Telegram、Bark 承接受控通知与反馈。Web、MCP、Telegram、Bark 与 Cron 共用常驻 Gateway、SQLite 状态、成员经历和专业服务；外部 AI 通过 MCP 委托结果，不拥有第二套 Runtime。通用 `totemora run` 与 `onboarding-exam` 仍是直接创建本地 `TribeRuntime + FileRunStore` 的兼容入口，尚未迁移到 Gateway。Web 已提供任务大厅、证据台、成员营帐、火种、资产、AI / 财经双域情报台、内容工坊和审批入口，后续继续补 Skill 议事与效果对照，而不是另建一套控制面。
 
-当前实现与使用方式见 [quickstart.md](quickstart.md)，领域结构见 [architecture-v2.md](architecture-v2.md)，服务器驻扎见 [always-on-gateway.md](always-on-gateway.md)，Gateway 见 [gateway-architecture.md](gateway-architecture.md)，MCP 见 [mcp-gateway.md](mcp-gateway.md)，Skill 对话治理见 [skill-governance.md](skill-governance.md)，推进顺序见 [execution-plan.md](execution-plan.md)。版本化验收指南属于历史节点快照，不作为当前架构说明。
+当前实现与使用方式见 [quickstart.md](quickstart.md)，领域结构见 [architecture-v2.md](architecture-v2.md)，服务器驻扎见 [always-on-gateway.md](always-on-gateway.md)，Gateway 见 [gateway-architecture.md](gateway-architecture.md)，MCP 见 [mcp-gateway.md](mcp-gateway.md)，财经情报见 [finance-intelligence.md](finance-intelligence.md)，Skill 对话治理见 [skill-governance.md](skill-governance.md)，推进顺序见 [execution-plan.md](execution-plan.md)。版本化验收指南属于历史节点快照，不作为当前架构说明。
 
-当前开发节点是 `v0.10.0-collaborative-content-studio`：在 SQLite 持久内核与 Git Flow、听风专业服务之上，内容工坊已形成听风研究/审校、千工写作、绘影视觉策划/配图的三人责任链。热点短帖和教程长文保留文字协作证据；CPA 图片火种另行记录视觉简报、参考集、生成、双重门禁和失败原因，图片失败不丢正文。生成只算操作，用户采纳才形成成长信用；自动外发继续保留独立门禁。Gateway 设计见 [gateway-architecture.md](gateway-architecture.md)，内容工坊验收见 [v0.10-content-studio-test-guide.md](v0.10-content-studio-test-guide.md)，设计决策见 [ADR-0014](adr/0014-collaborative-content-studio.md) 与 [ADR-0015](adr/0015-cpa-article-illustration.md)。
+当前开发节点是 `v0.11.0-finance-intelligence-vertical`：新增独立成员“观潮”和 `finance.watch` 专业服务，以 S0–S4 来源证据、市场/证券语义、确定性质量门和独立反馈历史处理财经情报；Bark 支持按 AI / 财经领域路由多台设备并逐目标熔断。原有内容工坊的听风研究/审校、千工写作、绘影视觉策划/配图责任链保持不变。财经使用见 [finance-intelligence.md](finance-intelligence.md)，决策见 [ADR-0017](adr/0017-finance-intelligence-vertical.md)。
 
-这里的 `v0.10.0-*` 是 `/api/status` 暴露的产品节点标签，不等于根 `package.json` 的包版本或 MCP Adapter 的协议兼容版本。当前三者独立演进；统一版本来源属于产品化整理项。
+这里的 `v0.11.0-*` 是 `/api/status` 暴露的产品节点标签，不等于根 `package.json` 的包版本或 MCP Adapter 的协议兼容版本。当前三者独立演进；统一版本来源属于产品化整理项。
 
 自动写作默认只在 6–18 小时节律窗口检查一次，并且候选必须同时满足价值、可信度、新颖度、非重复和 72 小时新鲜度门禁；没有合格内容时跳过本轮，不为消耗模型额度制造文章。手动选题仍可随时发起。
 
