@@ -427,7 +427,8 @@ export class BarkNotificationService {
 
     if (!response.ok) {
       let body = "unreadable response body";
-      try { body = (await response.text()).slice(0, 2_000); } catch {}
+      try { body = await readResponseTextLimited(response, 8_192); } catch {}
+      body = body.slice(0, 2_000);
       body = sanitizeError(body, target);
       const retryable = response.status === 408 || response.status === 429 || response.status >= 500;
       this.failure(target.id, `HTTP ${response.status}: ${body}`);
@@ -738,6 +739,32 @@ function sanitizeError(value: string, target: BarkTargetConfig): string {
 
 function ensureSlash(value: string): string {
   return value.endsWith("/") ? value : `${value}/`;
+}
+
+async function readResponseTextLimited(response: Response, limit: number): Promise<string> {
+  const declared = Number(response.headers.get("content-length") ?? 0);
+  if (declared > limit) throw new Error(`response exceeded ${limit} bytes`);
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    total += chunk.value.byteLength;
+    if (total > limit) {
+      await reader.cancel();
+      throw new Error(`response exceeded ${limit} bytes`);
+    }
+    chunks.push(chunk.value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
 }
 
 function redact(value: string): string {

@@ -9,6 +9,7 @@ export interface FinanceWatchItem {
 }
 
 export interface FinancePreferences {
+  schema_version: 2;
   interests: string[];
   watchlist: FinanceWatchItem[];
   markets: FinanceMarket[];
@@ -32,6 +33,7 @@ export interface FinancePreferences {
 }
 
 const DEFAULT_PREFERENCES: FinancePreferences = {
+  schema_version: 2,
   interests: ["宏观政策", "资本市场监管", "上市公司重大事项", "人工智能与科技产业"],
   watchlist: [],
   markets: ["CN", "HK", "US", "JP", "KR"],
@@ -56,8 +58,13 @@ export class FinancePreferenceStore {
   }
 
   async get(): Promise<FinancePreferences> {
-    return validate(this.state.listRecords<FinancePreferences>("settings")
-      .find((item) => "watchlist" in item && "markets" in item) ?? structuredClone(DEFAULT_PREFERENCES));
+    const stored = this.state.listRecords<FinancePreferences>("settings")
+      .find((item) => "watchlist" in item && "markets" in item);
+    const value = validate(stored ?? structuredClone(DEFAULT_PREFERENCES), stored?.schema_version !== 2);
+    if (stored && stored.schema_version !== 2) {
+      this.state.putRecord("settings", "finance_intelligence_preferences", value, value.updated_at, value.updated_at);
+    }
+    return value;
   }
 
   async save(input: unknown): Promise<FinancePreferences> {
@@ -68,7 +75,7 @@ export class FinancePreferenceStore {
   }
 }
 
-function validate(input: unknown): FinancePreferences {
+function validate(input: unknown, migrateLegacyMarkets = false): FinancePreferences {
   const value = input as Partial<FinancePreferences> | undefined;
   const interests = Array.isArray(value?.interests)
     ? value.interests.map(String).map((item) => item.trim()).filter(Boolean).slice(0, 30)
@@ -76,6 +83,10 @@ function validate(input: unknown): FinancePreferences {
   if (interests.some((item) => item.length > 80)) throw new Error("Each finance interest must be at most 80 characters");
   const markets = [...new Set((Array.isArray(value?.markets) ? value.markets : DEFAULT_PREFERENCES.markets)
     .map(String).filter((market): market is FinanceMarket => ["CN", "HK", "US", "JP", "KR"].includes(market)))] as FinanceMarket[];
+  if (migrateLegacyMarkets) {
+    if (!markets.includes("JP")) markets.push("JP");
+    if (!markets.includes("KR")) markets.push("KR");
+  }
   if (!markets.length) throw new Error("At least one finance market is required");
   const watchlist = (Array.isArray(value?.watchlist) ? value.watchlist : []).flatMap((raw): FinanceWatchItem[] => {
     if (!raw || typeof raw !== "object") return [];
@@ -95,6 +106,7 @@ function validate(input: unknown): FinancePreferences {
   }
   const morningBriefings = value?.morning_briefings;
   return {
+    schema_version: 2,
     interests,
     watchlist: uniqueWatchlist,
     markets,

@@ -7,18 +7,20 @@ import {
   FinanceMarketSnapshotService,
   formatMorningSnapshot,
   parseMarketSnapshotResponse,
+  usMarketSession,
 } from "./finance-market-snapshot-service";
 
-function payload() {
+function payload(latest = 1_700_086_400) {
   const symbols = ["^GSPC", "^IXIC", "^DJI", "XLK", "XLF", "XLE", "XLV", "XLI", "XLY", "^N225", "^KS11"];
   return JSON.stringify({ spark: { result: symbols.map((symbol, index) => ({
     symbol,
-    response: [{ timestamp: [1_700_000_000, 1_700_086_400], indicators: { quote: [{ close: [100, 100 + index] }] } }],
+    response: [{ timestamp: [latest - 86_400, latest], indicators: { quote: [{ close: [100, 100 + index] }] } }],
   })) } });
 }
 
 test("market snapshot parses deterministic benchmark and sector moves", () => {
-  const snapshot = parseMarketSnapshotResponse(payload(), "2026-08-12T00:00:00.000Z");
+  const latest = Date.parse("2026-08-11T13:30:00.000Z") / 1_000;
+  const snapshot = parseMarketSnapshotResponse(payload(latest), "2026-08-12T00:00:00.000Z");
   expect(snapshot.moves.find((move) => move.symbol === "^IXIC")?.change_percent).toBeCloseTo(1);
   expect(snapshot.moves.find((move) => move.symbol === "XLK")?.group).toBe("us_sector");
   const text = formatMorningSnapshot(snapshot, "asia_preopen", [{
@@ -29,6 +31,16 @@ test("market snapshot parses deterministic benchmark and sector moves", () => {
   expect(text).toContain("当前为盘前");
   expect(text).toContain("板块领涨");
   expect(text).toContain("EXM -8.20%");
+  expect(usMarketSession(snapshot)).toEqual({ fresh: true, date: "2026-08-11" });
+});
+
+test("market snapshot labels a holiday gap as no new US close", () => {
+  const friday = Date.parse("2026-09-04T13:30:00.000Z") / 1_000;
+  const snapshot = parseMarketSnapshotResponse(payload(friday), "2026-09-08T00:05:00.000Z");
+  const text = formatMorningSnapshot(snapshot, "us_overnight", []);
+  expect(usMarketSession(snapshot)).toEqual({ fresh: false, date: "2026-09-04" });
+  expect(text).toContain("美股无新收盘（最近交易日 2026-09-04）");
+  expect(text).not.toContain("隔夜美股");
 });
 
 test("market snapshot excludes the unfinished daily bar during a live US session", () => {

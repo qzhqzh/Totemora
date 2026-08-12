@@ -50,6 +50,22 @@ test("Bark opens a thirty-minute circuit after three retryable channel failures"
   await rm(dataDir, { recursive: true, force: true });
 });
 
+test("Bark bounds error response bodies before recording a delivery failure", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-bark-error-limit-"));
+  await mkdir(join(dataDir, "secrets"), { recursive: true });
+  await writeFile(join(dataDir, "secrets", "bark-device-key"), "device-secret\n");
+  let cancelled = false;
+  const service = new BarkNotificationService(dataDir, (async () => new Response(new ReadableStream({
+    pull(controller) {
+      controller.enqueue(new Uint8Array(5_000));
+    },
+    cancel() { cancelled = true; },
+  }), { status: 503 })) as unknown as typeof fetch);
+  await expect(service.push({ title: "测试", body: "正文" })).rejects.toBeInstanceOf(BarkDeliveryError);
+  expect(cancelled).toBe(true);
+  await rm(dataDir, { recursive: true, force: true });
+});
+
 test("Bark routes multiple configured targets by domain and returns target receipts without secrets", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "totemora-bark-targets-"));
   await mkdir(join(dataDir, "secrets"), { recursive: true });

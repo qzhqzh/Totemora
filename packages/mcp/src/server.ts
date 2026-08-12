@@ -112,7 +112,7 @@ export function createTotemoraMcpServer(gateway: TotemoraGatewayClient): McpServ
       idempotency_key: z.string().min(1).max(200).optional(),
       delivery_mode: z.enum(["candidate_pool", "direct_push"]).default("candidate_pool"),
     },
-    annotations: { title: "Run intelligence watch", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { title: "Run intelligence watch", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, async ({ message_count, idempotency_key, delivery_mode }) => toolCall(() => gateway.runIntelligenceBrief(message_count, idempotency_key, delivery_mode)));
 
   server.registerTool("totemora_get_intelligence_task", {
@@ -130,7 +130,7 @@ export function createTotemoraMcpServer(gateway: TotemoraGatewayClient): McpServ
       idempotency_key: z.string().min(1).max(200).optional(),
       delivery_mode: z.enum(["candidate_pool", "direct_push"]).default("candidate_pool"),
     },
-    annotations: { title: "Run finance watch", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    annotations: { title: "Run finance watch", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, async ({ message_count, idempotency_key, delivery_mode }) => toolCall(() =>
     gateway.runFinanceBrief(message_count, idempotency_key, delivery_mode),
   ));

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { FinancePreferenceStore } from "./finance-preference-store";
+import { StateDatabase } from "./state-database";
 
 test("finance preferences normalize markets and watchlist without mixing AI settings", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "totemora-finance-preferences-"));
@@ -47,5 +48,21 @@ test("finance morning briefing preferences validate times and remain backward co
   expect(saved.morning_briefings.asia_preopen).toEqual({ enabled: false, time: "06:45" });
   expect(saved.morning_briefings.us_overnight).toEqual({ enabled: true, time: "08:15" });
   expect(store.save({ markets: ["US"], morning_briefings: { us_overnight: { time: "25:00" } } })).rejects.toThrow("HH:MM");
+  await rm(dataDir, { recursive: true, force: true });
+});
+
+test("legacy finance preferences gain JP and KR once without overriding later choices", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-finance-preferences-migration-"));
+  const createdAt = "2026-08-01T00:00:00.000Z";
+  StateDatabase.open(dataDir).putRecord("settings", "finance_intelligence_preferences", {
+    interests: ["宏观"], watchlist: [], markets: ["CN", "HK", "US"],
+    channels: { disclosures: true, regulation: true, macro: true, global_official: true, market_media: false },
+    scan_interval_minutes: 10, push_interval_seconds: 60, push_threshold: 0.78,
+    novelty_history_hours: 168, updated_at: createdAt,
+  }, createdAt, createdAt);
+  const store = new FinancePreferenceStore(dataDir);
+  expect((await store.get()).markets).toEqual(["CN", "HK", "US", "JP", "KR"]);
+  expect((await store.save({ markets: ["US"] })).markets).toEqual(["US"]);
+  expect((await store.get()).markets).toEqual(["US"]);
   await rm(dataDir, { recursive: true, force: true });
 });

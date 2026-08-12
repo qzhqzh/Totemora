@@ -5,6 +5,7 @@ import {
   formatMorningSnapshot,
   type FinanceBriefingType,
   type FinanceMarketSnapshot,
+  usMarketSession,
 } from "./finance-market-snapshot-service";
 import { FinancePreferenceStore, type FinancePreferences } from "./finance-preference-store";
 import { FinanceSourceRegistry, type FinanceSourceItem } from "./finance-source-registry";
@@ -49,6 +50,8 @@ export interface FinanceIntelligenceBrief {
   queued_messages?: number;
   briefing_type?: FinanceBriefingType;
   market_snapshot?: FinanceMarketSnapshot;
+  delivery_idempotency_key?: string;
+  delivery_pending?: boolean;
   error?: string;
 }
 
@@ -95,12 +98,16 @@ export class FinanceIntelligenceService {
     await this.assets.assertCanUse(member, "official-finance-sources", "read_disclosures");
     await this.assets.assertCanUse(member, "official-finance-sources", "read_regulation");
     await this.assets.assertCanUse(member, "official-finance-sources", "read_macro");
+    await this.assertNotificationAccess(member);
     const brief: FinanceIntelligenceBrief = {
       id: crypto.randomUUID(), domain: "finance", member_id: member.id,
       title: "部落财经情报", summary: "", disclaimer: "仅供信息整理，不构成投资建议。",
       items: [], sources: [], warnings: [], pushed_messages: 0,
       status: "failed", created_at: new Date().toISOString(),
       ...(input.briefing_type ? { briefing_type: input.briefing_type } : {}),
+      ...(input.briefing_type && input.idempotency_key
+        ? { delivery_idempotency_key: input.idempotency_key }
+        : {}),
     };
     try {
       const preferences = await this.preferences.get();
@@ -161,7 +168,7 @@ export class FinanceIntelligenceService {
               input.briefing_type ? `晨报类型：${input.briefing_type}` : "",
               input.briefing_type ? `结构化行情（S3，数值必须原样使用）：${JSON.stringify(brief.market_snapshot)}` : "",
               `来源证据：${JSON.stringify(sourceEvidence)}`,
-              briefingInstruction(input.briefing_type),
+              briefingInstruction(input.briefing_type, brief.market_snapshot),
               "输出严格 JSON：{title,summary,items:[{headline,brief,url,event_key,importance,interest,confidence,novelty,push_worthy,rationale,is_update}]}。items 取 3-8 条并合并同一事件；四项分数为 0-1。headline 先写市场/标的（若有）再写事实；brief 只写已知事实、为什么可能重要、下一观察点，最多 220 字。无自选匹配时，只把重大监管、货币政策、关键宏观或明显重大公司事件标为 push_worthy。summary 不超过 180 字，并提醒不构成投资建议。",
               attempt === 1
                 ? `上一次输出被确定性门禁拒绝：${rejectionReason}。修正后重发完整 JSON：${rejected.slice(0, 6_000)}`
@@ -188,7 +195,10 @@ export class FinanceIntelligenceService {
       brief.items = evaluated.items;
       const testSuffix = input.briefing_type && input.reason === "manual" ? " · 测试" : "";
       if (input.briefing_type === "asia_preopen") brief.title = `观潮晨报 · 日韩盘前${testSuffix}`;
-      if (input.briefing_type === "us_overnight") brief.title = `观潮晨报 · 隔夜美股${testSuffix}`;
+      if (input.briefing_type === "us_overnight") {
+        const label = brief.market_snapshot && !usMarketSession(brief.market_snapshot).fresh ? "美股休市" : "隔夜美股";
+        brief.title = `观潮晨报 · ${label}${testSuffix}`;
+      }
       if (input.defer_push !== false) {
         const accepted = await this.candidates.ingest({
           domain: "finance", scan_id: brief.id, member_id: member.id,
@@ -199,10 +209,13 @@ export class FinanceIntelligenceService {
         brief.queued_messages = accepted.filter((candidate) => candidate.status === "queued").length;
       } else if (await this.dispatcher.notificationConfigured("finance")) {
         const messages = buildMessages(brief, messageCount);
+        brief.delivery_pending = true;
+        this.save(brief);
         for (let index = 0; index < messages.length; index += 1) {
           await this.dispatcher.pushDirect("finance", input.idempotency_key ?? brief.id, index, member.id, messages[index]!);
           brief.pushed_messages += 1;
         }
+        brief.delivery_pending = false;
       }
       brief.status = "completed";
       this.save(brief);
@@ -236,18 +249,21 @@ export class FinanceIntelligenceService {
     }
   }
 
-  async runDue(): Promise<{ scan?: FinanceIntelligenceBrief; pushed?: IntelligenceCandidate; push_error?: string } | undefined> {
+  async runDue(now = new Date()): Promise<{ scan?: FinanceIntelligenceBrief; pushed?: IntelligenceCandidate; push_error?: string } | undefined> {
     const preferences = await this.preferences.get();
-    const now = new Date();
     for (const due of financeBriefingsDue(now, preferences)) {
       const serviceId = `finance.brief.${due.type}`;
       const window = `${due.local_date}:${due.type}`;
+      const deliveryKey = `scheduled:${window}`;
+      const pending = this.pendingScheduledDelivery(deliveryKey);
+      if (pending) return { scan: await this.retryScheduledDelivery(pending) };
       if (!this.claimWindow(window, serviceId)) continue;
       return { scan: await this.run({
         reason: "scheduled", defer_push: false, message_count: 1, briefing_type: due.type,
-        idempotency_key: `scheduled:${window}`,
+        idempotency_key: deliveryKey,
       }) };
     }
+    await this.assertNotificationAccess(this.requireMember());
     let pushed: IntelligenceCandidate | undefined;
     let pushError: string | undefined;
     try { pushed = await this.dispatcher.pushNext("finance", preferences.push_interval_seconds * 1_000, "finance.watch"); }
@@ -297,6 +313,47 @@ export class FinanceIntelligenceService {
       INSERT OR IGNORE INTO schedule_leases(service_id,window_key,claimed_at,owner_id)
       VALUES(?,?,?,?)
     `).run(serviceId, window, new Date().toISOString(), process.pid.toString()).changes === 1;
+  }
+
+  private pendingScheduledDelivery(deliveryKey: string): FinanceIntelligenceBrief | undefined {
+    return this.state.listRecords<FinanceIntelligenceBrief>("finance_intelligence_briefs")
+      .find((brief) => brief.delivery_idempotency_key === deliveryKey && brief.delivery_pending === true);
+  }
+
+  private async retryScheduledDelivery(brief: FinanceIntelligenceBrief): Promise<FinanceIntelligenceBrief> {
+    const member = this.requireMember();
+    await this.assertNotificationAccess(member);
+    try {
+      const messages = buildMessages(brief, 1);
+      for (let index = 0; index < messages.length; index += 1) {
+        await this.dispatcher.pushDirect(
+          "finance", brief.delivery_idempotency_key!, index, member.id, messages[index]!,
+        );
+      }
+      brief.pushed_messages = messages.length;
+      brief.delivery_pending = false;
+      brief.status = "completed";
+      delete brief.error;
+      this.save(brief);
+      return brief;
+    } catch (error) {
+      brief.error = error instanceof Error ? error.message : String(error);
+      this.save(brief);
+      throw error;
+    }
+  }
+
+  private async assertNotificationAccess(member: AgentConfig): Promise<void> {
+    const bark = await this.dispatcher.barkStatus("finance");
+    if (bark.configured) {
+      await this.assets.assertCanUse(member, "finance-intelligence", "push_bark");
+      await this.assets.assertCanUse(member, "internal-bark", "push_notification");
+    }
+    const telegram = await this.dispatcher.telegramStatus();
+    if (telegram.configured) {
+      await this.assets.assertCanUse(member, "finance-intelligence", "push_telegram");
+      await this.assets.assertCanUse(member, "telegram-bot", "push_notification");
+    }
   }
 
   private save(brief: FinanceIntelligenceBrief): void {
@@ -428,23 +485,33 @@ export function financeBriefingsDue(now: Date, preferences: FinancePreferences):
   });
 }
 
-function buildMessages(brief: FinanceIntelligenceBrief, count: number) {
+export function buildFinanceMessages(brief: FinanceIntelligenceBrief, count: number) {
   const morning = brief.briefing_type && brief.market_snapshot
-    ? `${formatMorningSnapshot(brief.market_snapshot, brief.briefing_type, brief.sources)}\n\n重点：${brief.summary}`
+    ? formatMorningSnapshot(brief.market_snapshot, brief.briefing_type, brief.sources)
     : brief.summary;
-  const messages = [{ title: brief.title.slice(0, 80), body: `${morning}\n\n${brief.disclaimer}`.slice(0, 500), url: brief.items[0]?.url }];
+  const messages = [{ title: brief.title.slice(0, 80), body: notificationBody(morning, brief.disclaimer), url: brief.items[0]?.url }];
   for (const item of brief.items.slice(0, count - 1)) {
-    messages.push({ title: item.headline.slice(0, 80), body: `${item.brief}\n\n${brief.disclaimer}`.slice(0, 500), url: item.url });
+    messages.push({ title: item.headline.slice(0, 80), body: notificationBody(item.brief, brief.disclaimer), url: item.url });
   }
   return messages.slice(0, count);
 }
 
-function briefingInstruction(type?: FinanceBriefingType): string {
+const buildMessages = buildFinanceMessages;
+
+function notificationBody(content: string, disclaimer: string): string {
+  const suffix = `\n\n${disclaimer}`;
+  return `${content.slice(0, Math.max(0, 500 - suffix.length))}${suffix}`;
+}
+
+function briefingInstruction(type?: FinanceBriefingType, snapshot?: FinanceMarketSnapshot): string {
+  const staleWarning = snapshot && !usMarketSession(snapshot).fresh
+    ? "结构化行情没有新的美股收盘，必须明确写为休市或最近交易日，不得称为隔夜或昨夜涨跌。"
+    : "";
   if (type === "asia_preopen") {
-    return "这是北京时间日韩盘前晨报：东京和首尔现货均在北京时间 08:00 开盘，不得声称已有当日开盘涨跌。summary 聚焦隔夜美股传导、日韩盘前政策/公司消息和潜在利空，区分事实与推断。";
+    return `这是北京时间日韩盘前晨报：东京和首尔现货均在北京时间 08:00 开盘，不得声称已有当日开盘涨跌。summary 聚焦隔夜美股传导、日韩盘前政策/公司消息和潜在利空，区分事实与推断。${staleWarning}`;
   }
   if (type === "us_overnight") {
-    return "这是隔夜美股收盘晨报：summary 聚焦异常涨跌、领涨/领跌板块及其已知催化或利空；行情数字只复制结构化行情，原因无法由证据确认时必须写为推断。";
+    return `这是隔夜美股收盘晨报：summary 聚焦异常涨跌、领涨/领跌板块及其已知催化或利空；行情数字只复制结构化行情，原因无法由证据确认时必须写为推断。${staleWarning}`;
   }
   return "";
 }

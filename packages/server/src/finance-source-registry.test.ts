@@ -7,6 +7,7 @@ import { FinanceSourceRegistry } from "./finance-source-registry";
 import type { FinancePreferences } from "./finance-preference-store";
 
 const preferences: FinancePreferences = {
+  schema_version: 2,
   interests: ["监管"], watchlist: [], markets: ["CN"],
   channels: { disclosures: true, regulation: true, macro: true, global_official: false, market_media: false },
   scan_interval_minutes: 10, push_interval_seconds: 60, push_threshold: 0.78,

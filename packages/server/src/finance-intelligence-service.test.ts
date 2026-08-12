@@ -1,12 +1,21 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { loadLocalConfig, type AgentProvider } from "@totemora/core";
-import { FinanceIntelligenceService, financeAdviceViolation, financeBriefingsDue } from "./finance-intelligence-service";
+import {
+  buildFinanceMessages,
+  FinanceIntelligenceService,
+  financeAdviceViolation,
+  financeBriefingsDue,
+  type FinanceIntelligenceBrief,
+} from "./finance-intelligence-service";
+import { parseMarketSnapshotResponse } from "./finance-market-snapshot-service";
 import { FinancePreferenceStore } from "./finance-preference-store";
+import { IntelligenceDispatcher } from "./intelligence-dispatcher";
 import { MemberStateStore } from "./member-state-store";
+import { StateDatabase } from "./state-database";
 
 test.each([
   "建议继续持有该标的",
@@ -130,3 +139,77 @@ test("观潮 corrects prohibited investment advice before a candidate can be sto
   expect(brief.warnings).toContain("观潮经过一次确定性门禁纠正后完成评估");
   await rm(dataDir, { recursive: true, force: true });
 });
+
+test("finance delivery requires both specialist and channel asset permissions", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-finance-permission-"));
+  await mkdir(join(dataDir, "secrets"), { recursive: true });
+  await writeFile(join(dataDir, "secrets", "bark-device-key"), "device-secret\n");
+  const config = await loadLocalConfig({ configDir: resolve(import.meta.dir, "../../../configs/example") });
+  const member = config.agents.agents.find((candidate) => candidate.id === "qwen_finance")!;
+  member.tools = member.tools?.filter((tool) => tool !== "internal-bark");
+  const provider: AgentProvider = { async generate() { throw new Error("provider must not run"); } };
+  const service = new FinanceIntelligenceService(
+    config, { get: () => provider }, new MemberStateStore(dataDir, config), dataDir,
+    resolve(import.meta.dir, "../../.."), (async () => Response.json({ code: 200 })) as unknown as typeof fetch,
+  );
+  await expect(service.run({ defer_push: false })).rejects.toThrow("internal-bark");
+  await rm(dataDir, { recursive: true, force: true });
+});
+
+test("scheduled morning delivery retries only incomplete Bark targets without rerunning the model", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-finance-morning-retry-"));
+  await mkdir(join(dataDir, "secrets"), { recursive: true });
+  await writeFile(join(dataDir, "secrets", "bark-targets.json"), JSON.stringify([
+    { id: "flaky", device_key: "flaky-key", domains: ["finance"], enabled: true, server_url: "https://flaky.example.test" },
+    { id: "healthy", device_key: "healthy-key", domains: ["finance"], enabled: true, server_url: "https://healthy.example.test" },
+  ]));
+  await new FinancePreferenceStore(dataDir).save({ markets: ["US"] });
+  const requests: string[] = [];
+  let flakyAttempts = 0;
+  const fetchImpl = (async (input) => {
+    const url = String(input);
+    requests.push(url);
+    if (url.includes("flaky.example.test") && flakyAttempts++ === 0) return new Response("unavailable", { status: 503 });
+    return Response.json({ code: 200 });
+  }) as typeof fetch;
+  const config = await loadLocalConfig({ configDir: resolve(import.meta.dir, "../../../configs/example") });
+  const memberState = new MemberStateStore(dataDir, config);
+  const capturedAt = "2026-08-13T00:05:00.000Z";
+  const latest = Date.parse("2026-08-12T13:30:00.000Z") / 1_000;
+  const snapshot = parseMarketSnapshotResponse(marketPayload(latest), capturedAt);
+  const deliveryKey = "scheduled:2026-08-13:us_overnight";
+  const brief: FinanceIntelligenceBrief = {
+    id: "morning-retry", domain: "finance", member_id: "qwen_finance",
+    title: "观潮晨报 · 隔夜美股", summary: "模型错误声称标普上涨 99%", disclaimer: "仅供信息整理，不构成投资建议。",
+    items: [{ headline: "来源事件", brief: "来源事实", url: "https://example.com/source" }],
+    sources: [], warnings: [], pushed_messages: 0, status: "failed", created_at: capturedAt,
+    briefing_type: "us_overnight", market_snapshot: snapshot,
+    delivery_idempotency_key: deliveryKey, delivery_pending: true, error: "flaky target failed",
+  };
+  const message = buildFinanceMessages(brief, 1)[0]!;
+  expect(message.body).not.toContain("99%");
+  expect(message.body.endsWith(brief.disclaimer)).toBe(true);
+  const dispatcher = new IntelligenceDispatcher(dataDir, memberState, fetchImpl);
+  await expect(dispatcher.pushDirect("finance", deliveryKey, 0, brief.member_id, message)).rejects.toThrow("unavailable");
+  StateDatabase.open(dataDir).putRecord("finance_intelligence_briefs", brief.id, brief, brief.created_at, brief.created_at);
+  let providerCalls = 0;
+  const provider: AgentProvider = { async generate() { providerCalls += 1; throw new Error("provider must not rerun"); } };
+  const service = new FinanceIntelligenceService(
+    config, { get: () => provider }, memberState, dataDir, resolve(import.meta.dir, "../../.."), fetchImpl,
+  );
+  expect(await service.runDue(new Date(capturedAt))).toMatchObject({
+    scan: { id: brief.id, status: "completed", delivery_pending: false, pushed_messages: 1 },
+  });
+  expect(providerCalls).toBe(0);
+  expect(requests.filter((url) => url.includes("healthy.example.test"))).toHaveLength(1);
+  expect(requests.filter((url) => url.includes("flaky.example.test"))).toHaveLength(2);
+  await rm(dataDir, { recursive: true, force: true });
+});
+
+function marketPayload(latest: number): string {
+  const symbols = ["^GSPC", "^IXIC", "^DJI", "XLK", "XLF", "XLE", "XLV", "XLI", "XLY"];
+  return JSON.stringify({ spark: { result: symbols.map((symbol, index) => ({
+    symbol,
+    response: [{ timestamp: [latest - 86_400, latest], indicators: { quote: [{ close: [100, 101 + index] }] } }],
+  })) } });
+}

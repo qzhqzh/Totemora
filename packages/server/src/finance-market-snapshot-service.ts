@@ -159,13 +159,17 @@ export function formatMorningSnapshot(
   const sectors = snapshot.moves.filter((move) => move.group === "us_sector")
     .sort((left, right) => right.change_percent - left.change_percent);
   const asia = snapshot.moves.filter((move) => move.group === "asia_benchmark");
+  const usSession = usMarketSession(snapshot);
+  const usLabel = usSession.fresh
+    ? (type === "asia_preopen" ? "隔夜美股" : "美股收盘")
+    : `美股无新收盘（最近交易日 ${usSession.date ?? "未知"}）`;
   const lines = type === "asia_preopen"
     ? [
       "日韩现货 08:00（北京时间）开盘，当前为盘前。",
-      `隔夜美股：${us.slice(0, 4).map(formatMove).join("｜")}`,
+      `${usLabel}：${us.slice(0, 4).map(formatMove).join("｜")}`,
       asia.length ? `日韩上日：${asia.map(formatMove).join("｜")}` : "",
     ]
-    : [`美股收盘：${us.slice(0, 4).map(formatMove).join("｜")}`];
+    : [`${usLabel}：${us.slice(0, 4).map(formatMove).join("｜")}`];
   if (sectors.length >= 4) {
     lines.push(`板块领涨：${sectors.slice(0, 2).map(formatMove).join("｜")}；领跌：${sectors.slice(-2).reverse().map(formatMove).join("｜")}`);
   }
@@ -178,6 +182,23 @@ export function formatMorningSnapshot(
   }
   if (snapshot.cached) lines.push(`行情使用 ${snapshot.captured_at.slice(0, 16).replace("T", " ")} 缓存，需留意时效。`);
   return lines.filter(Boolean).join("\n");
+}
+
+export function usMarketSession(snapshot: FinanceMarketSnapshot): { fresh: boolean; date?: string } {
+  const latest = snapshot.moves
+    .filter((move) => move.group === "us_benchmark")
+    .map((move) => Date.parse(move.as_of))
+    .filter(Number.isFinite)
+    .sort((left, right) => right - left)[0];
+  const capturedAt = Date.parse(snapshot.captured_at);
+  if (latest === undefined || !Number.isFinite(capturedAt)) return { fresh: false };
+  const ageHours = (capturedAt - latest) / 3_600_000;
+  return {
+    fresh: ageHours >= 0 && ageHours <= 30,
+    date: new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
+    }).format(new Date(latest)),
+  };
 }
 
 function formatMove(move: FinanceMarketMove): string {
