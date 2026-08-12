@@ -206,7 +206,7 @@ export function formatMorningSnapshot(
   if (hotMoves.length) {
     lines.push(`热股异动（S4线索）：${hotMoves.map((item) => `${item.symbols[0] ?? item.title} ${signed(item.change_percent!)}`).join("｜")}`);
   }
-  const sourceLines = morningSourceLines(sources, type);
+  const sourceLines = morningSourceLines(sources, type, snapshot.checked_at ?? snapshot.captured_at);
   if (sourceLines.length) lines.push(`消息线索：${sourceLines.join("｜")}`);
   if (snapshot.cached) lines.push(`行情使用 ${snapshot.captured_at.slice(0, 16).replace("T", " ")} 缓存，需留意时效。`);
   return lines.filter(Boolean).join("\n");
@@ -227,17 +227,28 @@ export function usMarketSession(snapshot: FinanceMarketSnapshot): { fresh: boole
   };
 }
 
-function morningSourceLines(sources: FinanceSourceItem[], type: FinanceBriefingType): string[] {
+function morningSourceLines(sources: FinanceSourceItem[], type: FinanceBriefingType, checkedAt: string): string[] {
   const markets = type === "asia_preopen" ? new Set(["JP", "KR"]) : new Set(["US"]);
+  const checkedEpoch = Date.parse(checkedAt);
+  if (!Number.isFinite(checkedEpoch)) return [];
+  const weekday = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Shanghai", weekday: "short",
+  }).format(new Date(checkedEpoch));
+  const lookbackHours = type === "asia_preopen" && weekday === "Mon" ? 72 : 24;
   return sources
-    .filter((source) => markets.has(source.market) && ["S0", "S1"].includes(source.evidence_tier))
+    .filter((source) => {
+      const publishedEpoch = Date.parse(source.published_at ?? "");
+      const age = checkedEpoch - publishedEpoch;
+      return markets.has(source.market) && ["S0", "S1"].includes(source.evidence_tier)
+        && Number.isFinite(publishedEpoch) && age >= 0 && age <= lookbackHours * 3_600_000;
+    })
     .sort((left, right) => {
       const tier = left.evidence_tier.localeCompare(right.evidence_tier);
       return tier || String(right.published_at ?? "").localeCompare(String(left.published_at ?? ""));
     })
     .filter((source, index, rows) => rows.findIndex((other) => other.link === source.link) === index)
     .slice(0, 4)
-    .map((source) => `[${source.evidence_tier} ${source.source}] ${source.title.replace(/\s+/g, " ").trim().slice(0, 70)}`);
+    .map((source) => `[${source.evidence_tier} ${source.source} ${marketDate(source.published_at!, "Asia/Shanghai")}] ${source.title.replace(/\s+/g, " ").trim().slice(0, 70)}`);
 }
 
 function formatMove(move: FinanceMarketMove): string {
