@@ -32,6 +32,10 @@ http://127.0.0.1:4310
 5. 在 Run 现场观察 planning、executing、reviewing 等阶段，并查看派工理由、报告、验收、Token 和 Trace。
 6. 专业任务使用对应入口：已有代码改动走 Git Flow 门禁，AI / 技术与财经情报走“双域情报台”，协作写作与配图走“创作工坊”；不要把这些副作用隐含在通用 Run 文本里。
 
+第二台 Bark 手机不需要再手改 JSON：在“双域情报台”的“通知设备”中填写设备
+信息、选择 AI / 财经路由并发送测试。完整 device key 只写入服务器 Secret，保存后
+即时生效；详细步骤见 [内部 Bark 通知通道](internal-bark.md)。
+
 任务大厅会在提交前显示 Task Analyzer 判断的模式。通用 Run 当前执行 `inspect` 和绑定工作地的 `continue`；`change`、`operate` 和无工作地 `answer` 不会伪装成只读执行。受控变更、通知和内容生产由强类型专业服务承接。运行中的模型请求可以点击“取消 Run”中止。
 
 Provider、预算、派工等临时错误被标记为可重试时，Web 会显示“重试 Run”。重试会创建新的 Run 并继续归入原 Mission。Job 与重试规格已持久化，服务重启后仍可重试；被重启中断的 Job 会转换成可重试失败。

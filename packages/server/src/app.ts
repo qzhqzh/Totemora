@@ -34,6 +34,9 @@ import { SPECIALIST_SERVICES, SpecialistTaskRepository } from "./specialist-serv
 import { MemberProfileStore } from "./member-profile-store";
 import { ContentStudioService, type ContentIllustrationGenerator, type CreateContentInput } from "./content-studio-service";
 import { CpaIllustrationService } from "./cpa-illustration-service";
+import {
+  BarkNotificationService, BarkTargetMutationError, type BarkTargetMutationInput,
+} from "./bark-notification-service";
 
 export interface PlaygroundOptions {
   configDir: string;
@@ -138,6 +141,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
   const intelligenceTasks = new Map<string, IntelligenceTask>();
   const intelligenceTaskStore = new JobStore<IntelligenceTask, IntelligenceTaskInput>(options.dataDir, "intelligence-tasks");
   const specialistTasks = new SpecialistTaskRepository(options.dataDir);
+  const barkManagement = new BarkNotificationService(options.dataDir, options.fetchImpl ?? fetch);
   const failInterruptedSpecialistTask = (taskId: string, summary: string) => {
     const task = specialistTasks.get(taskId);
     if (!task || !["queued", "routing", "running"].includes(task.status)) return;
@@ -805,6 +809,67 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
         if (request.method === "GET" && url.pathname === "/api/finance/bark") {
           requireOperator(request, options.operatorToken);
           return json(await (await getMemberServices()).finance.barkStatus(url.searchParams.get("health") === "1"));
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/notifications/bark/targets") {
+          requireOperator(request, options.operatorToken);
+          return json(await barkManagement.managementStatus(url.searchParams.get("health") === "1"));
+        }
+
+        if (request.method === "POST" && url.pathname === "/api/notifications/bark/targets") {
+          requireOperator(request, options.operatorToken);
+          try {
+            return json(await barkManagement.upsertManagedTarget(
+              await request.json() as BarkTargetMutationInput, "create",
+            ), 201);
+          } catch (error) {
+            if (error instanceof BarkTargetMutationError) throw new HttpError(error.status, error.message);
+            throw error;
+          }
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/notifications/bark/audit") {
+          requireOperator(request, options.operatorToken);
+          return json({ events: await barkManagement.listManagementAudit() });
+        }
+
+        const barkTargetTestMatch = url.pathname.match(/^\/api\/notifications\/bark\/targets\/([^/]+)\/test$/);
+        if (request.method === "POST" && barkTargetTestMatch) {
+          requireOperator(request, options.operatorToken);
+          const targetId = decodeURIComponent(barkTargetTestMatch[1]!);
+          const input = await request.json().catch(() => ({})) as { idempotency_key?: string };
+          const idempotencyKey = input.idempotency_key?.trim() || `web-bark-test:${targetId}:${crypto.randomUUID()}`;
+          try {
+            const result = await new ActionJournal(options.dataDir).executeEffectOnce({
+              idempotency_key: idempotencyKey, asset_id: "internal-bark", member_id: "operator",
+              action: "test_notification", request: { target_id: targetId },
+            }, async () => {
+              const receipt = await barkManagement.pushTo(targetId, {
+                id: `test-${crypto.randomUUID()}`, title: "Totemora 设备测试",
+                body: "这台设备已接入部落通知控制面。AI / 财经领域路由将按设备配置生效。",
+              });
+              return `Bark target ${targetId} accepted test with status ${receipt.status}`;
+            });
+            await barkManagement.recordTestAudit(targetId, true, result.record.evidence ?? "accepted");
+            return json({ target_id: targetId, accepted: true, replayed: result.replayed });
+          } catch (error) {
+            await barkManagement.recordTestAudit(targetId, false, error instanceof Error ? error.message : String(error));
+            throw error;
+          }
+        }
+
+        const barkTargetMatch = url.pathname.match(/^\/api\/notifications\/bark\/targets\/([^/]+)$/);
+        if (request.method === "PUT" && barkTargetMatch) {
+          requireOperator(request, options.operatorToken);
+          const input = await request.json() as Omit<BarkTargetMutationInput, "id">;
+          try {
+            return json(await barkManagement.upsertManagedTarget(
+              { ...input, id: decodeURIComponent(barkTargetMatch[1]!) }, "update",
+            ));
+          } catch (error) {
+            if (error instanceof BarkTargetMutationError) throw new HttpError(error.status, error.message);
+            throw error;
+          }
         }
 
         if (request.method === "GET" && url.pathname === "/api/intelligence/telegram") {

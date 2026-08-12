@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -148,5 +148,66 @@ test("Bark rejects unsupported domains and non-HTTPS non-local servers", async (
     { id: "bad-server", device_key: "secret", domains: ["ai"], enabled: true, server_url: "http://example.test" },
   ]));
   await expect(service.status()).rejects.toThrow("HTTPS");
+  await rm(dataDir, { recursive: true, force: true });
+});
+
+test("Bark management atomically stores masked targets and preserves keys on metadata updates", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-bark-management-"));
+  await mkdir(join(dataDir, "secrets"), { recursive: true });
+  await writeFile(join(dataDir, "secrets", "bark-device-key"), "primary-secret\n");
+  let deliveryHealthy = false;
+  const service = new BarkNotificationService(dataDir, (async () => (
+    deliveryHealthy ? Response.json({ code: 200 }) : new Response("unavailable", { status: 503 })
+  )) as unknown as typeof fetch);
+  const created = await service.upsertManagedTarget({
+    id: "finance-phone", label: "财经手机", device_key: "finance-secret-1234",
+    domains: ["finance"], enabled: true, server_url: "http://127.0.0.1:18080",
+  }, "create");
+  expect(created).toMatchObject({
+    id: "finance-phone", label: "财经手机", domains: ["finance"], enabled: true,
+    source: "managed", key_suffix: "1234",
+  });
+  expect(JSON.stringify(created)).not.toContain("finance-secret");
+  const targetFile = join(dataDir, "secrets", "bark-targets.json");
+  expect((await stat(targetFile)).mode & 0o777).toBe(0o600);
+
+  await expect(service.upsertManagedTarget({
+    id: "finance-phone", label: "重复设备", device_key: "replacement-secret",
+  }, "create")).rejects.toMatchObject({ status: 409 });
+  await expect(service.upsertManagedTarget({ id: "missing-phone", enabled: false }, "update"))
+    .rejects.toMatchObject({ status: 404 });
+  await expect(service.upsertManagedTarget({
+    id: "untrusted", label: "不可信服务", device_key: "untrusted-secret",
+    server_url: "https://attacker.example.test", domains: ["ai"], enabled: true,
+  }, "create")).rejects.toThrow("not allowlisted");
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await expect(service.pushTo("finance-phone", { title: "测试", body: "正文" })).rejects.toThrow();
+  }
+  expect((await service.status()).targets.find((target) => target.id === "finance-phone"))
+    .toMatchObject({ channel_status: "open" });
+  deliveryHealthy = true;
+  const updated = await service.upsertManagedTarget({
+    id: "finance-phone", label: "随身设备", device_key: "corrected-secret-5678",
+    domains: ["ai", "finance"], enabled: true,
+  }, "update");
+  expect(updated).toMatchObject({ label: "随身设备", domains: ["ai", "finance"], enabled: true });
+  expect(await readFile(targetFile, "utf8")).toContain("corrected-secret-5678");
+  await expect(service.pushTo("finance-phone", { title: "恢复", body: "立即测试" })).resolves.toMatchObject({ accepted: true });
+  expect((await service.targets()).find((target) => target.id === "primary")).toMatchObject({ source: "legacy" });
+  const audit = JSON.stringify(await service.listManagementAudit());
+  expect(audit).not.toContain("finance-secret");
+  expect(audit).toContain("key_changed");
+  await expect(service.upsertManagedTarget({ id: "primary", label: "覆盖主设备" })).rejects.toThrow("reserved");
+  await rm(dataDir, { recursive: true, force: true });
+});
+
+test("Bark never returns a complete short device key", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-bark-short-key-"));
+  await mkdir(join(dataDir, "secrets"), { recursive: true });
+  await writeFile(join(dataDir, "secrets", "bark-device-key"), "tiny\n");
+  const state = JSON.stringify(await new BarkNotificationService(dataDir).status());
+  expect(state).not.toContain("tiny");
+  expect(state).not.toContain("key_suffix");
   await rm(dataDir, { recursive: true, force: true });
 });

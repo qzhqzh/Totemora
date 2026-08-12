@@ -323,6 +323,62 @@ test("finance task endpoint reuses a domain idempotency key instead of schedulin
   await rm(dataDir, { recursive: true, force: true });
 });
 
+test("operator manages and tests Bark devices without exposing device keys", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-bark-panel-api-"));
+  await mkdir(join(dataDir, "secrets"), { recursive: true });
+  await writeFile(join(dataDir, "secrets", "bark-device-key"), "primary-device-secret\n");
+  const requests: Array<{ url: string; body?: Record<string, unknown> }> = [];
+  const app = createPlaygroundApp({
+    configDir: resolve(import.meta.dir, "../../../configs/example"), dataDir,
+    operatorToken: "operator-secret",
+    createProviderRegistry: () => ({ get: () => new PlaygroundProvider() }),
+    fetchImpl: (async (input, init) => {
+      requests.push({
+        url: String(input),
+        body: init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined,
+      });
+      return Response.json({ code: 200 });
+    }) as typeof fetch,
+  });
+  expect((await app.fetch(new Request("http://local/api/notifications/bark/targets"))).status).toBe(401);
+  const createdResponse = await app.fetch(new Request("http://local/api/notifications/bark/targets", {
+    method: "POST", headers: authorized(), body: JSON.stringify({
+      id: "second-phone", label: "第二台手机", device_key: "second-device-secret-9876",
+      domains: ["finance"], enabled: true, server_url: "http://127.0.0.1:18080",
+    }),
+  }));
+  expect(createdResponse.status).toBe(201);
+  expect(await createdResponse.json()).toMatchObject({ id: "second-phone", key_suffix: "9876", source: "managed" });
+  expect((await app.fetch(new Request("http://local/api/notifications/bark/targets", {
+    method: "POST", headers: authorized(), body: JSON.stringify({
+      id: "second-phone", label: "重复手机", device_key: "replacement-secret", domains: ["ai"],
+    }),
+  }))).status).toBe(409);
+  expect((await app.fetch(new Request("http://local/api/notifications/bark/targets/missing-phone", {
+    method: "PUT", headers: authorized(), body: JSON.stringify({ enabled: false }),
+  }))).status).toBe(404);
+  const statusResponse = await app.fetch(new Request("http://local/api/notifications/bark/targets?health=1", { headers: authorized() }));
+  const statusBody = await statusResponse.json();
+  expect(statusBody.targets).toHaveLength(2);
+  expect(JSON.stringify(statusBody)).not.toContain("device-secret");
+
+  const tested = await app.fetch(new Request("http://local/api/notifications/bark/targets/second-phone/test", {
+    method: "POST", headers: authorized(), body: JSON.stringify({ idempotency_key: "panel-test-second" }),
+  }));
+  expect(await tested.json()).toEqual({ target_id: "second-phone", accepted: true, replayed: false });
+  expect(requests.find((request) => request.url.endsWith("/push"))?.body).toMatchObject({
+    device_key: "second-device-secret-9876", title: "Totemora 设备测试",
+  });
+  const disabled = await app.fetch(new Request("http://local/api/notifications/bark/targets/second-phone", {
+    method: "PUT", headers: authorized(), body: JSON.stringify({ enabled: false }),
+  }));
+  expect(await disabled.json()).toMatchObject({ enabled: false, key_suffix: "9876" });
+  const audit = await (await app.fetch(new Request("http://local/api/notifications/bark/audit", { headers: authorized() }))).json();
+  expect(audit.events.map((event: any) => event.action)).toEqual(expect.arrayContaining(["created", "updated", "tested"]));
+  expect(JSON.stringify(audit)).not.toContain("second-device-secret");
+  await rm(dataDir, { recursive: true, force: true });
+});
+
 test("Telegram webhook handles allowlisted group commands and candidate feedback exactly once", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "totemora-telegram-webhook-"));
   const secrets = join(dataDir, "secrets");
