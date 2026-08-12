@@ -18,6 +18,7 @@ export interface FinanceMarketSnapshot {
   source: "Yahoo Finance chart";
   evidence_tier: "S3";
   captured_at: string;
+  checked_at: string;
   cached: boolean;
   completed_daily_bars: true;
   moves: FinanceMarketMove[];
@@ -74,7 +75,7 @@ export class FinanceMarketSnapshotService {
       .find((item) => item.moves?.length);
     this.recordHealth("degraded", new Date().toISOString(), Date.now() - started, cached?.moves.length, errors.join("; "));
     if (cached?.completed_daily_bars === true && Date.now() - Date.parse(cached.captured_at) <= 72 * 3_600_000) {
-      return { ...cached, cached: true };
+      return { ...cached, checked_at: new Date().toISOString(), cached: true };
     }
     throw new Error(`结构化行情不可用：${errors.join("; ")}`);
   }
@@ -146,7 +147,7 @@ export function parseMarketSnapshotResponse(body: string, capturedAt: string): F
   if (benchmarkCount < 2 || sectorCount < 5) throw new Error("结构化行情返回不完整");
   return {
     source: "Yahoo Finance chart", evidence_tier: "S3", captured_at: capturedAt,
-    cached: false, completed_daily_bars: true, moves,
+    checked_at: capturedAt, cached: false, completed_daily_bars: true, moves,
   };
 }
 
@@ -180,6 +181,8 @@ export function formatMorningSnapshot(
   if (hotMoves.length) {
     lines.push(`热股异动（S4线索）：${hotMoves.map((item) => `${item.symbols[0] ?? item.title} ${signed(item.change_percent!)}`).join("｜")}`);
   }
+  const sourceLines = morningSourceLines(sources, type);
+  if (sourceLines.length) lines.push(`消息线索：${sourceLines.join("｜")}`);
   if (snapshot.cached) lines.push(`行情使用 ${snapshot.captured_at.slice(0, 16).replace("T", " ")} 缓存，需留意时效。`);
   return lines.filter(Boolean).join("\n");
 }
@@ -190,7 +193,7 @@ export function usMarketSession(snapshot: FinanceMarketSnapshot): { fresh: boole
     .map((move) => Date.parse(move.as_of))
     .filter(Number.isFinite)
     .sort((left, right) => right - left)[0];
-  const capturedAt = Date.parse(snapshot.captured_at);
+  const capturedAt = Date.parse(snapshot.checked_at ?? snapshot.captured_at);
   if (latest === undefined || !Number.isFinite(capturedAt)) return { fresh: false };
   const ageHours = (capturedAt - latest) / 3_600_000;
   return {
@@ -199,6 +202,19 @@ export function usMarketSession(snapshot: FinanceMarketSnapshot): { fresh: boole
       timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
     }).format(new Date(latest)),
   };
+}
+
+function morningSourceLines(sources: FinanceSourceItem[], type: FinanceBriefingType): string[] {
+  const markets = type === "asia_preopen" ? new Set(["JP", "KR"]) : new Set(["US"]);
+  return sources
+    .filter((source) => markets.has(source.market) && !source.source_id.startsWith("xueqiu-hot-stock:"))
+    .sort((left, right) => {
+      const tier = left.evidence_tier.localeCompare(right.evidence_tier);
+      return tier || String(right.published_at ?? "").localeCompare(String(left.published_at ?? ""));
+    })
+    .filter((source, index, rows) => rows.findIndex((other) => other.link === source.link) === index)
+    .slice(0, 4)
+    .map((source) => `[${source.evidence_tier} ${source.source}] ${source.title.replace(/\s+/g, " ").trim().slice(0, 70)}`);
 }
 
 function formatMove(move: FinanceMarketMove): string {
