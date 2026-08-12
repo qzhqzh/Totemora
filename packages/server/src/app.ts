@@ -28,6 +28,7 @@ import { MemberEvolutionService } from "./member-evolution-service";
 import { IntelligenceService } from "./intelligence-service";
 import { IntelligencePreferenceStore } from "./intelligence-preference-store";
 import { FinanceIntelligenceService } from "./finance-intelligence-service";
+import type { FinanceBriefingType } from "./finance-market-snapshot-service";
 import { FinancePreferenceStore } from "./finance-preference-store";
 import { ActionJournal } from "./action-journal";
 import { SPECIALIST_SERVICES, SpecialistTaskRepository } from "./specialist-service";
@@ -111,6 +112,7 @@ interface IntelligenceTask {
   message_count: number;
   idempotency_key: string;
   delivery_mode: "candidate_pool" | "direct_push";
+  briefing_type?: FinanceBriefingType;
   result?: Awaited<ReturnType<IntelligenceService["run"]>> | Awaited<ReturnType<FinanceIntelligenceService["run"]>>;
   error?: string;
   retryable?: boolean;
@@ -122,6 +124,7 @@ interface IntelligenceTaskInput {
   message_count?: number;
   idempotency_key?: string;
   delivery_mode?: "candidate_pool" | "direct_push";
+  briefing_type?: FinanceBriefingType;
 }
 
 class HttpError extends Error {
@@ -358,7 +361,8 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
         task.domain === domain && task.idempotency_key === input.idempotency_key,
       );
       if (existing) {
-        if (existing.message_count !== messageCount || existing.delivery_mode !== deliveryMode) {
+        if (existing.message_count !== messageCount || existing.delivery_mode !== deliveryMode
+          || existing.briefing_type !== input.briefing_type) {
           throw new HttpError(409, `Idempotency key ${input.idempotency_key} was reused with different intelligence task input`);
         }
         return existing;
@@ -375,6 +379,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
       message_count: messageCount,
       idempotency_key: input.idempotency_key ?? `${domain}-intelligence-${crypto.randomUUID()}`,
       delivery_mode: deliveryMode,
+      ...(input.briefing_type ? { briefing_type: input.briefing_type } : {}),
     };
     intelligenceTasks.set(task.id, task);
     await intelligenceTaskStore.save(task, input);
@@ -394,8 +399,10 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
       });
       try {
         const services = await getMemberServices();
-        const runner = finance ? services.finance : services.intelligence;
-        task.result = await runner.run({
+        task.result = finance ? await services.finance.run({
+          message_count: task.message_count, idempotency_key: task.idempotency_key, reason: "manual",
+          defer_push: task.delivery_mode === "candidate_pool", briefing_type: task.briefing_type,
+        }) : await services.intelligence.run({
           message_count: task.message_count, idempotency_key: task.idempotency_key, reason: "manual",
           defer_push: task.delivery_mode === "candidate_pool",
         });
@@ -953,11 +960,14 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
 
         if (request.method === "POST" && url.pathname === "/api/finance/run") {
           requireOperator(request, options.operatorToken);
-          const input = await request.json().catch(() => ({})) as { message_count?: number; idempotency_key?: string };
+          const input = await request.json().catch(() => ({})) as {
+            message_count?: number; idempotency_key?: string; briefing_type?: FinanceBriefingType;
+          };
           return json(await (await getMemberServices()).finance.run({
             message_count: input.message_count,
             idempotency_key: input.idempotency_key,
             reason: "manual",
+            briefing_type: input.briefing_type,
           }), 201);
         }
 

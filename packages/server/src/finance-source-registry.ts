@@ -2,7 +2,7 @@ import { StateDatabase } from "./state-database";
 import type { EvidenceTier } from "./intelligence-candidate-store";
 import type { FinanceMarket, FinancePreferences } from "./finance-preference-store";
 
-export type FinanceSourceCategory = "disclosures" | "regulation" | "macro" | "global_official";
+export type FinanceSourceCategory = "disclosures" | "regulation" | "macro" | "global_official" | "market_media" | "market_data";
 export type FinanceSourceAvailability = "active" | "covered" | "credential_required" | "commercial";
 
 export interface FinanceSourceDefinition {
@@ -29,6 +29,7 @@ export interface FinanceSourceItem {
   market: FinanceMarket;
   symbols: string[];
   event_type: string;
+  change_percent?: number;
   summary?: string;
   cached?: boolean;
 }
@@ -43,7 +44,8 @@ export interface FinanceSourceHealth extends FinanceSourceDefinition {
 }
 
 interface ActiveSource extends FinanceSourceDefinition {
-  parser: "cninfo" | "csrc" | "pbc" | "stats" | "rss" | "atom" | "hkma";
+  parser: "cninfo" | "csrc" | "pbc" | "stats" | "rss" | "atom" | "hkma" | "xueqiu-hot" | "sina-roll";
+  allowed_link_origins?: string[];
 }
 
 interface SourceCache {
@@ -88,9 +90,35 @@ const ACTIVE_SOURCES: ActiveSource[] = [
     tier: "S1", markets: ["HK"], category: "global_official", availability: "active", official: true,
     summary: "香港货币、银行及金融稳定相关官方发布。", parser: "hkma",
   },
+  {
+    id: "boj-whats-new", name: "日本银行", url: "https://www.boj.or.jp/en/rss/whatsnew.xml",
+    tier: "S1", markets: ["JP"], category: "global_official", availability: "active", official: true,
+    summary: "日本银行货币政策、金融市场、统计与公开发言的官方更新 RSS。", parser: "rss",
+  },
+  {
+    id: "bok-press-releases", name: "韩国银行", url: "https://www.bok.or.kr/eng/bbs/E0000634/news.rss",
+    tier: "S1", markets: ["KR"], category: "global_official", availability: "active", official: true,
+    summary: "韩国银行货币政策、经济与金融市场新闻稿的官方英文 RSS。", parser: "rss",
+  },
+  {
+    id: "xueqiu-hot-stock", name: "雪球热股", url: "https://xueqiu.com/hot/stock",
+    tier: "S4", markets: ["CN", "HK", "US"], category: "market_media", availability: "active", official: false,
+    summary: "雪球公开热股榜的社区关注信号；只用于发现市场关注变化，不能替代公告、监管或官方数据。", parser: "xueqiu-hot",
+  },
+  {
+    id: "sina-finance-roll", name: "新浪财经滚动", url: "https://feed.mix.sina.com.cn/api/roll/get?pageid=153&lid=2516&num=50&page=1",
+    tier: "S4", markets: ["CN", "HK", "US"], category: "market_media", availability: "active", official: false,
+    summary: "新浪财经公开滚动新闻，用于发现突发与媒体报道；重要事实必须回到 S0/S1 原文复核。", parser: "sina-roll",
+    allowed_link_origins: ["https://finance.sina.com.cn"],
+  },
 ];
 
 const CATALOG_ONLY: FinanceSourceDefinition[] = [
+  {
+    id: "yahoo-finance-chart", name: "Yahoo Finance 结构化行情", url: "https://finance.yahoo.com/markets/",
+    tier: "S3", markets: ["US", "HK"], category: "market_data", availability: "active", official: false,
+    summary: "晨报使用的指数与美国行业 ETF 日线快照；公开端点无服务承诺，失败时只复用 72 小时内缓存并显式标记。",
+  },
   {
     id: "sse-announcements", name: "上海证券交易所公告", url: "https://www.sse.com.cn/disclosure/listedinfo/announcement/",
     tier: "S0", markets: ["CN"], category: "disclosures", availability: "covered", official: true,
@@ -178,7 +206,7 @@ export class FinanceSourceRegistry {
     const selected = ACTIVE_SOURCES.filter((source) => sourceEnabled(source, preferences));
     const settled = await Promise.all(selected.map((source) => this.collectOne(source)));
     const warnings = settled.flatMap((result) => result.warnings);
-    const batches = settled.map((result) => result.items);
+    const batches = settled.map((result) => result.items.filter((item) => preferences.markets.includes(item.market)));
     const seen = new Set<string>();
     const items: FinanceSourceItem[] = [];
     for (let index = 0; items.length < 60 && index < 20; index += 1) {
@@ -231,18 +259,20 @@ export class FinanceSourceRegistry {
   }
 }
 
-function publicSource({ parser: _parser, ...source }: ActiveSource): FinanceSourceDefinition {
+function publicSource({ parser: _parser, allowed_link_origins: _allowedLinkOrigins, ...source }: ActiveSource): FinanceSourceDefinition {
   return source;
 }
 
 function sourceEnabled(source: ActiveSource, preferences: FinancePreferences): boolean {
   if (!source.markets.some((market) => preferences.markets.includes(market))) return false;
-  return preferences.channels[source.category];
+  return source.category === "market_data" || preferences.channels[source.category];
 }
 
 function parseSource(source: ActiveSource, body: string): FinanceSourceItem[] {
   if (source.parser === "rss") return parseRss(source, body);
   if (source.parser === "atom") return parseAtom(source, body);
+  if (source.parser === "xueqiu-hot") return parseXueqiuHot(source, body);
+  if (source.parser === "sina-roll") return parseSinaRoll(source, body);
   return extractAnchors(body).flatMap((anchor): FinanceSourceItem[] => {
     const href = decodeXml(anchor.href.trim());
     const title = cleanText(anchor.title || anchor.body);
@@ -262,6 +292,61 @@ function parseSource(source: ActiveSource, body: string): FinanceSourceItem[] {
       summary: `${source.name}官方条目；涉及数字和影响判断时应打开原文复核。`,
     }];
   }).filter((item, index, rows) => rows.findIndex((other) => other.link === item.link) === index);
+}
+
+function parseXueqiuHot(source: ActiveSource, html: string): FinanceSourceItem[] {
+  const script = html.match(/<script\b[^>]*id=["']initStore["'][^>]*>([\s\S]*?)<\/script>/i)?.[1] ?? "";
+  const rawRankList = script.match(/"rankList"\s*:\s*(\[[\s\S]*?\])\s*,\s*"stockTopics"/)?.[1];
+  if (!rawRankList) throw new Error("雪球热股页面缺少公开榜单数据");
+  let parsed: unknown;
+  try { parsed = JSON.parse(rawRankList); }
+  catch { throw new Error("雪球热股公开榜单格式已变化"); }
+  if (!Array.isArray(parsed)) throw new Error("雪球热股公开榜单格式已变化");
+  return parsed.flatMap((value): FinanceSourceItem[] => {
+    const row = recordValue(value);
+    const symbol = stringValue(row?.symbol ?? row?.code).toUpperCase();
+    const name = cleanText(stringValue(row?.name));
+    const heat = Number(row?.value);
+    if (!row || !name || !/^[A-Z0-9._-]{1,20}$/.test(symbol) || !Number.isFinite(heat)) return [];
+    const link = sourceLink(source, `/S/${encodeURIComponent(symbol)}`);
+    if (!link) return [];
+    const topic = cleanText(stringValue(recordValue(row.hot)?.tag));
+    const percent = Number(row.percent);
+    return [{
+      title: `雪球热股：${name}（${symbol}）${topic ? ` · ${topic}` : ""}`,
+      link: link.toString(), source: source.name, source_id: `${source.id}:${symbol}`, source_url: source.url,
+      evidence_tier: source.tier, market: marketFromSymbol(symbol, stringValue(row.exchange)), symbols: [symbol],
+      event_type: "market_attention",
+      change_percent: Number.isFinite(percent) ? percent : undefined,
+      summary: `雪球公开热股榜社区信号：热度 ${heat}${Number.isFinite(percent) ? `，页面涨跌幅 ${percent}%` : ""}。只用于发现线索，不作为事实结论。`,
+    }];
+  });
+}
+
+function parseSinaRoll(source: ActiveSource, json: string): FinanceSourceItem[] {
+  let parsed: unknown;
+  try { parsed = JSON.parse(json); }
+  catch { throw new Error("新浪财经滚动返回了无效 JSON"); }
+  const result = recordValue(recordValue(parsed)?.result);
+  const status = recordValue(result?.status);
+  if (Number(status?.code) !== 0 || !Array.isArray(result?.data)) {
+    throw new Error(`新浪财经滚动接口异常：${stringValue(status?.msg) || "unknown status"}`);
+  }
+  return result.data.flatMap((value): FinanceSourceItem[] => {
+    const row = recordValue(value);
+    const title = cleanText(stringValue(row?.title));
+    const link = sourceLink(source, stringValue(row?.url));
+    if (!row || title.length < 4 || !link) return [];
+    const sourceId = stringValue(row.docid) || stringValue(row.oid) || stableId(source.id, link.toString());
+    const intro = cleanText(stringValue(row.intro) || stringValue(row.summary)).slice(0, 1_000);
+    const media = cleanText(stringValue(row.media_name));
+    return [{
+      title, link: link.toString(), published_at: epochSecondsToIso(row.ctime), source: source.name,
+      source_id: `${source.id}:${sourceId}`, source_url: source.url, evidence_tier: source.tier,
+      market: marketFromSinaLink(link), symbols: symbolsFromMediaTitle(title), event_type: classifyEvent(title),
+      summary: [media ? `稿源：${media}` : "", intro, "媒体发现信号；关键事实需回到官方原文复核。"].filter(Boolean).join("；"),
+    }];
+  });
 }
 
 function acceptedAnchor(parser: ActiveSource["parser"], href: string, title: string): boolean {
@@ -334,6 +419,42 @@ function symbolsFromTitle(title: string): string[] {
   return [...new Set([...title.matchAll(/\b(?:[036]\d{5}|[A-Z]{1,5})\b/g)].map((match) => match[0]!.toUpperCase()))].slice(0, 10);
 }
 
+function symbolsFromMediaTitle(title: string): string[] {
+  const candidates = [
+    ...title.matchAll(/\b(?:SH|SZ|BJ)\d{6}\b/gi),
+    ...title.matchAll(/[$＄]([A-Z]{1,5})\b/g),
+    ...title.matchAll(/\b(?:NASDAQ|NYSE|AMEX)[:：]([A-Z]{1,5})\b/gi),
+    ...title.matchAll(/[（(]([A-Z]{1,5}|\d{5})[）)]/g),
+  ].map((match) => (match[1] ?? match[0]).replace(/^[$＄]/, "").toUpperCase());
+  return [...new Set(candidates)].slice(0, 10);
+}
+
+function marketFromSymbol(symbol: string, exchange: string): FinanceMarket {
+  if (/^(?:SH|SZ|BJ)\d{6}$/.test(symbol) || ["SH", "SZ", "BJ"].includes(exchange)) return "CN";
+  if (/^\d{5}$/.test(symbol) || exchange === "HK") return "HK";
+  return "US";
+}
+
+function marketFromSinaLink(link: URL): FinanceMarket {
+  if (/\/stock\/(?:hkstock|hkstockinfo)\//.test(link.pathname)) return "HK";
+  if (/\/stock\/usstock\//.test(link.pathname)) return "US";
+  return "CN";
+}
+
+function epochSecondsToIso(value: unknown): string | undefined {
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds <= 0) return undefined;
+  return new Date(seconds * 1_000).toISOString();
+}
+
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
+}
+
 function dateFromPath(path: string): string | undefined {
   const compact = path.match(/\/(20\d{2})(\d{2})\//);
   return compact ? `${compact[1]}-${compact[2]}` : undefined;
@@ -384,10 +505,20 @@ function sourceLink(source: ActiveSource, value: string): URL | undefined {
   try {
     const sourceUrl = new URL(source.url);
     const candidate = new URL(value, sourceUrl);
-    assertFinanceSourceUrl(candidate, sourceUrl.origin);
+    if (candidate.protocol === "http:" && sourceUrl.protocol === "https:" && candidate.hostname === sourceUrl.hostname) {
+      candidate.protocol = "https:";
+    }
+    const allowedOrigins = new Set([sourceUrl.origin, ...(source.allowed_link_origins ?? [])]);
+    assertFinanceSourceOrigins(candidate, allowedOrigins);
     return candidate;
   } catch {
     return undefined;
+  }
+}
+
+function assertFinanceSourceOrigins(url: URL, allowedOrigins: Set<string>): void {
+  if (url.protocol !== "https:" || !allowedOrigins.has(url.origin) || url.username || url.password || isPrivateHostname(url.hostname)) {
+    throw new Error(`Finance source URL is outside the HTTPS origin allowlist: ${url.hostname}`);
   }
 }
 

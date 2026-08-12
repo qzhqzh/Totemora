@@ -1,5 +1,11 @@
 import type { AgentConfig, LocalConfigSet, ProviderRegistry } from "@totemora/core";
 
+import {
+  FinanceMarketSnapshotService,
+  formatMorningSnapshot,
+  type FinanceBriefingType,
+  type FinanceMarketSnapshot,
+} from "./finance-market-snapshot-service";
 import { FinancePreferenceStore, type FinancePreferences } from "./finance-preference-store";
 import { FinanceSourceRegistry, type FinanceSourceItem } from "./finance-source-registry";
 import {
@@ -41,6 +47,8 @@ export interface FinanceIntelligenceBrief {
   created_at: string;
   candidate_ids?: string[];
   queued_messages?: number;
+  briefing_type?: FinanceBriefingType;
+  market_snapshot?: FinanceMarketSnapshot;
   error?: string;
 }
 
@@ -49,6 +57,7 @@ export class FinanceIntelligenceService {
   private readonly sources: FinanceSourceRegistry;
   private readonly candidates: IntelligenceCandidateStore;
   private readonly dispatcher: IntelligenceDispatcher;
+  private readonly marketSnapshots: FinanceMarketSnapshotService;
   private readonly assets: ToolAssetRegistry;
   private readonly state: StateDatabase;
 
@@ -64,6 +73,7 @@ export class FinanceIntelligenceService {
     this.sources = new FinanceSourceRegistry(dataDir, fetchImpl);
     this.candidates = new IntelligenceCandidateStore(dataDir);
     this.dispatcher = new IntelligenceDispatcher(dataDir, memberState, fetchImpl);
+    this.marketSnapshots = new FinanceMarketSnapshotService(dataDir, fetchImpl);
     this.assets = new ToolAssetRegistry(projectRoot, dataDir);
     this.state = StateDatabase.open(dataDir);
   }
@@ -73,7 +83,11 @@ export class FinanceIntelligenceService {
     idempotency_key?: string;
     reason?: "manual" | "scheduled";
     defer_push?: boolean;
+    briefing_type?: FinanceBriefingType;
   } = {}): Promise<FinanceIntelligenceBrief> {
+    if (input.briefing_type && !["asia_preopen", "us_overnight"].includes(input.briefing_type)) {
+      throw new Error("Unsupported finance briefing_type");
+    }
     const member = this.requireMember();
     const messageCount = Math.max(1, Math.min(5, input.message_count ?? 1));
     await this.assets.assertCanUse(member, "finance-intelligence", "collect");
@@ -86,16 +100,27 @@ export class FinanceIntelligenceService {
       title: "部落财经情报", summary: "", disclaimer: "仅供信息整理，不构成投资建议。",
       items: [], sources: [], warnings: [], pushed_messages: 0,
       status: "failed", created_at: new Date().toISOString(),
+      ...(input.briefing_type ? { briefing_type: input.briefing_type } : {}),
     };
     try {
       const preferences = await this.preferences.get();
-      if (input.reason === "manual") {
+      if (input.reason === "manual" && !input.briefing_type) {
         this.claimWindow(scheduledWindow(new Date(brief.created_at), preferences.scan_interval_minutes));
       }
       const collected = await this.sources.collect(preferences);
       brief.sources = collected.items;
       brief.warnings = collected.warnings;
-      const allowedLinks = new Set(brief.sources.map((item) => item.link));
+      if (input.briefing_type) {
+        brief.market_snapshot = await this.marketSnapshots.capture();
+        if (brief.market_snapshot.cached) brief.warnings.push("晨报结构化行情使用最近 72 小时内缓存");
+      }
+      const evidenceSources = input.briefing_type
+        ? morningEvidence(brief.sources, input.briefing_type)
+        : brief.sources;
+      const allowedLinks = new Set([
+        ...evidenceSources.map((item) => item.link),
+        ...(brief.market_snapshot?.moves.map((move) => move.url) ?? []),
+      ]);
       const recent = (await this.candidates.list(300, "finance"))
         .filter((candidate) => candidate.status === "pushed"
           && Date.parse(candidate.pushed_at ?? candidate.created_at) >= Date.now() - preferences.novelty_history_hours * 3_600_000)
@@ -104,11 +129,12 @@ export class FinanceIntelligenceService {
           event_key: candidate.event_key, headline: candidate.headline, market: candidate.market,
           symbols: candidate.symbols, event_type: candidate.event_type, pushed_at: candidate.pushed_at,
         }));
-      const sourceEvidence = brief.sources.map((item, index) => ({
+      const sourceEvidence = evidenceSources.map((item, index) => ({
         id: index + 1, title: item.title, url: item.link, source_id: item.source_id,
         published_at: item.published_at, source: item.source, source_url: item.source_url,
         evidence_tier: item.evidence_tier, market: item.market, symbols: item.symbols,
         event_type: item.event_type, summary: item.summary, cached: Boolean(item.cached),
+        change_percent: item.change_percent,
       }));
       const dossier = await this.memberState.getDossier(member.id);
       let evaluated: Pick<FinanceIntelligenceBrief, "title" | "summary" | "items"> | undefined;
@@ -116,7 +142,7 @@ export class FinanceIntelligenceService {
       let rejectionReason = "";
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const response = await this.providers.get(member.provider).generate({
-          memberId: member.id, model: member.model, responseFormat: "json", maxTokens: 3_500,
+          memberId: member.id, model: member.model, responseFormat: "json", maxTokens: input.briefing_type ? 2_000 : 3_500,
           messages: [
             { role: "system", content: [
               member.persona ?? "",
@@ -132,7 +158,10 @@ export class FinanceIntelligenceService {
               `用户自选标的：${JSON.stringify(preferences.watchlist)}`,
               `启用市场：${JSON.stringify(preferences.markets)}`,
               `最近已推送事件：${JSON.stringify(recent)}`,
+              input.briefing_type ? `晨报类型：${input.briefing_type}` : "",
+              input.briefing_type ? `结构化行情（S3，数值必须原样使用）：${JSON.stringify(brief.market_snapshot)}` : "",
               `来源证据：${JSON.stringify(sourceEvidence)}`,
+              briefingInstruction(input.briefing_type),
               "输出严格 JSON：{title,summary,items:[{headline,brief,url,event_key,importance,interest,confidence,novelty,push_worthy,rationale,is_update}]}。items 取 3-8 条并合并同一事件；四项分数为 0-1。headline 先写市场/标的（若有）再写事实；brief 只写已知事实、为什么可能重要、下一观察点，最多 220 字。无自选匹配时，只把重大监管、货币政策、关键宏观或明显重大公司事件标为 push_worthy。summary 不超过 180 字，并提醒不构成投资建议。",
               attempt === 1
                 ? `上一次输出被确定性门禁拒绝：${rejectionReason}。修正后重发完整 JSON：${rejected.slice(0, 6_000)}`
@@ -157,6 +186,9 @@ export class FinanceIntelligenceService {
       brief.title = evaluated.title;
       brief.summary = evaluated.summary;
       brief.items = evaluated.items;
+      const testSuffix = input.briefing_type && input.reason === "manual" ? " · 测试" : "";
+      if (input.briefing_type === "asia_preopen") brief.title = `观潮晨报 · 日韩盘前${testSuffix}`;
+      if (input.briefing_type === "us_overnight") brief.title = `观潮晨报 · 隔夜美股${testSuffix}`;
       if (input.defer_push !== false) {
         const accepted = await this.candidates.ingest({
           domain: "finance", scan_id: brief.id, member_id: member.id,
@@ -206,11 +238,21 @@ export class FinanceIntelligenceService {
 
   async runDue(): Promise<{ scan?: FinanceIntelligenceBrief; pushed?: IntelligenceCandidate; push_error?: string } | undefined> {
     const preferences = await this.preferences.get();
+    const now = new Date();
+    for (const due of financeBriefingsDue(now, preferences)) {
+      const serviceId = `finance.brief.${due.type}`;
+      const window = `${due.local_date}:${due.type}`;
+      if (!this.claimWindow(window, serviceId)) continue;
+      return { scan: await this.run({
+        reason: "scheduled", defer_push: false, message_count: 1, briefing_type: due.type,
+        idempotency_key: `scheduled:${window}`,
+      }) };
+    }
     let pushed: IntelligenceCandidate | undefined;
     let pushError: string | undefined;
     try { pushed = await this.dispatcher.pushNext("finance", preferences.push_interval_seconds * 1_000, "finance.watch"); }
     catch (error) { pushError = error instanceof Error ? error.message : String(error); }
-    const window = scheduledWindow(new Date(), preferences.scan_interval_minutes);
+    const window = scheduledWindow(now, preferences.scan_interval_minutes);
     if (!this.claimWindow(window)) return pushed || pushError ? { pushed, push_error: pushError } : undefined;
     const scan = await this.run({ reason: "scheduled", defer_push: true, idempotency_key: `scheduled:${window}` });
     if (!pushed) {
@@ -250,11 +292,11 @@ export class FinanceIntelligenceService {
     return member;
   }
 
-  private claimWindow(window: string): boolean {
+  private claimWindow(window: string, serviceId = "finance.watch"): boolean {
     return this.state.db.query(`
       INSERT OR IGNORE INTO schedule_leases(service_id,window_key,claimed_at,owner_id)
-      VALUES('finance.watch',?,?,?)
-    `).run(window, new Date().toISOString(), process.pid.toString()).changes === 1;
+      VALUES(?,?,?,?)
+    `).run(serviceId, window, new Date().toISOString(), process.pid.toString()).changes === 1;
   }
 
   private save(brief: FinanceIntelligenceBrief): void {
@@ -360,12 +402,61 @@ function scheduledWindow(now: Date, intervalMinutes: number): string {
   return `${now.toISOString().slice(0, 13)}:${String(bucket).padStart(2, "0")}`;
 }
 
+export function financeBriefingsDue(now: Date, preferences: FinancePreferences): Array<{ type: FinanceBriefingType; local_date: string }> {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: preferences.morning_briefings.timezone,
+    year: "numeric", month: "2-digit", day: "2-digit", weekday: "short",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  }).formatToParts(now).reduce<Record<string, string>>((result, part) => {
+    if (part.type !== "literal") result[part.type] = part.value;
+    return result;
+  }, {});
+  const weekday = parts.weekday ?? "";
+  const minute = Number(parts.hour) * 60 + Number(parts.minute);
+  const localDate = `${parts.year}-${parts.month}-${parts.day}`;
+  const configs: Array<{ type: FinanceBriefingType; enabled: boolean; time: string; grace: number }> = [
+    { type: "asia_preopen", ...preferences.morning_briefings.asia_preopen, grace: 59 },
+    { type: "us_overnight", ...preferences.morning_briefings.us_overnight, grace: 179 },
+  ];
+  return configs.flatMap((config) => {
+    if (!config.enabled) return [];
+    if (config.type === "asia_preopen" && ["Sat", "Sun"].includes(weekday)) return [];
+    if (config.type === "us_overnight" && ["Sun", "Mon"].includes(weekday)) return [];
+    const [hour, scheduledMinute] = config.time.split(":").map(Number);
+    const start = hour! * 60 + scheduledMinute!;
+    return minute >= start && minute <= start + config.grace ? [{ type: config.type, local_date: localDate }] : [];
+  });
+}
+
 function buildMessages(brief: FinanceIntelligenceBrief, count: number) {
-  const messages = [{ title: brief.title.slice(0, 80), body: `${brief.summary}\n\n${brief.disclaimer}`.slice(0, 500), url: brief.items[0]?.url }];
+  const morning = brief.briefing_type && brief.market_snapshot
+    ? `${formatMorningSnapshot(brief.market_snapshot, brief.briefing_type, brief.sources)}\n\n重点：${brief.summary}`
+    : brief.summary;
+  const messages = [{ title: brief.title.slice(0, 80), body: `${morning}\n\n${brief.disclaimer}`.slice(0, 500), url: brief.items[0]?.url }];
   for (const item of brief.items.slice(0, count - 1)) {
     messages.push({ title: item.headline.slice(0, 80), body: `${item.brief}\n\n${brief.disclaimer}`.slice(0, 500), url: item.url });
   }
   return messages.slice(0, count);
+}
+
+function briefingInstruction(type?: FinanceBriefingType): string {
+  if (type === "asia_preopen") {
+    return "这是北京时间日韩盘前晨报：东京和首尔现货均在北京时间 08:00 开盘，不得声称已有当日开盘涨跌。summary 聚焦隔夜美股传导、日韩盘前政策/公司消息和潜在利空，区分事实与推断。";
+  }
+  if (type === "us_overnight") {
+    return "这是隔夜美股收盘晨报：summary 聚焦异常涨跌、领涨/领跌板块及其已知催化或利空；行情数字只复制结构化行情，原因无法由证据确认时必须写为推断。";
+  }
+  return "";
+}
+
+function morningEvidence(sources: FinanceSourceItem[], type: FinanceBriefingType): FinanceSourceItem[] {
+  const preferredMarkets = type === "asia_preopen" ? new Set(["JP", "KR", "US", "HK"]) : new Set(["US"]);
+  const preferred = sources.filter((source) => preferredMarkets.has(source.market));
+  const official = preferred.filter((source) => ["S0", "S1"].includes(source.evidence_tier)).slice(0, 12);
+  const marketSignals = preferred.filter((source) => ["S2", "S3", "S4"].includes(source.evidence_tier)).slice(0, 20);
+  return [...official, ...marketSignals].filter((source, index, rows) =>
+    rows.findIndex((other) => other.link === source.link) === index,
+  ).slice(0, 32);
 }
 
 function isMemberFailure(message: string): boolean {

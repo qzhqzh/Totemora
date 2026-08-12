@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { loadLocalConfig, type AgentProvider } from "@totemora/core";
-import { FinanceIntelligenceService, financeAdviceViolation } from "./finance-intelligence-service";
+import { FinanceIntelligenceService, financeAdviceViolation, financeBriefingsDue } from "./finance-intelligence-service";
 import { FinancePreferenceStore } from "./finance-preference-store";
 import { MemberStateStore } from "./member-state-store";
 
@@ -38,13 +38,29 @@ test("deterministic finance gate permits factual disclosure language", () => {
   })).toBeUndefined();
 });
 
+test("finance morning briefings use Asia/Shanghai weekday windows", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-finance-schedule-"));
+  const preferences = await new FinancePreferenceStore(dataDir).get();
+  expect(financeBriefingsDue(new Date("2026-08-12T23:05:00.000Z"), preferences)).toEqual([
+    { type: "asia_preopen", local_date: "2026-08-13" },
+  ]);
+  expect(financeBriefingsDue(new Date("2026-08-13T00:05:00.000Z"), preferences)).toEqual([
+    { type: "us_overnight", local_date: "2026-08-13" },
+  ]);
+  expect(financeBriefingsDue(new Date("2026-08-15T00:05:00.000Z"), preferences)).toEqual([
+    { type: "us_overnight", local_date: "2026-08-15" },
+  ]);
+  expect(financeBriefingsDue(new Date("2026-08-16T00:05:00.000Z"), preferences)).toEqual([]);
+  await rm(dataDir, { recursive: true, force: true });
+});
+
 test("观潮 turns official finance evidence into a domain-isolated candidate", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "totemora-finance-service-"));
   const config = await loadLocalConfig({ configDir: resolve(import.meta.dir, "../../../configs/example") });
   await new FinancePreferenceStore(dataDir).save({
     interests: ["半导体", "监管"], markets: ["CN"],
     watchlist: [{ market: "CN", symbol: "688209", name: "英集芯" }],
-    channels: { disclosures: true, regulation: true, macro: true, global_official: false },
+    channels: { disclosures: true, regulation: true, macro: true, global_official: false, market_media: false },
   });
   const provider: AgentProvider = { async generate(input) {
     expect(input.memberId).toBe("qwen_finance");

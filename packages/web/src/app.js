@@ -639,10 +639,17 @@ async function loadFinancePreferences() {
   $("market-cn").checked = value.markets.includes("CN");
   $("market-hk").checked = value.markets.includes("HK");
   $("market-us").checked = value.markets.includes("US");
+  $("market-jp").checked = value.markets.includes("JP");
+  $("market-kr").checked = value.markets.includes("KR");
   $("finance-disclosures").checked = value.channels.disclosures;
   $("finance-regulation").checked = value.channels.regulation;
   $("finance-macro").checked = value.channels.macro;
   $("finance-global").checked = value.channels.global_official;
+  $("finance-market-media").checked = value.channels.market_media;
+  $("finance-asia-brief-enabled").checked = value.morning_briefings.asia_preopen.enabled;
+  $("finance-asia-brief-time").value = value.morning_briefings.asia_preopen.time;
+  $("finance-us-brief-enabled").checked = value.morning_briefings.us_overnight.enabled;
+  $("finance-us-brief-time").value = value.morning_briefings.us_overnight.time;
   $("finance-scan-interval").value = value.scan_interval_minutes;
   $("finance-push-interval").value = value.push_interval_seconds;
   $("finance-push-threshold").value = value.push_threshold;
@@ -650,7 +657,7 @@ async function loadFinancePreferences() {
 
 function readFinanceWatchlist() {
   return $("finance-watchlist").value.split("\n").map((line) => line.trim()).filter(Boolean).map((line, index) => {
-    const match = line.match(/^(CN|HK|US):([^\s]+)(?:\s+(.+))?$/i);
+    const match = line.match(/^(CN|HK|US|JP|KR):([^\s]+)(?:\s+(.+))?$/i);
     if (!match) throw new Error(`自选清单第 ${index + 1} 行格式不正确`);
     return { market: match[1].toUpperCase(), symbol: match[2].toUpperCase(), name: match[3]?.trim() || undefined };
   });
@@ -660,17 +667,23 @@ $("finance-preferences").addEventListener("submit", async (event) => {
   event.preventDefault();
   const button = event.submitter; button.disabled = true;
   try {
-    const markets = [["CN", "market-cn"], ["HK", "market-hk"], ["US", "market-us"]].filter(([, id]) => $(id).checked).map(([market]) => market);
+    const markets = [["CN", "market-cn"], ["HK", "market-hk"], ["US", "market-us"], ["JP", "market-jp"], ["KR", "market-kr"]].filter(([, id]) => $(id).checked).map(([market]) => market);
     await operatorApi("/api/finance/preferences", { method: "PUT", body: JSON.stringify({
       interests: $("finance-interests").value.split("\n").map((item) => item.trim()).filter(Boolean),
       watchlist: readFinanceWatchlist(), markets,
       channels: {
         disclosures: $("finance-disclosures").checked, regulation: $("finance-regulation").checked,
         macro: $("finance-macro").checked, global_official: $("finance-global").checked,
+        market_media: $("finance-market-media").checked,
       },
       scan_interval_minutes: Number($("finance-scan-interval").value),
       push_interval_seconds: Number($("finance-push-interval").value),
       push_threshold: Number($("finance-push-threshold").value), novelty_history_hours: 168,
+      morning_briefings: {
+        timezone: "Asia/Shanghai",
+        asia_preopen: { enabled: $("finance-asia-brief-enabled").checked, time: $("finance-asia-brief-time").value },
+        us_overnight: { enabled: $("finance-us-brief-enabled").checked, time: $("finance-us-brief-time").value },
+      },
     }) });
     $("finance-preference-status").textContent = "范围已保存；观潮下一轮巡查生效";
     await loadFinance();
@@ -678,8 +691,35 @@ $("finance-preferences").addEventListener("submit", async (event) => {
   finally { button.disabled = false; }
 });
 
+document.querySelectorAll("[data-finance-briefing]").forEach((button) => button.addEventListener("click", async () => {
+  const briefingType = button.dataset.financeBriefing;
+  button.disabled = true;
+  $("finance-status").classList.remove("error");
+  $("finance-status").textContent = "观潮正在采集结构化行情、新闻证据并生成测试晨报…";
+  try {
+    const task = await operatorApi("/api/finance/tasks", {
+      method: "POST", body: JSON.stringify({
+        message_count: 1, delivery_mode: "direct_push", briefing_type: briefingType,
+        idempotency_key: `web-finance-${briefingType}-${Date.now()}`,
+      }),
+    });
+    let current = task;
+    while (!["completed", "failed"].includes(current.status)) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      current = await operatorApi(`/api/finance/tasks/${encodeURIComponent(task.id)}`);
+      $("finance-status").textContent = `晨报任务 ${current.status}…`;
+    }
+    if (current.status === "failed") throw new Error(current.error || "财经晨报任务失败");
+    $("finance-status").textContent = `${current.result.title} 已完成，向财经设备发送 ${current.result.pushed_messages || 0} 条`;
+    await Promise.all([loadFinance(), loadMemberDossiers(), loadAssets()]);
+  } catch (error) {
+    $("finance-status").textContent = error.message;
+    $("finance-status").classList.add("error");
+  } finally { button.disabled = false; }
+}));
+
 $("run-finance").addEventListener("click", async () => {
-  const button = $("run-finance"); button.disabled = true; $("finance-status").classList.remove("error"); $("finance-status").textContent = "观潮正在读取官方来源、核对事件并评估候选…";
+  const button = $("run-finance"); button.disabled = true; $("finance-status").classList.remove("error"); $("finance-status").textContent = "观潮正在读取权威来源与市场线索、核对事件并评估候选…";
   try {
     const task = await operatorApi("/api/finance/tasks", {
       method: "POST", body: JSON.stringify({ message_count: 5, delivery_mode: "candidate_pool", idempotency_key: `web-finance-${Date.now()}` }),
