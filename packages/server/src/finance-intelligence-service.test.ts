@@ -189,8 +189,13 @@ test("scheduled morning delivery retries only incomplete Bark targets without re
   const message = buildFinanceMessages(brief, 1)[0]!;
   expect(message.body).not.toContain("99%");
   expect(message.body.endsWith(brief.disclaimer)).toBe(true);
+  expect(buildFinanceMessages(brief, 2)).toHaveLength(1);
   const dispatcher = new IntelligenceDispatcher(dataDir, memberState, fetchImpl);
   await expect(dispatcher.pushDirect("finance", deliveryKey, 0, brief.member_id, message)).rejects.toThrow("unavailable");
+  await memberState.remember({
+    member_id: brief.member_id, kind: "system_failure", summary: "财经情报任务失败：flaky target failed",
+    verified: true, source_id: brief.id,
+  });
   StateDatabase.open(dataDir).putRecord("finance_intelligence_briefs", brief.id, brief, brief.created_at, brief.created_at);
   let providerCalls = 0;
   const provider: AgentProvider = { async generate() { providerCalls += 1; throw new Error("provider must not rerun"); } };
@@ -203,7 +208,7 @@ test("scheduled morning delivery retries only incomplete Bark targets without re
   expect(providerCalls).toBe(0);
   expect(requests.filter((url) => url.includes("healthy.example.test"))).toHaveLength(1);
   expect(requests.filter((url) => url.includes("flaky.example.test"))).toHaveLength(2);
-  expect((await memberState.getDossier("qwen_finance")).growth.operation_count).toBe(1);
+  expect((await memberState.getDossier("qwen_finance")).growth).toMatchObject({ operation_count: 1, system_failures: 1 });
   await rm(dataDir, { recursive: true, force: true });
 });
 

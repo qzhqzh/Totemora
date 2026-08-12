@@ -62,6 +62,24 @@ test("market snapshot uses the current cache check time for session freshness", 
   });
 });
 
+test("market snapshot excludes US moves from a mismatched trading session", () => {
+  const latest = Date.parse("2026-08-11T13:30:00.000Z") / 1_000;
+  const stale = latest - 86_400;
+  const symbols = ["^GSPC", "^IXIC", "^DJI", "XLK", "XLF", "XLE", "XLV", "XLI", "XLY"];
+  const body = JSON.stringify({ spark: { result: symbols.map((symbol, index) => ({
+    symbol,
+    response: [{
+      timestamp: [latest - 172_800, index === 0 ? stale : latest],
+      indicators: { quote: [{ close: [100, 101 + index] }] },
+    }],
+  })) } });
+  const snapshot = parseMarketSnapshotResponse(body, "2026-08-12T00:00:00.000Z");
+  expect(snapshot.moves.some((move) => move.symbol === "^GSPC")).toBe(false);
+  expect(new Set(snapshot.moves.filter((move) => move.group !== "asia_benchmark").map((move) => move.as_of))).toEqual(
+    new Set([new Date(latest * 1_000).toISOString()]),
+  );
+});
+
 test("market snapshot excludes the unfinished daily bar during a live US session", () => {
   const symbols = ["^GSPC", "^IXIC", "^DJI", "XLK", "XLF", "XLE", "XLV", "XLI"];
   const body = JSON.stringify({ spark: { result: symbols.map((symbol) => ({

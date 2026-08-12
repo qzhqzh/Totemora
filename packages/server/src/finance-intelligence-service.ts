@@ -318,7 +318,7 @@ export class FinanceIntelligenceService {
       brief.status = "completed";
       delete brief.error;
       this.save(brief);
-      await this.recordCompletion(brief, member);
+      await this.recordCompletion(brief, member, true);
       return brief;
     } catch (error) {
       brief.error = error instanceof Error ? error.message : String(error);
@@ -340,7 +340,7 @@ export class FinanceIntelligenceService {
     }
   }
 
-  private async recordCompletion(brief: FinanceIntelligenceBrief, member: AgentConfig): Promise<void> {
+  private async recordCompletion(brief: FinanceIntelligenceBrief, member: AgentConfig, recovered = false): Promise<void> {
     await this.assets.recordUse({
       asset_id: "finance-intelligence", member_id: member.id, workflow_id: brief.id,
       action: "collect", outcome: "completed", evidence: `${brief.sources.length} 条官方/授权来源证据`,
@@ -357,7 +357,7 @@ export class FinanceIntelligenceService {
     await this.memberState.remember({
       member_id: member.id, kind: "operation", credit_type: "operation", credit_value: 0,
       summary: `完成财经扫描 ${brief.title}，形成 ${brief.candidate_ids?.length ?? 0} 条候选，${brief.queued_messages ?? brief.pushed_messages} 条进入外发路径`,
-      verified: true, source_id: brief.id,
+      verified: true, source_type: recovered ? "delivery_recovery" : "runtime", source_id: brief.id,
     });
   }
 
@@ -495,6 +495,7 @@ export function buildFinanceMessages(brief: FinanceIntelligenceBrief, count: num
     ? formatMorningSnapshot(brief.market_snapshot, brief.briefing_type, brief.sources)
     : brief.summary;
   const messages = [{ title: brief.title.slice(0, 80), body: notificationBody(morning, brief.disclaimer), url: brief.items[0]?.url }];
+  if (brief.briefing_type) return messages;
   for (const item of brief.items.slice(0, count - 1)) {
     messages.push({ title: item.headline.slice(0, 80), body: notificationBody(item.brief, brief.disclaimer), url: item.url });
   }

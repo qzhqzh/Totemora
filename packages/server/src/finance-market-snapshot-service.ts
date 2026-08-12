@@ -102,7 +102,7 @@ export class FinanceMarketSnapshotService {
 export function parseMarketSnapshotResponse(body: string, capturedAt: string): FinanceMarketSnapshot {
   const root = JSON.parse(body) as { spark?: { result?: unknown[] } };
   const rows = Array.isArray(root.spark?.result) ? root.spark.result : [];
-  const moves = rows.flatMap((raw): FinanceMarketMove[] => {
+  const parsedMoves = rows.flatMap((raw): FinanceMarketMove[] => {
     if (!raw || typeof raw !== "object") return [];
     const row = raw as { symbol?: unknown; response?: unknown[] };
     const symbol = String(row.symbol ?? "");
@@ -142,6 +142,7 @@ export function parseMarketSnapshotResponse(body: string, capturedAt: string): F
       url: `https://finance.yahoo.com/quote/${encodeURIComponent(symbol)}/`,
     }];
   });
+  const moves = alignUsSession(parsedMoves);
   const benchmarkCount = moves.filter((move) => move.group === "us_benchmark").length;
   const sectorCount = moves.filter((move) => move.group === "us_sector").length;
   if (benchmarkCount < 2 || sectorCount < 5) throw new Error("结构化行情返回不完整");
@@ -149,6 +150,30 @@ export function parseMarketSnapshotResponse(body: string, capturedAt: string): F
     source: "Yahoo Finance chart", evidence_tier: "S3", captured_at: capturedAt,
     checked_at: capturedAt, cached: false, completed_daily_bars: true, moves,
   };
+}
+
+function alignUsSession(moves: FinanceMarketMove[]): FinanceMarketMove[] {
+  const usMoves = moves.filter((move) => move.group !== "asia_benchmark");
+  const sessionDates = [...new Set(usMoves.map((move) => marketDate(move.as_of, "America/New_York")))]
+    .filter((date) => {
+      const sameDate = usMoves.filter((move) => marketDate(move.as_of, "America/New_York") === date);
+      return sameDate.filter((move) => move.group === "us_benchmark").length >= 2
+        && sameDate.filter((move) => move.group === "us_sector").length >= 5;
+    })
+    .sort()
+    .reverse();
+  const selected = sessionDates[0];
+  if (!selected) return moves.filter((move) => move.group === "asia_benchmark");
+  return moves.filter((move) => move.group === "asia_benchmark"
+    || marketDate(move.as_of, "America/New_York") === selected);
+}
+
+function marketDate(value: string, timeZone: string): string {
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return "";
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone, year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date(parsed));
 }
 
 export function formatMorningSnapshot(
@@ -198,9 +223,7 @@ export function usMarketSession(snapshot: FinanceMarketSnapshot): { fresh: boole
   const ageHours = (capturedAt - latest) / 3_600_000;
   return {
     fresh: ageHours >= 0 && ageHours <= 30,
-    date: new Intl.DateTimeFormat("en-CA", {
-      timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
-    }).format(new Date(latest)),
+    date: marketDate(new Date(latest).toISOString(), "America/New_York"),
   };
 }
 
