@@ -196,7 +196,7 @@ export class FinanceIntelligenceService {
       const testSuffix = input.briefing_type && input.reason === "manual" ? " · 测试" : "";
       if (input.briefing_type === "asia_preopen") brief.title = `观潮晨报 · 日韩盘前${testSuffix}`;
       if (input.briefing_type === "us_overnight") {
-        const label = brief.market_snapshot && !usMarketSession(brief.market_snapshot).fresh ? "美股休市" : "隔夜美股";
+        const label = brief.market_snapshot && !usMarketSession(brief.market_snapshot).fresh ? "美股无新收盘" : "隔夜美股";
         brief.title = `观潮晨报 · ${label}${testSuffix}`;
       }
       if (input.defer_push !== false) {
@@ -219,24 +219,7 @@ export class FinanceIntelligenceService {
       }
       brief.status = "completed";
       this.save(brief);
-      await this.assets.recordUse({
-        asset_id: "finance-intelligence", member_id: member.id, workflow_id: brief.id,
-        action: "collect", outcome: "completed", evidence: `${brief.sources.length} 条官方/授权来源证据`,
-      });
-      await this.assets.recordUse({
-        asset_id: "official-finance-sources", member_id: member.id, workflow_id: brief.id,
-        action: "read_disclosures", outcome: "completed",
-        evidence: `${new Set(brief.sources.map((source) => source.source)).size} 个来源参与本轮`,
-      });
-      await this.assets.recordUse({
-        asset_id: "finance-intelligence", member_id: member.id, workflow_id: brief.id,
-        action: "summarize", outcome: "completed", evidence: brief.summary,
-      });
-      await this.memberState.remember({
-        member_id: member.id, kind: "operation", credit_type: "operation", credit_value: 0,
-        summary: `完成财经扫描 ${brief.title}，形成 ${brief.candidate_ids?.length ?? 0} 条候选，${brief.queued_messages ?? brief.pushed_messages} 条进入外发路径`,
-        verified: true, source_id: brief.id,
-      });
+      await this.recordCompletion(brief, member);
       return brief;
     } catch (error) {
       brief.error = error instanceof Error ? error.message : String(error);
@@ -335,6 +318,7 @@ export class FinanceIntelligenceService {
       brief.status = "completed";
       delete brief.error;
       this.save(brief);
+      await this.recordCompletion(brief, member);
       return brief;
     } catch (error) {
       brief.error = error instanceof Error ? error.message : String(error);
@@ -354,6 +338,27 @@ export class FinanceIntelligenceService {
       await this.assets.assertCanUse(member, "finance-intelligence", "push_telegram");
       await this.assets.assertCanUse(member, "telegram-bot", "push_notification");
     }
+  }
+
+  private async recordCompletion(brief: FinanceIntelligenceBrief, member: AgentConfig): Promise<void> {
+    await this.assets.recordUse({
+      asset_id: "finance-intelligence", member_id: member.id, workflow_id: brief.id,
+      action: "collect", outcome: "completed", evidence: `${brief.sources.length} 条官方/授权来源证据`,
+    });
+    await this.assets.recordUse({
+      asset_id: "official-finance-sources", member_id: member.id, workflow_id: brief.id,
+      action: "read_disclosures", outcome: "completed",
+      evidence: `${new Set(brief.sources.map((source) => source.source)).size} 个来源参与本轮`,
+    });
+    await this.assets.recordUse({
+      asset_id: "finance-intelligence", member_id: member.id, workflow_id: brief.id,
+      action: "summarize", outcome: "completed", evidence: brief.summary,
+    });
+    await this.memberState.remember({
+      member_id: member.id, kind: "operation", credit_type: "operation", credit_value: 0,
+      summary: `完成财经扫描 ${brief.title}，形成 ${brief.candidate_ids?.length ?? 0} 条候选，${brief.queued_messages ?? brief.pushed_messages} 条进入外发路径`,
+      verified: true, source_id: brief.id,
+    });
   }
 
   private save(brief: FinanceIntelligenceBrief): void {

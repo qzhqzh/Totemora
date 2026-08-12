@@ -203,6 +203,7 @@ test("scheduled morning delivery retries only incomplete Bark targets without re
   expect(providerCalls).toBe(0);
   expect(requests.filter((url) => url.includes("healthy.example.test"))).toHaveLength(1);
   expect(requests.filter((url) => url.includes("flaky.example.test"))).toHaveLength(2);
+  expect((await memberState.getDossier("qwen_finance")).growth.operation_count).toBe(1);
   await rm(dataDir, { recursive: true, force: true });
 });
 
