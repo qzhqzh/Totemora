@@ -48,7 +48,9 @@ Totemora 的目标交互不是上传 Skill 文件。用户应通过部落对话�
 
 输入操作员 Token 后，在 Web 的“能力议事”直接描述能力目标、参考 URL、目标成员和验收例子。Chief 会继续追问或形成持久草案；草案通过静态校验后进入试用，但不会自动装备或增加权限。
 
-当前首个完整试用垂直是 `git-change-management`：在任务大厅对同一工作地和目标先运行一次当前能力基线，再把案卷 ID 填入“试用中的 Skill Commission ID”运行隔离试用。将两份专业任务 ID 登记到案卷后，Token、耗时、Skill digest 与 Chief 验收会从证据自动读取；至少三次独立通过才能提议正式装备，批准与回滚仍需显式点击。完整边界见 [Skill 对话治理](skill-governance.md)。
+当前首个完整试用垂直是 `git-change-management`。打开 `/skills`，选择 Skill 后可浏览完整目录；输入 Operator Token 后点击文本文件可只读预览 `SKILL.md`、配置、脚本和参考资料。疑似 Secret、二进制、软链和超限文件不会返回正文。
+
+当能力案卷进入“试用中”，在“让部落完成对照试炼”里选择已登记的 Git 工作地、试炼目标和独立 Reviewer。系统让同一名 Git 专员先形成无新 Skill 基线，再加载案卷固定 digest 形成试用计划；Reviewer 比较两份结果，Chief 门禁随后登记 Evidence ID、Token、耗时和结论。这个动作只形成 Git 计划，不会提交、Push 或 Merge。至少三次独立通过才能提议正式装备，批准与回滚仍需显式点击；原手工登记两份专业任务证据的方式保留在“高级”区域。完整边界见 [Skill 对话治理](skill-governance.md)。
 
 可通过环境变量覆盖启动参数：
 

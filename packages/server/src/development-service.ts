@@ -143,6 +143,7 @@ export class DevelopmentCommitService {
       mode?: "commit" | "pull_request" | "merge";
       issue_mode?: "auto" | "none";
       trial_commission_id?: string;
+      specialist_member_id?: string;
     } = {},
   ): Promise<DevelopmentProposal> {
     const startedAt = performance.now();
@@ -159,7 +160,19 @@ export class DevelopmentCommitService {
       && (member.skills ?? []).includes("git-flow-safety"),
     );
     if (!candidates.length) throw new Error("No available tribe member has the git-flow-safety capability");
-    const assignment = candidates.length === 1
+    const pinnedSpecialist = options.specialist_member_id
+      ? candidates.find((member) => member.id === options.specialist_member_id)
+      : undefined;
+    if (options.specialist_member_id && !pinnedSpecialist) {
+      throw new Error("Pinned Git Flow specialist is unavailable or ineligible");
+    }
+    const assignment = pinnedSpecialist
+      ? {
+          member_id: pinnedSpecialist.id,
+          assignment_reason: `Skill 试炼固定由 ${pinnedSpecialist.name ?? pinnedSpecialist.id} 运行基线与试用`,
+          instruction: `在同一快照上接管目标“${goal}”，按 Workplace Policy 形成 ${mode} 流程计划并向 Chief 汇报证据`,
+        }
+      : candidates.length === 1
       ? {
           member_id: candidates[0]!.id,
           assignment_reason: `Chief 路由器发现 ${candidates[0]!.name ?? candidates[0]!.id} 是唯一具备 git-flow-safety 的可用成员`,

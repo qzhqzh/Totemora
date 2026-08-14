@@ -125,3 +125,38 @@ test("commission rejects sources and permissions invented by the Chief", async (
   expect(service.list()[0]).toMatchObject({ status: "discovering" });
   await rm(dataDir, { recursive: true, force: true });
 });
+
+test("commission rejects a target member without the service capability", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-skill-member-capability-"));
+  const config = await loadLocalConfig({ configDir: resolve(import.meta.dir, "../../../configs/example") });
+  const provider: AgentProvider = { async generate() { return { content: JSON.stringify({
+    ready: true, reply: "draft", title: "Git mismatch", goal: "Reject an ineligible target",
+    skill_id: "git-change-management", target_member_id: "qwen_worker",
+    target_service_id: "git.flow", risk: "repository_mutation", trigger: "git task",
+    instructions: ["one", "two"], boundaries: ["gate"],
+    acceptance_examples: ["a", "b"], sources: [], requested_assets: [],
+  }) } } };
+  const service = new SkillCommissionService(config, { get: () => provider }, dataDir);
+  await expect(service.create("把 Git 专业服务交给不具备能力的成员"))
+    .rejects.toThrow("lacks required service capabilities");
+  await rm(dataDir, { recursive: true, force: true });
+});
+
+test("commission requires the service runtime asset even when the Chief omits it", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-skill-member-asset-"));
+  const config = await loadLocalConfig({ configDir: resolve(import.meta.dir, "../../../configs/example") });
+  const target = config.agents.agents.find((member) => member.id === "qwen_worker")!;
+  target.skills = [...new Set([...(target.skills ?? []), "git-flow-safety"])];
+  target.tools = (target.tools ?? []).filter((tool) => tool !== "git-flow-engine");
+  const provider: AgentProvider = { async generate() { return { content: JSON.stringify({
+    ready: true, reply: "draft", title: "Git asset mismatch", goal: "Reject missing runtime asset",
+    skill_id: "git-change-management", target_member_id: "qwen_worker",
+    target_service_id: "git.flow", risk: "repository_mutation", trigger: "git task",
+    instructions: ["one", "two"], boundaries: ["gate"],
+    acceptance_examples: ["a", "b"], sources: [], requested_assets: [],
+  }) } } };
+  const service = new SkillCommissionService(config, { get: () => provider }, dataDir);
+  await expect(service.create("目标成员没有 Git runtime asset"))
+    .rejects.toThrow("lacks requested asset grants: git-flow-engine");
+  await rm(dataDir, { recursive: true, force: true });
+});

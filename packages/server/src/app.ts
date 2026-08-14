@@ -44,6 +44,9 @@ import {
   SkillCommissionConflictError, SkillCommissionService, type SkillTrial,
 } from "./skill-commission-service";
 import { SkillRegistryService } from "./skill-registry-service";
+import {
+  SkillTrialConflictError, SkillTrialInputError, SkillTrialRunnerService, type SkillTrialRunInput,
+} from "./skill-trial-runner-service";
 import type { RecurringServiceState } from "./recurring-service-runner";
 
 export interface PlaygroundOptions {
@@ -222,6 +225,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
     finance: FinanceIntelligenceService;
     content: ContentStudioService;
     skills: SkillCommissionService;
+    skillTrials: SkillTrialRunnerService;
   }> | undefined;
   let bindingsRegistered = false;
   const getConfig = async () => {
@@ -293,6 +297,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
           failInterruptedSpecialistTask(work.id, work.error);
         }
       }
+      const skills = new SkillCommissionService(config, providers, options.dataDir);
       return {
         state,
         conversations: new MemberConversationService(config, providers, state, options.dataDir),
@@ -307,7 +312,11 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
           options.projectRoot ?? resolve(import.meta.dir, "../../.."),
           options.fetchImpl ?? fetch,
         ),
-        skills: new SkillCommissionService(config, providers, options.dataDir),
+        skills,
+        skillTrials: new SkillTrialRunnerService(
+          config, providers, skills, options.dataDir,
+          async (workplaceId, goal, trialOptions) => (await getDevelopmentService()).prepare(workplaceId, goal, trialOptions),
+        ),
         content,
       };
     })();
@@ -677,7 +686,8 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
               specialist_services: "typed_contract_v1",
               evidence_observatory: "cross_domain_funnel_v1",
               conversational_skills: "commission_trial_activation_v1",
-              skill_registry: "local_read_only_doctor_v1",
+              skill_registry: "local_package_browser_v2",
+              skill_trials: "member_baseline_trial_review_v1",
             },
           });
         }
@@ -701,11 +711,42 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
           return json({ commissions: (await getMemberServices()).skills.list() });
         }
 
+        if (request.method === "GET" && url.pathname === "/api/skills/trial-runs") {
+          requireOperator(request, options.operatorToken);
+          return json({ runs: (await getMemberServices()).skillTrials.list(url.searchParams.get("commission_id") ?? undefined) });
+        }
+
+        const skillTrialRunDetailMatch = url.pathname.match(/^\/api\/skills\/trial-runs\/([^/]+)$/);
+        if (request.method === "GET" && skillTrialRunDetailMatch) {
+          requireOperator(request, options.operatorToken);
+          const run = (await getMemberServices()).skillTrials.get(skillTrialRunDetailMatch[1]!);
+          return run ? json(run) : json({ error: "Skill trial run not found" }, 404);
+        }
+
         if (request.method === "GET" && url.pathname === "/api/skills/registry") {
           try { return json(await skillRegistry.list({ refresh: url.searchParams.get("refresh") === "1" })); }
           catch (error) {
             console.error(JSON.stringify({ event: "skill_registry_scan_failed", error: error instanceof Error ? error.message : String(error) }));
             return json({ error: "Skill registry scan failed" }, 500);
+          }
+        }
+
+        const skillRegistryFileMatch = url.pathname.match(/^\/api\/skills\/registry\/([^/]+)\/file$/);
+        if (request.method === "GET" && skillRegistryFileMatch) {
+          requireOperator(request, options.operatorToken);
+          try {
+            return json(await skillRegistry.readFile(
+              decodeURIComponent(skillRegistryFileMatch[1]!),
+              url.searchParams.get("path") ?? "",
+            ));
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Skill file preview failed";
+            if (["Invalid Skill id", "Invalid Skill file path"].includes(message)) return json({ error: message }, 400);
+            if (["Skill not found", "Skill file not found"].includes(message)) return json({ error: message }, 404);
+            if (message === "Skill file preview forbidden") return json({ error: message }, 415);
+            if (message === "Skill file preview too large") return json({ error: message }, 413);
+            console.error(JSON.stringify({ event: "skill_registry_file_failed", error: message }));
+            return json({ error: "Skill file preview failed" }, 500);
           }
         }
 
@@ -747,6 +788,20 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
             "baseline_evidence_id" | "trial_evidence_id" | "reviewer_member_id" | "outcome" | "summary"
           >;
           return json((await getMemberServices()).skills.recordTrial(skillTrialMatch[1]!, input), 201);
+        }
+
+        const skillTrialRunMatch = url.pathname.match(/^\/api\/skills\/commissions\/([^/]+)\/run-trial$/);
+        if (request.method === "POST" && skillTrialRunMatch) {
+          requireOperator(request, options.operatorToken);
+          const input = await request.json() as SkillTrialRunInput;
+          try {
+            return json((await getMemberServices()).skillTrials.start(skillTrialRunMatch[1]!, input), 202);
+          } catch (error) {
+            if (error instanceof SkillTrialInputError || error instanceof SkillTrialConflictError) throw error;
+            const reference = crypto.randomUUID().slice(0, 8);
+            console.error("Skill trial start failed", { reference, error });
+            return json({ error: "Unable to start Skill trial", reference }, 500);
+          }
         }
 
         const skillProposalMatch = url.pathname.match(/^\/api\/skills\/commissions\/([^/]+)\/propose-activation$/);
@@ -1337,7 +1392,9 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
       } catch (error) {
         return json(
           { error: error instanceof Error ? error.message : String(error) },
-          error instanceof HttpError ? error.status : error instanceof SkillCommissionConflictError ? 409 : 400,
+          error instanceof HttpError ? error.status
+            : error instanceof SkillCommissionConflictError || error instanceof SkillTrialConflictError ? 409
+              : error instanceof SkillTrialInputError ? 400 : 400,
         );
       }
     },

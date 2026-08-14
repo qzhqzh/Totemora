@@ -11,6 +11,7 @@ export interface SpecialistServiceDefinition {
   summary: string;
   operations: string[];
   required_capabilities: string[];
+  required_assets: string[];
   allowed_assets: string[];
   risk: "read_only" | "external_side_effects" | "repository_mutation";
   acceptance_policy: string;
@@ -42,18 +43,20 @@ export const SPECIALIST_SERVICES: SpecialistServiceDefinition[] = [
   {
     id: "git.flow", version: 1, title: "Git 流程代办",
     summary: "由 Chief 路由给 Git 专员，按工作地规范完成 Commit、Pull Request 或 Merge，并保留自检与验收证据。",
-    operations: ["commit", "pull_request", "merge"],
+    operations: ["commit", "pull_request", "merge", "skill_trial"],
     required_capabilities: ["git-flow-safety"],
+    required_assets: ["git-flow-engine"],
     allowed_assets: ["git-flow-engine", "opencode-correction"],
     risk: "repository_mutation",
     acceptance_policy: "专员自检通过，Chief 核对范围、验证结果和目标门禁；外部动作需要对应授权。",
-    stages: ["routing", "inspect", "plan", "local_gate", "remote_gate", "merge_gate", "accepted"],
+    stages: ["routing", "inspect", "plan", "baseline", "trial", "review", "evidence", "local_gate", "remote_gate", "merge_gate", "accepted"],
   },
   {
     id: "intelligence.watch", version: 1, title: "听风情报值守",
     summary: "常驻委任情报员按规则扫描来源；候选评估、通知派发和用户反馈分别留下证据。",
     operations: ["scan"],
     required_capabilities: ["news-intelligence"],
+    required_assets: ["news-intelligence"],
     allowed_assets: ["news-intelligence", "aihot-public-feed", "internal-bark", "telegram-bot"],
     risk: "external_side_effects",
     acceptance_policy: "扫描只算操作完成；候选获得明确正向反馈或专业任务验收后才形成成长信用。",
@@ -64,6 +67,7 @@ export const SPECIALIST_SERVICES: SpecialistServiceDefinition[] = [
     summary: "常驻财经情报员按官方披露、监管与宏观来源扫描；市场、自选标的、事件和证据等级进入独立候选门禁。",
     operations: ["scan"],
     required_capabilities: ["financial-intelligence-briefing"],
+    required_assets: ["finance-intelligence"],
     allowed_assets: ["finance-intelligence", "official-finance-sources", "internal-bark", "telegram-bot"],
     risk: "external_side_effects",
     acceptance_policy: "扫描只算操作；明确用户正向反馈才形成成长信用。不得生成买卖建议，S2-S4 信息不能替代官方事实证据。",
@@ -74,6 +78,7 @@ export const SPECIALIST_SERVICES: SpecialistServiceDefinition[] = [
     summary: "Chief 按常驻委任组织至少两名成员，把情报候选转化为 X 热点短帖或教程长文，并保留研究、写作与审校证据。",
     operations: ["x_hot_post", "longform_tutorial"],
     required_capabilities: ["editorial-research", "structured-writing"],
+    required_assets: ["content-studio"],
     allowed_assets: ["content-studio", "news-intelligence", "cpa-image-generation"],
     risk: "external_side_effects",
     acceptance_policy: "至少两名不同成员实际贡献；来源 URL 与事实边界通过独立审校；外部发布始终需要单独授权和幂等回执。",

@@ -30,7 +30,12 @@ export interface SkillRegistryEntry {
   hash_short: string;
   status: SkillRegistryStatus;
   binding: { member_ids: string[]; tribe_ids: string[] };
-  files: Array<{ path: string; kind: "manifest" | "metadata" | "script" | "reference" | "asset" | "agent" | "other"; size: number }>;
+  files: Array<{
+    path: string;
+    kind: "manifest" | "metadata" | "script" | "reference" | "asset" | "agent" | "other";
+    size: number;
+    sha256?: string;
+  }>;
   validation: {
     status: "passed" | "warning" | "failed";
     checked_at: string;
@@ -82,6 +87,7 @@ interface SkillMetadata {
 const SAFE_SKILL_ID = /^[a-z0-9][a-z0-9._-]{0,127}$/;
 const MAX_FILES = 500;
 const MAX_FILE_BYTES = 2_000_000;
+const MAX_PREVIEW_BYTES = 256_000;
 const MAX_PACKAGE_BYTES = 16_000_000;
 const MAX_SCAN_BYTES = 32_000_000;
 const MAX_SCAN_FILES = 2_000;
@@ -165,6 +171,36 @@ export class SkillRegistryService {
   async get(id: string): Promise<SkillRegistryEntry | undefined> {
     if (!SAFE_SKILL_ID.test(id)) throw new Error("Invalid Skill id");
     return (await this.list()).skills.find((skill) => skill.id === id);
+  }
+
+  async readFile(id: string, filePath: string): Promise<{
+    skill_id: string;
+    path: string;
+    kind: SkillRegistryEntry["files"][number]["kind"];
+    size: number;
+    content: string;
+  }> {
+    if (!SAFE_SKILL_ID.test(id)) throw new Error("Invalid Skill id");
+    const normalizedPath = normalizePreviewPath(filePath);
+    const skill = await this.get(id);
+    if (!skill) throw new Error("Skill not found");
+    const file = skill.files.find((candidate) => candidate.path === normalizedPath);
+    if (!file) throw new Error("Skill file not found");
+    if (!isPreviewableText(file.path) || skill.validation.issues.some((issue) => (
+      issue.code === "suspected_secret" && issue.file === file.path
+    ))) throw new Error("Skill file preview forbidden");
+    if (file.size > MAX_PREVIEW_BYTES) throw new Error("Skill file preview too large");
+    const packageDirectory = resolve(this.projectRoot, skill.path);
+    assertInside(this.root, packageDirectory);
+    const bytes = await readBoundedBuffer(resolve(packageDirectory, normalizedPath), file.size, this.root);
+    const currentDigest = createHash("sha256").update(bytes).digest("hex");
+    if (!file.sha256 || currentDigest !== file.sha256) {
+      throw new Error("Skill package changed; refresh the registry before previewing files");
+    }
+    const content = bytes.toString("utf8");
+    if (content.includes("\0")) throw new Error("Skill file preview forbidden");
+    if (containsSuspectedSecret(content)) throw new Error("Skill file preview forbidden");
+    return { skill_id: skill.id, path: file.path, kind: file.kind, size: file.size, content };
   }
 
   private async scan(directory: string, root: string, scannedAt: string, budget: ScanBudget): Promise<SkillRegistryEntry> {
@@ -467,28 +503,33 @@ async function validateReferences(source: string, directory: string, issues: Ski
 }
 
 async function detectSecrets(files: SkillRegistryEntry["files"], directory: string, root: string, issues: SkillValidationIssue[]): Promise<void> {
-  const patterns = [
-    /-----BEGIN (?:RSA |OPENSSH |EC )?PRIVATE KEY-----/,
-    /\b(?:sk-proj-|sk-ant-|ghp_|github_pat_)[A-Za-z0-9_-]{16,}/,
-    /\b(?:api[_-]?key|access[_-]?token|password)\s*[:=]\s*["']?[A-Za-z0-9_./+:-]{20,}/i,
-  ];
   for (const file of files) {
     const name = basename(file.path).toLowerCase();
     const extension = extname(name);
     if (!TEXT_EXTENSIONS.has(extension) && !name.startsWith(".env") && extension) continue;
     const content = await readBounded(resolve(directory, file.path), file.size, root);
     if (content.includes("\0")) continue;
-    if (patterns.some((pattern) => pattern.test(content))) addIssue(issues, {
+    if (containsSuspectedSecret(content)) addIssue(issues, {
       code: "suspected_secret", severity: "error", message: "检测到疑似 Secret，禁止进入可用状态", file: file.path,
     });
   }
 }
 
+function containsSuspectedSecret(content: string): boolean {
+  return [
+    /-----BEGIN (?:RSA |OPENSSH |EC )?PRIVATE KEY-----/,
+    /\b(?:sk-proj-|sk-ant-|ghp_|github_pat_)[A-Za-z0-9_-]{16,}/,
+    /\b(?:api[_-]?key|access[_-]?token|password)\s*[:=]\s*["']?[A-Za-z0-9_./+:-]{20,}/i,
+  ].some((pattern) => pattern.test(content));
+}
+
 async function hashFiles(files: SkillRegistryEntry["files"], directory: string, root: string): Promise<string> {
   const hash = createHash("sha256");
   for (const file of files) {
+    const bytes = await readBoundedBuffer(resolve(directory, file.path), file.size, root);
+    file.sha256 = createHash("sha256").update(bytes).digest("hex");
     hash.update(file.path).update("\0");
-    hash.update(await readBoundedBuffer(resolve(directory, file.path), file.size, root)).update("\0");
+    hash.update(bytes).update("\0");
   }
   return hash.digest("hex");
 }
@@ -502,10 +543,12 @@ async function readBoundedBuffer(path: string, size: number, root: string): Prom
   const canonicalPath = await realpath(path);
   assertInside(root, canonicalPath);
   if (canonicalPath !== resolve(path)) throw new Error("Skill package symbolic links are not readable");
+  const before = await lstat(canonicalPath);
   const handle = await open(canonicalPath, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const details = await handle.stat();
-    if (!details.isFile() || details.size !== size || details.size > MAX_FILE_BYTES) {
+    if (!details.isFile() || details.dev !== before.dev || details.ino !== before.ino
+      || details.size !== size || details.size > MAX_FILE_BYTES) {
       throw new Error("Skill file changed during scan");
     }
     return await handle.readFile();
@@ -538,6 +581,23 @@ function fileKind(path: string): SkillRegistryEntry["files"][number]["kind"] {
   if (path.startsWith("assets/")) return "asset";
   if (path.startsWith("agents/")) return "agent";
   return "other";
+}
+
+function normalizePreviewPath(value: string): string {
+  const normalized = value.trim();
+  if (!normalized || normalized.length > 500 || normalized.includes("\0") || normalized.includes("\\")
+    || isAbsolute(normalized) || normalized.startsWith("/")
+    || normalized.split("/").some((part) => !part || part === "." || part === "..")) {
+    throw new Error("Invalid Skill file path");
+  }
+  return normalized;
+}
+
+function isPreviewableText(path: string): boolean {
+  const name = basename(path).toLowerCase();
+  const extension = extname(name);
+  if (name.startsWith(".") || [".key", ".pem"].includes(extension)) return false;
+  return TEXT_EXTENSIONS.has(extension) || !extension;
 }
 
 function titleFromMarkdown(source: string): string | undefined {

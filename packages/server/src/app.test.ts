@@ -522,6 +522,18 @@ test("Skill commission API keeps conversational drafts private and durable", asy
   expect(createdResponse.status).toBe(201);
   const created = await createdResponse.json();
   expect(created).toMatchObject({ status: "draft", package: { version: 4, status: "draft" } });
+  const validated = await app.fetch(new Request(`http://local/api/skills/commissions/${created.id}/validate`, {
+    method: "POST", headers: authorized(), body: "{}",
+  }));
+  expect(validated.status).toBe(200);
+  const invalidTrial = await app.fetch(new Request(`http://local/api/skills/commissions/${created.id}/run-trial`, {
+    method: "POST", headers: authorized(), body: JSON.stringify({
+      idempotency_key: "api-invalid-mode", workplace_id: "missing", goal: "check",
+      reviewer_member_id: "qwen_worker", mode: "execute_everything",
+    }),
+  }));
+  expect(invalidTrial.status).toBe(400);
+  expect(await invalidTrial.json()).toEqual({ error: "Invalid Skill trial mode" });
 
   const restored = createApp();
   const loaded = await restored.fetch(new Request(`http://local/api/skills/commissions/${created.id}`, { headers: authorized() }));
@@ -553,6 +565,20 @@ test("Skill registry API exposes repository-backed metadata without accepting se
   expect(await detail.json()).toMatchObject({
     id: "sample-skill", files: [{ path: "SKILL.md", kind: "manifest" }],
   });
+  expect((await app.fetch(new Request("http://local/api/skills/registry/sample-skill/file?path=SKILL.md"))).status).toBe(401);
+  const preview = await app.fetch(new Request("http://local/api/skills/registry/sample-skill/file?path=SKILL.md", {
+    headers: authorized(),
+  }));
+  expect(preview.status).toBe(200);
+  expect(await preview.json()).toMatchObject({
+    skill_id: "sample-skill", path: "SKILL.md", kind: "manifest",
+    content: expect.stringContaining("# Sample Skill"),
+  });
+  const previewTraversal = await app.fetch(new Request(
+    "http://local/api/skills/registry/sample-skill/file?path=../private.txt",
+    { headers: authorized() },
+  ));
+  expect(previewTraversal.status).toBe(400);
   const traversal = await app.fetch(new Request("http://local/api/skills/registry/%2E%2E%2Foutside"));
   expect(traversal.status).toBe(400);
   expect(JSON.stringify(listedBody).includes(root)).toBe(false);

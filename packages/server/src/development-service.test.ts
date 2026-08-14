@@ -84,6 +84,32 @@ test("refuses to prepare a commit containing a secret path", async () => {
   await rm(dataDir, { recursive: true, force: true });
 });
 
+test("pins a requested eligible specialist even when several Git members are available", async () => {
+  const root = await createRepository();
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-development-pinned-"));
+  const settlement = new SettlementStore(dataDir);
+  const workplace = await settlement.addWorkplace("Pinned Repo", root);
+  await settlement.setWorkplacePolicy(workplace.id, {
+    instructions: "验证后形成提交计划", validation_commands: ["bun test"],
+    allowed_commit_types: ["feat"], forbidden_paths: [".env"],
+  });
+  const config = await exampleConfig();
+  const second = config.agents.agents.find((member) => member.id === "qwen_worker")!;
+  second.skills = [...new Set([...(second.skills ?? []), "git-flow-safety"])];
+  second.tools = [...new Set([...(second.tools ?? []), "git-flow-engine"])];
+  const provider = new DevelopmentProvider();
+  const service = new DevelopmentCommitService(
+    config, { get: () => provider }, settlement, dataDir, resolve(import.meta.dir, "../../.."),
+  );
+  const proposal = await service.prepare(workplace.id, "提交当前改动", {
+    specialist_member_id: "deepseek_git_steward",
+  });
+  expect(proposal.specialist_member_id).toBe("deepseek_git_steward");
+  expect(provider.requests.some((request) => request.messages.at(-1)?.content.includes("候选："))).toBe(false);
+  await rm(root, { recursive: true, force: true });
+  await rm(dataDir, { recursive: true, force: true });
+});
+
 test("invalidates approval when the working tree changes after proposal", async () => {
   const root = await createRepository();
   const dataDir = await mkdtemp(join(tmpdir(), "totemora-development-snapshot-"));

@@ -101,4 +101,4 @@ User conversation -> Skill Commission -> normalized package -> validation -> bou
 
 用户将通过对话委任能力，部落负责文件生成和维护。Skill 包含程序性指导，Asset 提供可执行能力，Specialist Service 提供稳定的长期契约。激活 Skill 不会静默授予资产、Secret、外部副作用、人格变更或新模型。
 
-`SKILL.md` 遵循可移植的 Skill 结构；Totemora 特有的生命周期、风险、证据和绑定元数据放在 `skill.yaml`。当前 Run 只固定 Skill 版本号；包 digest 是 E2 要求，尚未写入运行证据。参见 [Skill 对话治理](skill-governance.md) 和 [ADR-0016](adr/0016-conversational-skill-governance.md)。
+`SKILL.md` 遵循可移植的 Skill 结构；Totemora 特有的生命周期、风险、证据和绑定元数据放在 `skill.yaml`。Git 专业任务和自动试炼已经固定实际加载的版本、Commission 与包 digest；其他专业服务仍需逐个接入同一证据契约。参见 [Skill 对话治理](skill-governance.md) 和 [ADR-0016](adr/0016-conversational-skill-governance.md)。

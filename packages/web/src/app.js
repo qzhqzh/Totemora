@@ -24,6 +24,9 @@ let barkTargets = [];
 let editingBarkTargetId;
 let registrySkills = [];
 let activeRegistrySkillId;
+let activeRegistryFilePath;
+let skillTrialRuns = [];
+let skillCommissions = [];
 
 $("operator-token").value = sessionStorage.getItem("totemora_operator_token") || "";
 $("operator-token").addEventListener("change", () => {
@@ -260,8 +263,12 @@ async function loadSkillCommissions() {
   }
   container.innerHTML = '<p class="skill-empty">正在读取能力委任…</p>';
   try {
-    const { commissions } = await operatorApi("/api/skills/commissions");
-    renderSkillCommissions(commissions);
+    const [{ commissions }, { runs }] = await Promise.all([
+      operatorApi("/api/skills/commissions"), operatorApi("/api/skills/trial-runs"),
+    ]);
+    skillTrialRuns = runs;
+    skillCommissions = commissions;
+    renderSkillCommissions(skillCommissions);
   } catch (error) {
     container.innerHTML = `<p class="skill-empty error">能力委任读取失败：${escapeHtml(error.message)}</p>`;
   }
@@ -324,7 +331,7 @@ function renderSkillRegistrySummary(skills) {
 
 function renderSkillRegistryList() {
   $("skill-registry-list").innerHTML = registrySkills.map((skill) => `<button type="button" class="skill-registry-item" data-registry-skill="${escapeHtml(skill.id)}" aria-pressed="${skill.id === activeRegistrySkillId}">
-    <span><strong>${escapeHtml(skill.name)}</strong><small>${escapeHtml(skill.id)} · ${escapeHtml(skill.version ? `v${skill.version}` : skill.hash_short)}</small></span>
+    <span><strong>${escapeHtml(skill.name)}</strong><small>${escapeHtml(skill.id)} · ${escapeHtml(skill.version ? `v${skill.version}` : skill.hash_short)}</small><em>查看详情</em></span>
     <span class="skill-registry-state ${escapeHtml(skill.status)}">${escapeHtml(registryStatusLabel(skill.status))}</span>
   </button>`).join("");
 }
@@ -342,9 +349,7 @@ function renderSkillRegistryDetail(skill) {
   const issues = validation.issues.length
     ? `<ul class="skill-validation-issues">${validation.issues.map((issue) => `<li><b class="${escapeHtml(issue.severity)}">${issue.severity === "error" ? "阻断" : "提醒"}</b><span>${escapeHtml(issue.message)}</span><small>${escapeHtml(issue.file || issue.code)}</small></li>`).join("")}</ul>`
     : '<p class="skill-empty">Doctor 没有发现结构、引用、路径或 Secret 风险。</p>';
-  const files = skill.files.length
-    ? `<ul class="skill-file-list">${skill.files.map((file) => `<li><b>${escapeHtml(fileKindLabel(file.kind))}</b><code>${escapeHtml(file.path)}</code><small>${formatFileSize(file.size)}</small></li>`).join("")}</ul>`
-    : '<p class="skill-empty">没有可展示的包文件。</p>';
+  const files = renderSkillFileBrowser(skill);
   const commission = skill.governance.latest_commission;
   const activation = skill.governance.activation;
   const trials = skill.governance.trials;
@@ -352,9 +357,10 @@ function renderSkillRegistryDetail(skill) {
     ? `${escapeHtml(activation.status)} · v${activation.version}<br><code>${escapeHtml(activation.digest.slice(0, 12))}</code>`
     : skill.status === "active" ? `仓库声明 · ${skill.version ? `v${skill.version}` : skill.hash_short}` : "尚未激活";
   detail.innerHTML = `<div class="skill-detail-head">
-    <div><h3>${escapeHtml(skill.name)}</h3><p>${escapeHtml(skill.description)}</p></div>
+    <div><h3>${escapeHtml(skill.name)}</h3><p>${escapeHtml(skill.description)}</p><small><code>${escapeHtml(skill.id)}</code> · ${skill.version ? `v${skill.version}` : escapeHtml(skill.hash_short)}</small></div>
     <span class="skill-registry-state ${escapeHtml(skill.status)}">${escapeHtml(registryStatusLabel(skill.status))}</span>
   </div>
+  <div class="skill-detail-section skill-package-primary"><h4>Skill 包</h4><p class="skill-section-note">浏览仓库中的完整目录；文本内容需要操作员 Token，只读且不会执行脚本。</p>${files}</div>
   <dl class="skill-detail-meta">
     <div><dt>Skill ID</dt><dd><code>${escapeHtml(skill.id)}</code></dd></div>
     <div><dt>来源</dt><dd>本地仓库 · <code>${escapeHtml(skill.path)}</code>${skill.source.reference ? `<br><small>${escapeHtml(skill.source.provenance_kind || "provenance")} · ${escapeHtml(skill.source.reference)}</small>` : ""}</dd></div>
@@ -364,12 +370,54 @@ function renderSkillRegistryDetail(skill) {
   <div class="skill-detail-section"><h4>Doctor 验证</h4>
     <div class="skill-validation-summary ${escapeHtml(validation.status)}"><strong>${escapeHtml(validationStatusLabel(validation.status))}</strong><small>${validation.checks} 类检查 · ${escapeHtml(formatObservatoryTime(validation.checked_at))}</small></div>${issues}
   </div>
-  <div class="skill-detail-section"><h4>文件组成</h4>${files}</div>
   <div class="skill-detail-section"><h4>治理与试炼</h4><div class="skill-governance-evidence">
     <div><span>活动版本</span><strong>${activation ? `v${activation.version}` : skill.status === "active" ? skill.version ? `v${skill.version}` : "仓库活动态" : "未装备"}</strong><small>${activationDetail}</small></div>
     <div><span>最近委任</span><strong>${commission ? escapeHtml(skillStatusLabel(commission.status)) : "无案卷"}</strong><small>${commission ? `<code>${escapeHtml(commission.id)}</code><br>${escapeHtml(formatObservatoryTime(commission.updated_at))}` : "还没有 Commission 证据"}</small></div>
     <div><span>最近试炼</span><strong>${trials.accepted}/${trials.total} 通过</strong><small>${trials.total ? `${trials.rejected} 次未通过${trials.last_at ? ` · ${escapeHtml(formatObservatoryTime(trials.last_at))}` : ""}` : "尚无试炼证据"}</small></div>
   </div>${commission ? `<div class="skill-detail-actions"><a href="#skill-council" data-open-skill-commission="${escapeHtml(commission.id)}">查看委任 / 试炼</a></div>` : ""}</div>`;
+}
+
+function renderSkillFileBrowser(skill) {
+  if (!skill.files.length) return '<p class="skill-empty">没有可展示的包文件。</p>';
+  const tree = { directories: new Map(), files: [] };
+  for (const file of skill.files) {
+    const parts = file.path.split("/");
+    let node = tree;
+    for (const part of parts.slice(0, -1)) {
+      if (!node.directories.has(part)) node.directories.set(part, { directories: new Map(), files: [] });
+      node = node.directories.get(part);
+    }
+    node.files.push(file);
+  }
+  return `<div class="skill-package-browser">
+    <nav class="skill-file-tree" aria-label="${escapeHtml(skill.name)} 文件目录">${renderSkillTreeNode(tree)}</nav>
+    <section id="skill-file-preview" class="skill-file-preview" aria-live="polite">
+      <div class="skill-file-preview-empty"><strong>选择文件查看内容</strong><p>${$("operator-token").value.trim() ? "可预览 SKILL.md、配置、脚本和参考文本；资产与敏感文件只显示目录信息。" : "先在页面顶部输入操作员 Token，再选择文本文件。"}</p></div>
+    </section>
+  </div>`;
+}
+
+function renderSkillTreeNode(node) {
+  const directories = [...node.directories.entries()].sort(([left], [right]) => left.localeCompare(right));
+  const files = [...node.files].sort((left, right) => left.path.localeCompare(right.path));
+  return `<ul>${directories.map(([name, child]) => `<li class="skill-directory"><span><b>目录</b>${escapeHtml(name)}</span>${renderSkillTreeNode(child)}</li>`).join("")}${files.map((file) => `<li><button type="button" data-skill-file="${escapeHtml(file.path)}" aria-pressed="${file.path === activeRegistryFilePath}"><b>${escapeHtml(fileKindLabel(file.kind))}</b><span>${escapeHtml(file.path.split("/").at(-1))}</span><small>${formatFileSize(file.size)}</small></button></li>`).join("")}</ul>`;
+}
+
+async function loadSkillFilePreview(skillId, filePath) {
+  const preview = $("skill-file-preview");
+  if (!preview) return;
+  activeRegistryFilePath = filePath;
+  preview.innerHTML = `<div class="skill-file-preview-empty"><strong>正在读取 ${escapeHtml(filePath)}</strong><p>内容来自当前仓库快照。</p></div>`;
+  document.querySelectorAll("[data-skill-file]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.skillFile === filePath)));
+  try {
+    const file = await operatorApi(`/api/skills/registry/${encodeURIComponent(skillId)}/file?path=${encodeURIComponent(filePath)}`);
+    if (activeRegistrySkillId !== skillId || activeRegistryFilePath !== filePath) return;
+    preview.innerHTML = `<header><div><strong>${escapeHtml(file.path)}</strong><small>${escapeHtml(fileKindLabel(file.kind))} · ${formatFileSize(file.size)}</small></div><span>只读</span></header><pre><code>${escapeHtml(file.content)}</code></pre>`;
+  } catch (error) {
+    if (activeRegistrySkillId !== skillId || activeRegistryFilePath !== filePath) return;
+    preview.innerHTML = `<div class="skill-file-preview-empty error"><strong>无法预览 ${escapeHtml(filePath)}</strong><p>${escapeHtml(error.message)}</p></div>`;
+    if (!$("operator-token").value.trim()) $("operator-token").focus();
+  }
 }
 
 function registryStatusLabel(status) {
@@ -400,6 +448,7 @@ $("skill-registry-list").addEventListener("click", (event) => {
   const button = event.target.closest("[data-registry-skill]");
   if (!button) return;
   activeRegistrySkillId = button.dataset.registrySkill;
+  activeRegistryFilePath = undefined;
   renderSkillRegistryList();
   renderSkillRegistryDetail(registrySkills.find((skill) => skill.id === activeRegistrySkillId));
   if (skillsRoute) {
@@ -407,9 +456,9 @@ $("skill-registry-list").addEventListener("click", (event) => {
     url.searchParams.set("skill", activeRegistrySkillId);
     history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
   }
-  const detail = $("skill-registry-detail");
-  detail.focus({ preventScroll: true });
   if (matchMedia("(max-width: 760px)").matches) {
+    const detail = $("skill-registry-detail");
+    detail.focus({ preventScroll: true });
     detail.scrollIntoView({
       behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
       block: "start",
@@ -418,6 +467,11 @@ $("skill-registry-list").addEventListener("click", (event) => {
 });
 
 $("skill-registry-detail").addEventListener("click", async (event) => {
+  const file = event.target.closest("[data-skill-file]");
+  if (file) {
+    await loadSkillFilePreview(activeRegistrySkillId, file.dataset.skillFile);
+    return;
+  }
   const link = event.target.closest("[data-open-skill-commission]");
   if (!link) return;
   if (!$("operator-token").value.trim()) {
@@ -489,13 +543,49 @@ function renderSkillCommissions(commissions) {
 }
 
 function renderSkillTrialForm(commission) {
-  return `<details><summary>登记一次独立试用</summary><form class="skill-trial-form" data-commission-id="${escapeHtml(commission.id)}">
+  const workplaces = settlement?.workplaces ?? [];
+  const reviewers = (tribe?.members ?? []).filter((member) => (
+    member.id !== commission.target_member_id && member.roles.includes("reviewer") && !["inactive", "retired"].includes(member.status)
+  ));
+  const runs = skillTrialRuns.filter((run) => run.commission_id === commission.id);
+  return `<section class="skill-auto-trial">
+    <div><h5>让部落完成对照试炼</h5><p>目标成员运行同一工作地与目标的基线和固定 Skill 版本，独立测试成员比较证据；不会执行 Git 提交。</p></div>
+    <form class="skill-auto-trial-form" data-commission-id="${escapeHtml(commission.id)}">
+      <div class="grid-two"><label>测试工作地<select name="workplace_id" required>${workplaces.length ? workplaces.map((workplace) => `<option value="${escapeHtml(workplace.id)}">${escapeHtml(workplace.name)} · ${escapeHtml(workplace.id)}</option>`).join("") : '<option value="">请先在任务大厅登记工作地</option>'}</select></label><label>独立测试成员<select name="reviewer_member_id" required>${reviewers.length ? reviewers.map((member) => `<option value="${escapeHtml(member.id)}" ${member.id === "qwen_worker" ? "selected" : ""}>${escapeHtml(member.name)} · ${escapeHtml(member.id)}</option>`).join("") : '<option value="">暂无可用 Reviewer</option>'}</select></label></div>
+      <label>试炼目标<input name="goal" required maxlength="2000" value="${escapeHtml(commission.goal)}"></label>
+      <div class="grid-two"><label>Git 流程<select name="mode"><option value="commit">只形成 Commit 计划</option><option value="pull_request">形成 PR 计划</option><option value="merge">形成 Merge 计划</option></select></label><label>Issue 策略<select name="issue_mode"><option value="none">不创建 Issue</option><option value="auto">按策略规划 Issue</option></select></label></div>
+      <button type="submit" ${!workplaces.length || !reviewers.length ? "disabled" : ""}>开始成员试炼</button>
+    </form>
+    <div class="skill-trial-run-region" data-trial-runs-for="${escapeHtml(commission.id)}" aria-live="polite" aria-atomic="true">${renderSkillTrialRuns(runs)}</div>
+  </section>
+  <details><summary>高级：登记已有试炼证据</summary><form class="skill-trial-form" data-commission-id="${escapeHtml(commission.id)}">
     <p class="chips">先在任务大厅对同一 Git 工作地与目标运行一次基线；再把本案卷 ID <code>${escapeHtml(commission.id)}</code> 填入“试用中的 Skill Commission ID”后重跑。Token、耗时和验收结论从两份专业任务证据自动读取。</p>
     <div class="grid-two"><label>无 Skill 基线证据 ID<input name="baseline_evidence_id" required></label><label>使用 Skill 的试用证据 ID<input name="trial_evidence_id" required></label></div>
     <div class="grid-two"><label>独立 Reviewer<input name="reviewer_member_id" value="${escapeHtml(commission.chief_member_id)}" required></label><label>试用结论<select name="outcome"><option value="accepted">通过</option><option value="rejected">未通过</option></select></label></div>
     <label>Reviewer 摘要<input name="summary" required maxlength="500" placeholder="说明相对基线改善或退化的证据"></label>
     <button type="submit" class="secondary">登记试用证据</button>
   </form></details>`;
+}
+
+function skillTrialIdempotency(commissionId, input) {
+  const storageKey = `totemora_skill_trial:${commissionId}`;
+  const signature = JSON.stringify(input);
+  try {
+    const existing = JSON.parse(sessionStorage.getItem(storageKey) || "null");
+    if (existing?.signature === signature && existing?.key) return { storageKey, key: existing.key };
+  } catch {}
+  const key = crypto.randomUUID();
+  sessionStorage.setItem(storageKey, JSON.stringify({ signature, key }));
+  return { storageKey, key };
+}
+
+function renderSkillTrialRuns(runs) {
+  if (!runs.length) return '<p class="skill-trial-run-empty">还没有自动试炼。一次试炼会留下目标成员、Reviewer、两份 Evidence ID 和结论。</p>';
+  return `<ol class="skill-trial-runs" aria-label="自动试炼进度">${runs.map((run) => { const outcome = run.review?.outcome; return `<li class="${escapeHtml(outcome || run.status)}"><div><strong>${escapeHtml(outcome === "accepted" ? "试炼通过" : outcome === "rejected" ? "试炼未通过" : skillTrialStageLabel(run.stage))}</strong><span>${escapeHtml(outcome || run.status)}</span></div><p>${escapeHtml(run.review?.rationale || run.error || `${memberLabel(run.target_member_id)} 正在与 ${memberLabel(run.reviewer_member_id)} 协作`)}</p><small>${escapeHtml(formatObservatoryTime(run.updated_at))}${run.baseline_evidence_id ? ` · 基线 <code>${escapeHtml(run.baseline_evidence_id)}</code>` : ""}${run.trial_evidence_id ? ` · 试用 <code>${escapeHtml(run.trial_evidence_id)}</code>` : ""}</small></li>`; }).join("")}</ol>`;
+}
+
+function skillTrialStageLabel(stage) {
+  return ({ queued: "等待成员", baseline: "运行无新 Skill 基线", trial: "运行固定版本试用", review: "独立测试成员验收", record: "Chief 登记证据", completed: "试炼已登记", failed: "试炼失败" })[stage] || stage;
 }
 
 function skillStatusLabel(status) {
@@ -541,6 +631,21 @@ $("skill-commissions").addEventListener("submit", async (event) => {
       await operatorApi(`/api/skills/commissions/${encodeURIComponent(card.dataset.commissionId)}/messages`, {
         method: "POST", body: JSON.stringify({ message: new FormData(form).get("message") }),
       });
+    } else if (form.classList.contains("skill-auto-trial-form")) {
+      const data = new FormData(form);
+      const trialInput = {
+        workplace_id: data.get("workplace_id"), goal: data.get("goal"),
+        reviewer_member_id: data.get("reviewer_member_id"), mode: data.get("mode"), issue_mode: data.get("issue_mode"),
+      };
+      const idempotency = skillTrialIdempotency(card.dataset.commissionId, trialInput);
+      const run = await operatorApi(`/api/skills/commissions/${encodeURIComponent(card.dataset.commissionId)}/run-trial`, {
+        method: "POST", body: JSON.stringify({
+          idempotency_key: idempotency.key, ...trialInput,
+        }),
+      });
+      $("skill-commission-status").textContent = "成员试炼已开始：目标成员先跑基线，再加载固定 Skill，由独立 Reviewer 验收。";
+      await waitForSkillTrialRun(run.id);
+      sessionStorage.removeItem(idempotency.storageKey);
     } else if (form.classList.contains("skill-trial-form")) {
       const data = new FormData(form);
       await operatorApi(`/api/skills/commissions/${encodeURIComponent(card.dataset.commissionId)}/trials`, {
@@ -559,6 +664,23 @@ $("skill-commissions").addEventListener("submit", async (event) => {
     button.disabled = false;
   }
 });
+
+async function waitForSkillTrialRun(id) {
+  for (let attempt = 0; attempt < 180; attempt += 1) {
+    const run = await operatorApi(`/api/skills/trial-runs/${encodeURIComponent(id)}`);
+    const existing = skillTrialRuns.findIndex((candidate) => candidate.id === run.id);
+    if (existing >= 0) skillTrialRuns[existing] = run;
+    else skillTrialRuns.unshift(run);
+    const region = [...document.querySelectorAll("[data-trial-runs-for]")]
+      .find((candidate) => candidate.dataset.trialRunsFor === run.commission_id);
+    if (region) region.innerHTML = renderSkillTrialRuns(
+      skillTrialRuns.filter((candidate) => candidate.commission_id === run.commission_id),
+    );
+    if (["completed", "failed"].includes(run.status)) return run;
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+  }
+  throw new Error("成员试炼仍在运行，请稍后刷新查看");
+}
 
 $("skill-commissions").addEventListener("click", async (event) => {
   const button = event.target.closest("[data-skill-action]");
@@ -1737,16 +1859,15 @@ function externalLink(value, label) {
 
 async function loadSkillsRoute() {
   const registry = loadSkillRegistry();
-  const commissions = loadSkillCommissions();
   try {
-    [tribe, status] = await Promise.all([api("/api/tribe"), api("/api/status")]);
+    [tribe, status, settlement] = await Promise.all([api("/api/tribe"), api("/api/status"), api("/api/settlement")]);
     $("tribe-status").textContent = `${status.version} · ${tribe.tribe.name} · ${status.active_members} 名可用成员`;
     if (activeRegistrySkillId) renderSkillRegistryDetail(registrySkills.find((skill) => skill.id === activeRegistrySkillId));
   } catch {
     $("tribe-status").textContent = "Skills 控制面 · 部落状态暂不可用";
     $("tribe-status").classList.add("error");
   }
-  await Promise.allSettled([registry, commissions]);
+  await Promise.allSettled([registry, loadSkillCommissions()]);
 }
 
 if (skillsRoute) {

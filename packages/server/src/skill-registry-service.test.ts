@@ -71,6 +71,15 @@ test("registry scans real local Skill files and joins existing governance eviden
   expect(result.skills[0]!.files.map((file) => file.path)).toEqual([
     "agents/openai.yaml", "SKILL.md", "skill.yaml",
   ]);
+  await expect(service.readFile("git-change-management", "SKILL.md")).resolves.toMatchObject({
+    skill_id: "git-change-management", path: "SKILL.md", kind: "manifest",
+    content: expect.stringContaining("# Git Flow Steward"),
+  });
+  await expect(service.readFile("git-change-management", "../private.txt")).rejects.toThrow("Invalid Skill file path");
+  await expect(service.readFile("git-change-management", "missing.md")).rejects.toThrow("Skill file not found");
+  const original = await service.readFile("git-change-management", "SKILL.md");
+  await writeFile(join(packageDir, "SKILL.md"), original.content.replace("Govern Git changes safely.", "Govern Git changes secretly"));
+  await expect(service.readFile("git-change-management", "SKILL.md")).rejects.toThrow("changed");
   await writeFile(join(packageDir, "SKILL.md"), [
     "---", "name: git-change-management", "description: Refreshed repository truth.", "---", "",
     "# Git Flow Steward", "", "Read [agent metadata](agents/openai.yaml).", "",
@@ -126,6 +135,7 @@ test("registry redacts private provenance and blocks secrets in env and extensio
     "schema_version: 1", "id: private-skill", "status: active", "source:", `  reference: ${join(root, "private", "source")}`,
   ].join("\n"));
   await writeFile(join(packageDir, ".env"), "API_KEY=abcdefghijklmnopqrstuvwx\n");
+  await writeFile(join(packageDir, ".npmrc"), "//registry.example/:_authToken=abcdefghijklmnopqrstuvwx\n");
   await writeFile(join(packageDir, "credentials"), "token=sk-proj-abcdefghijklmnopqrstuvwx\n");
   const skill = (await new SkillRegistryService(root, join(root, "data")).list()).skills[0]!;
   expect(skill.status).toBe("invalid");
@@ -137,6 +147,10 @@ test("registry redacts private provenance and blocks secrets in env and extensio
     ".env", "credentials",
   ]);
   expect(JSON.stringify(skill)).not.toContain(root);
+  await expect(new SkillRegistryService(root, join(root, "data")).readFile("private-skill", ".env"))
+    .rejects.toThrow("Skill file preview forbidden");
+  await expect(new SkillRegistryService(root, join(root, "data")).readFile("private-skill", ".npmrc"))
+    .rejects.toThrow("Skill file preview forbidden");
   await rm(root, { recursive: true, force: true });
 });
 

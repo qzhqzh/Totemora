@@ -22,7 +22,7 @@ Totemora 是一个**预算约束下的异构智能部落**，不是通用聊天�
 
 ## 当前产品形态
 
-当前提供 CLI、本地 Web 和 MCP 三种主要入口，并通过 Telegram、Bark 承接受控通知与反馈。Web、MCP、Telegram、Bark 与 Cron 共用常驻 Gateway、SQLite 状态、成员经历和专业服务；外部 AI 通过 MCP 委托结果，不拥有第二套 Runtime。通用 `totemora run` 与 `onboarding-exam` 仍是直接创建本地 `TribeRuntime + FileRunStore` 的兼容入口，尚未迁移到 Gateway。Web 已提供任务大厅、证据台、成员营帐、火种、资产、AI / 财经双域情报台、内容工坊和审批入口，后续继续补 Skill 议事与效果对照，而不是另建一套控制面。
+当前提供 CLI、本地 Web 和 MCP 三种主要入口，并通过 Telegram、Bark 承接受控通知与反馈。Web、MCP、Telegram、Bark 与 Cron 共用常驻 Gateway、SQLite 状态、成员经历和专业服务；外部 AI 通过 MCP 委托结果，不拥有第二套 Runtime。通用 `totemora run` 与 `onboarding-exam` 仍是直接创建本地 `TribeRuntime + FileRunStore` 的兼容入口，尚未迁移到 Gateway。Web 已提供任务大厅、证据台、成员营帐、火种、资产、AI / 财经双域情报台、内容工坊、Skill 包浏览、成员对照试炼和审批入口。
 
 当前实现与使用方式见 [quickstart.md](quickstart.md)，领域结构见 [architecture-v2.md](architecture-v2.md)，服务器驻扎见 [always-on-gateway.md](always-on-gateway.md)，Gateway 见 [gateway-architecture.md](gateway-architecture.md)，MCP 见 [mcp-gateway.md](mcp-gateway.md)，财经情报见 [finance-intelligence.md](finance-intelligence.md)，Skill 对话治理见 [skill-governance.md](skill-governance.md)，推进顺序见 [execution-plan.md](execution-plan.md)。版本化验收指南属于历史节点快照，不作为当前架构说明。
 
@@ -32,7 +32,7 @@ Totemora 是一个**预算约束下的异构智能部落**，不是通用聊天�
 
 自动写作默认只在 6–18 小时节律窗口检查一次，并且候选必须同时满足价值、可信度、新颖度、非重复和 72 小时新鲜度门禁；没有合格内容时跳过本轮，不为消耗模型额度制造文章。手动选题仍可随时发起。
 
-对话式 Skill 治理已完成 Git 专业服务的首个闭环：用户描述能力，Chief 形成持久案卷和规范包，静态校验后以相同 Git 任务运行无 Skill 基线与隔离试用，三次独立验收后才能显式装备，并可回滚。通用脚本沙箱、Telegram 对话入口和非 Git 服务试用仍属后续工作。决策见 [ADR-0016](adr/0016-conversational-skill-governance.md)。
+对话式 Skill 治理已完成 Git 专业服务的首个闭环：用户描述能力，Chief 形成持久案卷和规范包；Web 可浏览仓库 Skill 完整目录并受控预览文本；静态校验后，同一 Git 专员运行基线和固定 digest 试用，另一名测试成员独立比较，三次通过后才能显式装备，并可回滚。通用脚本沙箱、Telegram 对话入口和非 Git 服务试用仍属后续工作。决策见 [ADR-0016](adr/0016-conversational-skill-governance.md)。
 
 ## 当前成功标准
 

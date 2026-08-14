@@ -324,6 +324,31 @@ export class StateDatabase {
           .run("skill commission optimistic concurrency", new Date().toISOString());
       })();
     }
+    const skillTrialRunLease = this.db.query("SELECT version FROM schema_migrations WHERE version = 5").get() as { version: number } | null;
+    if (!skillTrialRunLease) {
+      this.db.transaction(() => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS skill_trial_run_leases (
+            commission_id TEXT PRIMARY KEY,
+            run_id TEXT UNIQUE NOT NULL,
+            owner_id TEXT,
+            claimed_at TEXT
+          )
+        `);
+        this.db.query("INSERT INTO schema_migrations(version,name,applied_at) VALUES(5,?,?)")
+          .run("skill trial active run reservation", new Date().toISOString());
+      })();
+    }
+    const skillTrialLeaseFencing = this.db.query("SELECT version FROM schema_migrations WHERE version = 6").get() as { version: number } | null;
+    if (!skillTrialLeaseFencing) {
+      this.db.transaction(() => {
+        const columns = new Set((this.db.query("PRAGMA table_info(skill_trial_run_leases)").all() as Array<{ name: string }>).map((column) => column.name));
+        if (!columns.has("claim_token")) this.db.exec("ALTER TABLE skill_trial_run_leases ADD COLUMN claim_token TEXT");
+        if (!columns.has("lease_expires_at")) this.db.exec("ALTER TABLE skill_trial_run_leases ADD COLUMN lease_expires_at TEXT");
+        this.db.query("INSERT INTO schema_migrations(version,name,applied_at) VALUES(6,?,?)")
+          .run("skill trial lease fencing", new Date().toISOString());
+      })();
+    }
   }
 
   importJsonFile<T>(sourcePath: string, parse: (value: unknown) => T[], insert: (row: T) => void): LegacyImportResult {

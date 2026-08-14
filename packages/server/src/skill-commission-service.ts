@@ -213,6 +213,8 @@ export class SkillCommissionService {
       throw new Error("Skill package requires instructions, boundaries, and at least two acceptance examples");
     }
     const definition = requireService(pkg.target_service_id);
+    const targetMember = this.requireTargetMember(pkg.target_member_id);
+    assertMemberCanServe(targetMember, definition, pkg.requested_assets);
     if (pkg.requested_assets.some((asset) => !definition.allowed_assets.includes(asset))) {
       throw new Error("Skill package requests an asset outside the target service boundary");
     }
@@ -224,7 +226,7 @@ export class SkillCommissionService {
 
   recordTrial(id: string, input: Pick<SkillTrial,
     "baseline_evidence_id" | "trial_evidence_id" | "reviewer_member_id" | "outcome" | "summary"
-  >): SkillCommission {
+  > & { trial_id?: string }): SkillCommission {
     const commission = this.requireCommission(id);
     if (commission.status !== "trial" || !commission.package) throw new Error("Skill commission is not ready for trial evidence");
     this.requireTargetMember(input.reviewer_member_id);
@@ -241,13 +243,16 @@ export class SkillCommissionService {
     if (input.outcome === "accepted" && !evaluated.accepted) {
       throw new Error("An accepted Skill trial must have an accepted trial outcome");
     }
+    const trialId = input.trial_id ?? crypto.randomUUID();
+    const existing = this.state.db.query("SELECT id FROM skill_trials WHERE id=?").get(trialId) as { id: string } | null;
+    if (existing) return this.requireCommission(id);
     const trial: SkillTrial = {
       ...input,
       metrics: {
         baseline: { accepted: baseline.accepted, total_tokens: baseline.total_tokens, latency_ms: baseline.latency_ms },
         trial: { accepted: evaluated.accepted, total_tokens: evaluated.total_tokens, latency_ms: evaluated.latency_ms },
       },
-      id: crypto.randomUUID(), commission_id: id,
+      id: trialId, commission_id: id,
       summary: cleanText(input.summary, 500), created_at: new Date().toISOString(),
     };
     this.state.db.query(`
@@ -433,6 +438,7 @@ export class SkillCommissionService {
     if (requestedAssets.some((asset) => !targetService.allowed_assets.includes(asset))) {
       throw new Error("Chief requested an asset outside the target service boundary");
     }
+    assertMemberCanServe(targetMember, targetService, requestedAssets);
     const allowedSources = new Set(transcript
       .filter((message) => message.role === "user")
       .flatMap((message) => extractHttpsUrls(message.content)));
@@ -664,6 +670,18 @@ export class SkillCommissionService {
   private touch(id: string, at = new Date().toISOString()): void {
     this.state.db.query("UPDATE skill_commissions SET updated_at=? WHERE id=?").run(at, id);
   }
+}
+
+function assertMemberCanServe(
+  member: AgentConfig,
+  service: (typeof SPECIALIST_SERVICES)[number],
+  requestedAssets: string[],
+): void {
+  const missingCapabilities = service.required_capabilities.filter((capability) => !(member.skills ?? []).includes(capability));
+  if (missingCapabilities.length) throw new Error(`Target member lacks required service capabilities: ${missingCapabilities.join(", ")}`);
+  const missingAssets = [...new Set([...service.required_assets, ...requestedAssets])]
+    .filter((asset) => !(member.tools ?? []).includes(asset));
+  if (missingAssets.length) throw new Error(`Target member lacks requested asset grants: ${missingAssets.join(", ")}`);
 }
 
 function parseChiefDraft(content: string): ChiefDraft {
