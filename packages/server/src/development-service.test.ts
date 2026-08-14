@@ -34,6 +34,7 @@ test("chief delegates a policy-bound commit and approval creates verified experi
     commit_message: "feat(demo): add greeting",
     files: ["src.ts"], self_check: { outcome: "accepted" }, chief_acceptance: { outcome: "accepted" },
     skill: { id: "git-change-management", version: 3 },
+    evaluation: { accepted: true, calls: 2, total_tokens: 0, usage_status: "unknown" },
     git_context: { branch: "main", has_develop: false, unpushed_commits: 0, stash_count: 0 },
   });
   expect(provider.requests.find((request) => request.memberId === "deepseek_git_steward")?.maxTokens).toBe(8_000);

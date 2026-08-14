@@ -3,7 +3,7 @@ import { readFile, stat } from "node:fs/promises";
 import { readdirSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 
-import type { AgentConfig, LocalConfigSet, ProviderRegistry } from "@totemora/core";
+import type { AgentConfig, LocalConfigSet, ModelUsage, ProviderRegistry } from "@totemora/core";
 
 import type { SettlementStore, Workplace, WorkplacePolicy } from "./settlement-store";
 import { SkillGovernanceStore } from "./skill-governance-store";
@@ -11,6 +11,7 @@ import { OpenCodeCorrectionTool, type OpenCodeCorrectionResult } from "./opencod
 import { ToolAssetRegistry } from "./tool-asset-registry";
 import { StateDatabase } from "./state-database";
 import { MemberStateStore } from "./member-state-store";
+import { SkillCommissionService } from "./skill-commission-service";
 
 export interface DevelopmentProposal {
   id: string;
@@ -27,7 +28,14 @@ export interface DevelopmentProposal {
   chief_member_id: string;
   specialist_member_id: string;
   assignment_reason: string;
-  skill: { id: string; version: number };
+  skill: { id: string; version: number; digest?: string; package_digest?: string; commission_id?: string };
+  evaluation: {
+    accepted: boolean;
+    calls: number;
+    total_tokens: number;
+    usage_status: "measured" | "partial" | "unknown";
+    latency_ms: number;
+  };
   git_context: {
     branch: string;
     has_develop: boolean;
@@ -107,6 +115,7 @@ export class DevelopmentCommitService {
   private readonly assetRegistry: ToolAssetRegistry;
   private readonly state: StateDatabase;
   private readonly memberState: MemberStateStore;
+  private readonly skillCommissions: SkillCommissionService;
 
   constructor(
     private readonly config: LocalConfigSet,
@@ -123,14 +132,22 @@ export class DevelopmentCommitService {
     this.assetRegistry = new ToolAssetRegistry(projectRoot, dataDir);
     this.state = StateDatabase.open(dataDir);
     this.memberState = new MemberStateStore(dataDir, config);
+    this.skillCommissions = new SkillCommissionService(config, providers, dataDir);
     this.importLegacyState();
   }
 
   async prepare(
     workplaceId: string,
     goal: string,
-    options: { mode?: "commit" | "pull_request" | "merge"; issue_mode?: "auto" | "none" } = {},
+    options: {
+      mode?: "commit" | "pull_request" | "merge";
+      issue_mode?: "auto" | "none";
+      trial_commission_id?: string;
+    } = {},
   ): Promise<DevelopmentProposal> {
+    const startedAt = performance.now();
+    const usageRecords: Array<ModelUsage | undefined> = [];
+    const recordUsage = (usage: ModelUsage | undefined) => usageRecords.push(usage);
     const workplace = await this.getWorkplace(workplaceId);
     const policy = requirePolicy(workplace);
     const snapshot = await collectGitSnapshot(workplace.path, policy);
@@ -155,14 +172,27 @@ export class DevelopmentCommitService {
           `候选：${JSON.stringify(candidates.map((member) => ({ id: member.id, profile: member.profile, skills: member.skills })))}`,
           `Policy：${JSON.stringify(policy)}`,
           "只输出 JSON：{member_id,assignment_reason,instruction}。",
-        ].join("\n")) as { member_id?: string; assignment_reason?: string; instruction?: string };
+        ].join("\n"), 4_000, recordUsage) as { member_id?: string; assignment_reason?: string; instruction?: string };
     const specialist = candidates.find((member) => member.id === assignment.member_id);
     if (!specialist || !assignment.assignment_reason || !assignment.instruction) {
       throw new Error("Chief did not assign the Git Flow task to an eligible specialist");
     }
     await this.assetRegistry.assertCanUse(specialist, "git-flow-engine", "plan");
     const baseSkill = await readFile(resolve(this.projectRoot, "skills/git-change-management/SKILL.md"), "utf8");
-    const skill = await this.skillStore.getActive(baseSkill);
+    const legacySkill = await this.skillStore.getActive(baseSkill);
+    const managedSkill = options.trial_commission_id
+      ? this.skillCommissions.trialPackage(options.trial_commission_id, specialist.id, "git.flow")
+      : this.skillCommissions.activePackage("git-change-management", specialist.id, "git.flow");
+    const skill = {
+      version: Math.max(legacySkill.version, managedSkill?.version ?? 0),
+      content: managedSkill
+        ? `${legacySkill.content.trim()}\n\n## 已批准的对话式 Skill 包\n\n${managedSkill.skill_md.trim()}\n`
+        : legacySkill.content,
+      digest: createHash("sha256").update(managedSkill
+        ? `${legacySkill.content.trim()}\n${managedSkill.digest}\n${managedSkill.skill_md.trim()}`
+        : legacySkill.content).digest("hex"),
+      commission_id: managedSkill?.commission_id,
+    };
     const experiences = await this.loadExperiences();
 
     const specialistPrompt = [
@@ -182,7 +212,7 @@ export class DevelopmentCommitService {
     let specialistOutput: SpecialistOutput | undefined;
     let validationFeedback = "";
     for (let attempt = 1; attempt <= 3; attempt += 1) {
-      const candidate = await this.callJson(specialist, `${specialistPrompt}${validationFeedback}`, 8_000) as SpecialistOutput;
+      const candidate = await this.callJson(specialist, `${specialistPrompt}${validationFeedback}`, 8_000, recordUsage) as SpecialistOutput;
       try {
         validateSpecialistOutput(
           candidate,
@@ -212,7 +242,7 @@ export class DevelopmentCommitService {
       `Policy：${JSON.stringify(policy)}`,
       `专员汇报：${JSON.stringify(specialistOutput)}`,
       '只输出严格 JSON，例如 {"outcome":"accepted","rationale":"...","issues":[]}，不要输出解释或 Markdown。',
-    ].join("\n")) as DevelopmentProposal["chief_acceptance"];
+    ].join("\n"), 4_000, recordUsage) as DevelopmentProposal["chief_acceptance"];
     validateAcceptance(chiefAcceptance, "Chief");
 
     const now = new Date().toISOString();
@@ -233,7 +263,16 @@ export class DevelopmentCommitService {
       chief_member_id: chief.id,
       specialist_member_id: specialist.id,
       assignment_reason: assignment.assignment_reason,
-      skill: { id: "git-change-management", version: skill.version },
+      skill: {
+        id: "git-change-management", version: skill.version, digest: skill.digest,
+        ...(managedSkill ? { package_digest: managedSkill.digest } : {}),
+        ...(skill.commission_id ? { commission_id: skill.commission_id } : {}),
+      },
+      evaluation: summarizeEvaluationUsage(
+        usageRecords,
+        specialistOutput.self_check.outcome === "accepted" && chiefAcceptance.outcome === "accepted",
+        performance.now() - startedAt,
+      ),
       git_context: {
         branch: snapshot.branch,
         has_develop: /(^|[\s/])develop$/m.test(snapshot.branches),
@@ -570,7 +609,12 @@ export class DevelopmentCommitService {
     return workplace;
   }
 
-  private async callJson(member: AgentConfig, prompt: string, maxTokens = 4_000): Promise<unknown> {
+  private async callJson(
+    member: AgentConfig,
+    prompt: string,
+    maxTokens = 4_000,
+    onUsage?: (usage: ModelUsage | undefined) => void,
+  ): Promise<unknown> {
     const constitution = (await this.memberState.getDossier(member.id)).portrait.constitution;
     const response = await this.providers.get(member.provider).generate({
       memberId: member.id,
@@ -585,6 +629,7 @@ export class DevelopmentCommitService {
       responseFormat: "json",
       maxTokens,
     });
+    onUsage?.(response.usage);
     return parseJson(response.content, member.id);
   }
 
@@ -727,6 +772,23 @@ function requireMember(config: LocalConfigSet, id: string): AgentConfig {
     throw new Error(`Required tribe member is unavailable: ${id}`);
   }
   return member;
+}
+
+function summarizeEvaluationUsage(
+  records: Array<ModelUsage | undefined>,
+  accepted: boolean,
+  latencyMs: number,
+): DevelopmentProposal["evaluation"] {
+  const measured = records.filter((usage): usage is ModelUsage => typeof usage?.totalTokens === "number");
+  return {
+    accepted,
+    calls: records.length,
+    total_tokens: measured.reduce((total, usage) => total + (usage.totalTokens ?? 0), 0),
+    usage_status: measured.length === records.length && records.length > 0
+      ? "measured"
+      : measured.length > 0 ? "partial" : "unknown",
+    latency_ms: Math.round(latencyMs),
+  };
 }
 
 async function collectGitSnapshot(root: string, policy: WorkplacePolicy): Promise<GitSnapshot> {

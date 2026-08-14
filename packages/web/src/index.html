@@ -8,7 +8,15 @@
 </head>
 <body>
   <header>
-    <div><span class="eyebrow">TOTEMORA / LOCAL TRIBE</span><h1>部落试炼场</h1></div>
+    <div class="site-identity">
+      <a class="site-name" href="/" aria-label="返回 Totemora 驻地总览"><h1>部落试炼场</h1></a>
+      <nav class="primary-nav" aria-label="主导航">
+        <a href="/" data-primary-route="home">驻地总览</a>
+        <a href="/skills" data-primary-route="skills">Skills / 技能</a>
+        <a href="/#task-hall">任务大厅</a>
+        <a href="/#intelligence-hall">情报台</a>
+      </nav>
+    </div>
     <form id="operator-form" class="operator"><div id="tribe-status" class="status">正在唤醒部落…</div><input id="operator-token" class="token-input" type="password" autocomplete="current-password" spellcheck="false" placeholder="操作员 Token（任务操作必需）"></form>
   </header>
   <main>
@@ -23,7 +31,13 @@
           <button id="refresh-observatory" type="button" class="secondary">刷新现场</button>
         </div>
       </div>
-      <div id="observatory-summary" class="observatory-summary" aria-live="polite"></div>
+      <div id="observatory-summary" class="observatory-summary"></div>
+      <div class="evidence-health">
+        <div class="observatory-subhead"><h3>价值漏斗</h3><p>扫描不是成长。只有经归因的验收结果和主动反馈进入成员证据。</p></div>
+        <div id="evidence-funnels" class="evidence-funnels"></div>
+        <div id="evidence-notices" class="evidence-notices"></div>
+        <div id="benchmark-evidence" class="benchmark-evidence"></div>
+      </div>
       <div class="observatory-grid">
         <div>
           <div class="observatory-subhead"><h3>常驻专业服务</h3><p>Chief 将委任交给固定专员，能力、资产和验收规则一起生效。</p></div>
@@ -40,12 +54,12 @@
       </div>
     </section>
     <section class="panel roster-panel">
-      <div class="section-title"><span>01</span><h2>部落成员</h2></div>
+      <div class="section-title"><h2>部落成员</h2></div>
       <div id="roster" class="roster"></div>
       <h3>任务队列</h3><div id="history" class="history"></div>
     </section>
-    <section class="panel task-panel">
-      <div class="section-title"><span>02</span><h2>任务大厅</h2></div>
+    <section class="panel task-panel" id="task-hall">
+      <div class="section-title"><h2>任务大厅</h2></div>
       <form id="task-form">
         <label>现在想让部落做什么？<textarea id="goal" required>分析这个 demo 项目的订单折扣实现，找出风险并给出有文件证据的建议</textarea></label>
         <div id="intake-analysis" class="intake-analysis">正在判断任务模式…</div>
@@ -80,6 +94,7 @@ secrets/</textarea></label>
           <div id="skill-proposal-history" class="history"></div>
         </details>
         <details><summary>高级设置：验收与智能预算</summary>
+          <label>试用中的 Skill Commission ID（可选）<input id="trial-commission-id" placeholder="先跑一次无 Skill 基线，再填入案卷 ID 跑同一任务"></label>
           <label>验收标准（每行一条）<textarea id="acceptance">逐条比较 README 业务规则与当前实现
 每个关键结论引用真实文件路径
 给出按优先级排序的建议</textarea></label>
@@ -94,17 +109,55 @@ secrets/</textarea></label>
       </form>
     </section>
     <section class="panel ember-panel">
-      <div class="section-title"><span>03</span><h2>火种</h2></div>
+      <div class="section-title"><h2>火种</h2></div>
       <p class="section-note">基础模型能力。火种与人格、Skills、工具和经历结合后，成为部落人物。</p>
       <div id="embers" class="embers"></div>
     </section>
     <section class="panel asset-panel">
-      <div class="section-title"><span>04</span><h2>部落资产</h2></div>
+      <div class="section-title"><h2>部落资产</h2></div>
       <p class="section-note">确定性工具、适配器、基础设施和经验图纸归部落所有；成员按授权取用，每次调用留下证据。</p>
       <div id="assets" class="assets"></div>
     </section>
+    <section class="panel skill-registry-panel" id="skill-registry" aria-labelledby="skill-registry-title">
+      <div class="skill-registry-head">
+        <div>
+          <h2 id="skill-registry-title">技能库</h2>
+          <p>仓库文件是 Skill 内容的真实来源；这里汇合校验、绑定、试炼和活动版本证据。</p>
+        </div>
+        <div class="skill-registry-controls">
+          <span id="skill-registry-live" role="status" aria-live="polite">正在扫描允许目录…</span>
+          <button id="refresh-skill-registry" type="button" class="secondary">重新扫描</button>
+        </div>
+      </div>
+      <div id="skill-registry-summary" class="skill-registry-summary"></div>
+      <div class="skill-registry-workspace">
+        <div class="skill-registry-index">
+          <div class="skill-registry-index-head"><h3>已发现 Skill</h3><span id="skill-registry-root">skills/</span></div>
+          <div id="skill-registry-list" class="skill-registry-list"><p class="skill-empty">正在读取仓库 Skill…</p></div>
+        </div>
+        <section id="skill-registry-detail" class="skill-registry-detail" aria-label="Skill 详情" tabindex="-1">
+          <div class="skill-registry-placeholder"><h3>选择一个 Skill</h3><p>查看文件组成、content hash、Doctor 结果和现有治理证据。</p></div>
+        </section>
+      </div>
+    </section>
+    <section class="panel skill-panel" id="skill-council">
+      <div class="section-title"><h2>能力议事</h2></div>
+      <p class="section-note">用聊天告诉 Chief 希望部落学习什么。部落负责澄清、形成规范包、安排受限试用和保留回滚版本；文件上传、权限授予和自动安装都不在这里发生。</p>
+      <div class="skill-council">
+        <form id="skill-commission-form" class="skill-commission-form">
+          <h3>委任一种能力</h3>
+          <label>告诉 Chief 你希望改善什么<textarea id="skill-commission-message" required maxlength="8000" placeholder="例如：听风最近总把同一事件当新消息。请基于失败记录改进他的去重方法，先试用三次再提议装备。"></textarea></label>
+          <button type="submit">开始议事</button>
+          <small id="skill-commission-status" class="form-status" role="status" aria-live="polite">输入操作员 Token 后可创建持久能力委任。</small>
+        </form>
+        <div class="skill-ledger">
+          <div class="skill-ledger-head"><div><h3>委任案卷</h3><p>每项能力都保留对话、版本、digest、试用和审批证据。</p></div><button id="refresh-skills" type="button" class="secondary">刷新案卷</button></div>
+          <div id="skill-commissions" class="skill-commissions" aria-live="polite"></div>
+        </div>
+      </div>
+    </section>
     <section class="panel codex-panel">
-      <div class="section-title"><span>05</span><h2>成员营帐</h2></div>
+      <div class="section-title"><h2>成员营帐</h2></div>
       <p class="section-note">选择一名成员单独交谈；成员会带着自己的经历、成长状态和性格回答，也可以向同谱系导师求助。</p>
       <div class="member-camp">
         <aside><div id="member-tabs" class="member-tabs"></div><div id="member-dossier" class="member-dossier"></div></aside>
@@ -118,8 +171,8 @@ secrets/</textarea></label>
         </div>
       </div>
     </section>
-    <section class="panel intelligence-panel">
-      <div class="section-title"><span>06</span><h2>双域情报台</h2></div>
+    <section class="panel intelligence-panel" id="intelligence-hall">
+      <div class="section-title"><h2>双域情报台</h2></div>
       <p class="section-note">听风追踪 AI 与技术变化；观潮独立追踪财经官方披露和宏观事件。两名成员各自积累经验、候选池和偏好，只共享通知基础设施。</p>
       <section class="notification-console" aria-labelledby="notification-console-title">
         <header class="notification-console-head">
@@ -194,7 +247,7 @@ secrets/</textarea></label>
       </div>
     </section>
     <section class="panel content-panel" id="content-studio">
-      <div class="section-title"><span>07</span><h2>创作工坊</h2></div>
+      <div class="section-title"><h2>创作工坊</h2></div>
       <p class="section-note">热点候选由至少两名成员共同完成研究、写作和独立审校；通过后可一键复制。对外发布仍保留单独门禁。</p>
       <div class="content-workbench">
         <aside class="content-controls">
@@ -222,11 +275,11 @@ secrets/</textarea></label>
       </div>
     </section>
     <section class="panel codex-panel">
-      <div class="section-title"><span>08</span><h2>人物图鉴</h2></div>
+      <div class="section-title"><h2>人物图鉴</h2></div>
       <div id="codex" class="codex"></div>
     </section>
     <section id="run-panel" class="panel run-panel hidden">
-      <div class="section-title"><span>09</span><h2>Run 现场</h2></div>
+      <div class="section-title"><h2>Run 现场</h2></div>
       <div class="run-head"><div><small>当前阶段</small><strong id="phase">QUEUED</strong></div><div id="run-message"></div></div>
       <button id="cancel-run" type="button" class="secondary hidden">取消 Run</button>
       <button id="retry-run" type="button" class="secondary hidden">重试 Run</button>

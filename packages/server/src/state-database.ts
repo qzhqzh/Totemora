@@ -251,6 +251,79 @@ export class StateDatabase {
           .run("domain-aware intelligence candidates", new Date().toISOString());
       })();
     }
+    const skillCommission = this.db.query("SELECT version FROM schema_migrations WHERE version = 3").get() as { version: number } | null;
+    if (!skillCommission) {
+      this.db.transaction(() => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS skill_commissions (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            goal TEXT NOT NULL,
+            status TEXT NOT NULL,
+            chief_member_id TEXT NOT NULL,
+            target_member_id TEXT,
+            target_service_id TEXT,
+            risk TEXT NOT NULL,
+            package_json TEXT,
+            package_digest TEXT,
+            package_version INTEGER,
+            revision INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS skill_commission_status
+            ON skill_commissions(status, updated_at DESC);
+          CREATE TABLE IF NOT EXISTS skill_commission_messages (
+            id TEXT PRIMARY KEY,
+            commission_id TEXT NOT NULL REFERENCES skill_commissions(id),
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS skill_commission_message_timeline
+            ON skill_commission_messages(commission_id, created_at, id);
+          CREATE TABLE IF NOT EXISTS skill_trials (
+            id TEXT PRIMARY KEY,
+            commission_id TEXT NOT NULL REFERENCES skill_commissions(id),
+            baseline_evidence_id TEXT NOT NULL,
+            trial_evidence_id TEXT NOT NULL,
+            reviewer_member_id TEXT NOT NULL,
+            outcome TEXT NOT NULL,
+            metrics_json TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE(commission_id, trial_evidence_id)
+          );
+          CREATE TABLE IF NOT EXISTS skill_activations (
+            id TEXT PRIMARY KEY,
+            commission_id TEXT NOT NULL REFERENCES skill_commissions(id),
+            skill_id TEXT NOT NULL,
+            version INTEGER NOT NULL,
+            digest TEXT NOT NULL,
+            target_member_id TEXT,
+            target_service_id TEXT,
+            package_json TEXT NOT NULL,
+            status TEXT NOT NULL,
+            approved_by TEXT NOT NULL,
+            activated_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS skill_activation_lookup
+            ON skill_activations(skill_id, status, version DESC);
+        `);
+        this.db.query("INSERT INTO schema_migrations(version,name,applied_at) VALUES(3,?,?)")
+          .run("conversational skill commissions", new Date().toISOString());
+      })();
+    }
+    const skillCommissionRevision = this.db.query("SELECT version FROM schema_migrations WHERE version = 4").get() as { version: number } | null;
+    if (!skillCommissionRevision) {
+      this.db.transaction(() => {
+        const columns = new Set((this.db.query("PRAGMA table_info(skill_commissions)").all() as Array<{ name: string }>).map((column) => column.name));
+        if (!columns.has("revision")) this.db.exec("ALTER TABLE skill_commissions ADD COLUMN revision INTEGER NOT NULL DEFAULT 1");
+        this.db.query("INSERT INTO schema_migrations(version,name,applied_at) VALUES(4,?,?)")
+          .run("skill commission optimistic concurrency", new Date().toISOString());
+      })();
+    }
   }
 
   importJsonFile<T>(sourcePath: string, parse: (value: unknown) => T[], insert: (row: T) => void): LegacyImportResult {

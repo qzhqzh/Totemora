@@ -1,6 +1,6 @@
 # ADR-0016：通过部落对话治理 Skill
 
-- 状态：Planned（目标架构，尚未实现通用 Commission）
+- 状态：Accepted（Git 专业服务已完成首个实现闭环）
 - 日期：2026-08-11
 
 ## 背景
@@ -49,3 +49,12 @@ Chief 可以在现有权限内自动调研公开来源、起草、静态校验�
 - “用户交给部落一个 Skill”在产品文案中改为“用户委任部落学习一种能力”。
 
 完整规范见 [Skill 对话治理](../skill-governance.md)。
+
+## 2026-08-12 实现记录
+
+- Commission、消息、规范包、试炼和活动版本已进入 SQLite；Web 与 MCP 复用同一案卷。
+- 包 digest 不随 draft / validated / active 生命周期标签变化，旧任务按实际加载 digest 留证。
+- Git Flow 可通过 `trial_commission_id` 临时加载 validated 包；这不改变活动版本。
+- 试炼只接受结构化专业任务证据：目标成员、专业服务、Reviewer、Commission ID、验收、Token 与耗时必须相符，手填指标不再算证据。
+- 三次通过只允许进入 `activation_proposed`；高风险正式装备和回滚仍要求操作员显式动作。
+- 通用文件包导出、脚本沙箱、非 Git 试用适配器与 Telegram Commission 入口尚未实现。

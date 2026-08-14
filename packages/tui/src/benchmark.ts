@@ -12,7 +12,7 @@ import {
   type WorkspaceSnapshot,
 } from "@totemora/core";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 
 export type BenchmarkStrategy = "single_strong" | "single_cheap" | "tribe";
 
@@ -43,7 +43,22 @@ export interface BenchmarkResult {
   budget: { max_output_tokens_per_call: number };
   results: BenchmarkCaseResult[];
   summary: Record<BenchmarkStrategy, BenchmarkStrategySummary>;
-  pricing_status: "unconfigured";
+  pricing_status: "configured" | "partial" | "unconfigured";
+  pricing_snapshot?: { id: string; as_of: string; source: string; currency: "USD" };
+}
+
+export interface BenchmarkPricingSnapshot {
+  schema_version: 1;
+  id: string;
+  as_of: string;
+  source: string;
+  currency: "USD";
+  models: Array<{
+    provider: string;
+    model: string;
+    input_usd_per_million: number;
+    output_usd_per_million: number;
+  }>;
 }
 
 export interface BenchmarkCaseResult {
@@ -67,6 +82,9 @@ export interface BenchmarkCaseResult {
   total_tokens: number;
   strong_model_tokens: number;
   usage_status: "measured" | "partial" | "unknown";
+  pricing_status: "configured" | "partial" | "unconfigured";
+  estimated_cost_usd?: number;
+  strong_model_cost_usd?: number;
   error?: string;
   report?: TaskReport;
   run_id?: string;
@@ -81,6 +99,8 @@ interface BenchmarkStrategySummary {
   latency_ms: number;
   failures: number;
   usage_unknown_cases: number;
+  known_cost_usd: number;
+  pricing_gap_cases: number;
 }
 
 interface EmberIdentity {
@@ -94,11 +114,12 @@ interface UsageRecord extends EmberIdentity {
 }
 
 const DEFAULT_MAX_OUTPUT_TOKENS = 2_000;
+const SAFE_BENCHMARK_ID = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 
 export async function loadBenchmarkSuite(path: string): Promise<{ suite: BenchmarkSuite; path: string }> {
   const absolutePath = resolve(path);
   const suite = JSON.parse(await readFile(absolutePath, "utf8")) as BenchmarkSuite;
-  if (suite.schema_version !== 1 || !suite.id?.trim() || !Number.isInteger(suite.version)) {
+  if (suite.schema_version !== 1 || !SAFE_BENCHMARK_ID.test(suite.id) || !Number.isInteger(suite.version)) {
     throw new Error("Benchmark suite requires schema_version=1, id, and integer version");
   }
   if (!Array.isArray(suite.tasks) || suite.tasks.length === 0) {
@@ -106,7 +127,7 @@ export async function loadBenchmarkSuite(path: string): Promise<{ suite: Benchma
   }
   const ids = new Set<string>();
   for (const task of suite.tasks) {
-    if (!task.id?.trim() || ids.has(task.id)) throw new Error(`Invalid or duplicate benchmark task id: ${task.id}`);
+    if (!SAFE_BENCHMARK_ID.test(task.id) || ids.has(task.id)) throw new Error(`Invalid or duplicate benchmark task id: ${task.id}`);
     if (!task.goal?.trim() || !task.workspace?.trim()) throw new Error(`Benchmark task ${task.id} requires goal and workspace`);
     if (!Array.isArray(task.acceptance) || task.acceptance.length === 0) throw new Error(`Benchmark task ${task.id} requires acceptance criteria`);
     if (!Array.isArray(task.expected_evidence) || task.expected_evidence.length === 0) throw new Error(`Benchmark task ${task.id} requires expected_evidence`);
@@ -115,6 +136,26 @@ export async function loadBenchmarkSuite(path: string): Promise<{ suite: Benchma
     ids.add(task.id);
   }
   return { suite, path: absolutePath };
+}
+
+export async function loadPricingSnapshot(path: string): Promise<BenchmarkPricingSnapshot> {
+  const snapshot = JSON.parse(await readFile(resolve(path), "utf8")) as BenchmarkPricingSnapshot;
+  if (snapshot.schema_version !== 1 || !snapshot.id?.trim() || snapshot.currency !== "USD"
+    || !Number.isFinite(Date.parse(snapshot.as_of)) || !snapshot.source?.trim()
+    || !Array.isArray(snapshot.models) || snapshot.models.length === 0) {
+    throw new Error("Pricing snapshot requires schema_version=1, id, as_of, source, USD currency, and model rates");
+  }
+  const identities = new Set<string>();
+  for (const item of snapshot.models) {
+    const identity = `${item.provider}/${item.model}`;
+    if (!item.provider?.trim() || !item.model?.trim() || identities.has(identity)
+      || !Number.isFinite(item.input_usd_per_million) || item.input_usd_per_million < 0
+      || !Number.isFinite(item.output_usd_per_million) || item.output_usd_per_million < 0) {
+      throw new Error(`Invalid or duplicate pricing rate: ${identity}`);
+    }
+    identities.add(identity);
+  }
+  return snapshot;
 }
 
 export async function runBenchmark(input: {
@@ -128,8 +169,10 @@ export async function runBenchmark(input: {
   maxFiles?: number;
   maxContextBytes?: number;
   maxOutputTokens?: number;
+  pricingSnapshotPath?: string;
 }): Promise<{ result: BenchmarkResult; jsonPath: string; markdownPath: string }> {
   const loaded = await loadBenchmarkSuite(input.suitePath);
+  const pricing = input.pricingSnapshotPath ? await loadPricingSnapshot(input.pricingSnapshotPath) : undefined;
   const chiefMemberId = input.chiefMemberId ?? input.strongMemberId;
   const maxOutputTokens = input.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
   const strongMember = requireMember(input.config, input.strongMemberId);
@@ -149,11 +192,11 @@ export async function runBenchmark(input: {
     const order = strategyOrder(taskIndex);
     for (const strategy of order) {
       if (strategy === "single_strong") {
-        results.push(await runSingle(task, workspace, strategy, members.strong, strongEmber, input, maxOutputTokens));
+        results.push(await runSingle(task, workspace, strategy, members.strong, strongEmber, input, maxOutputTokens, pricing));
       } else if (strategy === "single_cheap") {
-        results.push(await runSingle(task, workspace, strategy, members.cheap, strongEmber, input, maxOutputTokens));
+        results.push(await runSingle(task, workspace, strategy, members.cheap, strongEmber, input, maxOutputTokens, pricing));
       } else {
-        results.push(await runTribe(task, workspace, members.chief, strongEmber, input, maxOutputTokens));
+        results.push(await runTribe(task, workspace, members.chief, strongEmber, input, maxOutputTokens, pricing));
       }
     }
   }
@@ -166,13 +209,23 @@ export async function runBenchmark(input: {
     budget: { max_output_tokens_per_call: maxOutputTokens },
     results,
     summary: summarize(results),
-    pricing_status: "unconfigured",
+    pricing_status: !pricing ? "unconfigured"
+      : results.every((item) => item.pricing_status === "configured") ? "configured" : "partial",
+    ...(pricing ? { pricing_snapshot: {
+      id: pricing.id, as_of: pricing.as_of, source: pricing.source, currency: pricing.currency,
+    } } : {}),
   };
   const outputDir = resolve(input.dataDir, "benchmarks");
   await mkdir(outputDir, { recursive: true });
   const stem = `${loaded.suite.id}-v${loaded.suite.version}-${result.id}`;
   const jsonPath = resolve(outputDir, `${stem}.json`);
   const markdownPath = resolve(outputDir, `${stem}.md`);
+  for (const path of [jsonPath, markdownPath]) {
+    const child = relative(outputDir, path);
+    if (!child || child.startsWith("..") || resolve(outputDir, child) !== path) {
+      throw new Error("Benchmark output path escaped its data directory");
+    }
+  }
   await writeFile(jsonPath, `${JSON.stringify(result, null, 2)}\n`, "utf8");
   await writeFile(markdownPath, renderBenchmarkMarkdown(result), "utf8");
   return { result, jsonPath, markdownPath };
@@ -186,9 +239,10 @@ async function runSingle(
   strongEmber: EmberIdentity,
   input: Parameters<typeof runBenchmark>[0],
   maxOutputTokens: number,
+  pricing?: BenchmarkPricingSnapshot,
 ): Promise<BenchmarkCaseResult> {
   const member = requireMember(input.config, memberId);
-  const meter = new MeteredProviderRegistry(input.providers);
+  const meter = new MeteredProviderRegistry(input.providers, pricing);
   const startedAt = performance.now();
   try {
     const response = await meter.get(member.provider).generate({
@@ -237,8 +291,9 @@ async function runTribe(
   strongEmber: EmberIdentity,
   input: Parameters<typeof runBenchmark>[0],
   maxOutputTokens: number,
+  pricing?: BenchmarkPricingSnapshot,
 ): Promise<BenchmarkCaseResult> {
-  const meter = new MeteredProviderRegistry(input.providers);
+  const meter = new MeteredProviderRegistry(input.providers, pricing);
   const startedAt = performance.now();
   try {
     const runtime = new TribeRuntime(
@@ -351,6 +406,8 @@ function summarize(results: BenchmarkCaseResult[]): Record<BenchmarkStrategy, Be
       latency_ms: rows.reduce((sum, row) => sum + row.latency_ms, 0),
       failures: rows.filter((result) => result.status === "failed").length,
       usage_unknown_cases: rows.filter((result) => result.usage_status !== "measured").length,
+      known_cost_usd: roundUsd(rows.reduce((sum, row) => sum + (row.estimated_cost_usd ?? 0), 0)),
+      pricing_gap_cases: rows.filter((result) => result.pricing_status !== "configured").length,
     }];
   })) as Record<BenchmarkStrategy, BenchmarkStrategySummary>;
 }
@@ -375,7 +432,8 @@ function requireMember(config: LocalConfigSet, memberId: string) {
 function renderBenchmarkMarkdown(result: BenchmarkResult): string {
   const rows = (["single_strong", "single_cheap", "tribe"] as const).map((strategy) => {
     const item = result.summary[strategy];
-    return `| ${strategy} | ${item.structural_passed}/${item.attempted} | ${(item.structural_pass_rate * 100).toFixed(1)}% | ${item.total_tokens} | ${item.strong_model_tokens} | ${item.latency_ms} | ${item.failures} | ${item.usage_unknown_cases} |`;
+    const knownCost = item.attempted > item.pricing_gap_cases ? item.known_cost_usd.toFixed(6) : "unknown";
+    return `| ${strategy} | ${item.structural_passed}/${item.attempted} | ${(item.structural_pass_rate * 100).toFixed(1)}% | ${item.total_tokens} | ${item.strong_model_tokens} | ${knownCost} | ${item.pricing_gap_cases} | ${item.latency_ms} | ${item.failures} | ${item.usage_unknown_cases} |`;
   });
   return [
     `# Totemora Benchmark · ${result.suite.id} v${result.suite.version}`,
@@ -384,16 +442,18 @@ function renderBenchmarkMarkdown(result: BenchmarkResult): string {
     `- Created: ${result.created_at}`,
     `- Strong / cheap / chief: \`${result.members.strong}\` / \`${result.members.cheap}\` / \`${result.members.chief}\``,
     `- Max output tokens per call: ${result.budget.max_output_tokens_per_call}`,
-    "- Pricing: unconfigured; no cost value is fabricated.",
+    result.pricing_status === "unconfigured"
+      ? "- Pricing: unconfigured; no cost value is fabricated."
+      : `- Pricing: ${result.pricing_status}; snapshot ${result.pricing_snapshot?.id} as of ${result.pricing_snapshot?.as_of} (${result.pricing_snapshot?.source}).`,
     "",
-    "| Strategy | Structural passed | Structural pass rate | Total tokens | Strong-model tokens | Latency ms | Failures | Usage gaps |",
-    "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+    "| Strategy | Structural passed | Structural pass rate | Total tokens | Strong-model tokens | Known cost USD | Pricing gaps | Latency ms | Failures | Usage gaps |",
+    "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ...rows,
     "",
     "## Cases",
     "",
     ...result.results.map((item) =>
-      `- \`${item.task_id}\` / **${item.strategy}**: ${item.structural_passed ? "STRUCTURAL PASS" : "FAIL"} · score ${item.score} · tokens ${item.total_tokens} (${item.usage_status}) · ${item.latency_ms} ms${item.error ? ` · ${item.error}` : ""}`,
+      `- \`${item.task_id}\` / **${item.strategy}**: ${item.structural_passed ? "STRUCTURAL PASS" : "FAIL"} · score ${item.score} · tokens ${item.total_tokens} (${item.usage_status}) · cost ${item.estimated_cost_usd === undefined ? "unknown" : `$${item.estimated_cost_usd.toFixed(6)}`} · ${item.latency_ms} ms${item.error ? ` · ${item.error}` : ""}`,
     ),
     "",
     "## Scoring boundary",
@@ -406,7 +466,10 @@ function renderBenchmarkMarkdown(result: BenchmarkResult): string {
 class MeteredProviderRegistry implements ProviderRegistry {
   private readonly records: UsageRecord[] = [];
 
-  constructor(private readonly base: ProviderRegistry) {}
+  constructor(
+    private readonly base: ProviderRegistry,
+    private readonly pricing?: BenchmarkPricingSnapshot,
+  ) {}
 
   get(providerId: string): AgentProvider {
     const provider = this.base.get(providerId);
@@ -434,6 +497,19 @@ class MeteredProviderRegistry implements ProviderRegistry {
         : "unknown";
     const sum = (field: keyof ModelUsage) =>
       measured.reduce((total, record) => total + (record.usage?.[field] ?? 0), 0);
+    const priceable = this.records.filter((record) =>
+      typeof record.usage?.inputTokens === "number"
+      && typeof record.usage?.outputTokens === "number"
+      && this.pricing?.models.some((rate) => rate.provider === record.provider && rate.model === record.model),
+    );
+    const pricingStatus = !this.pricing ? "unconfigured"
+      : priceable.length === this.records.length && this.records.length > 0 ? "configured" : "partial";
+    const cost = (records: UsageRecord[]) => roundUsd(records.reduce((total, record) => {
+      const rate = this.pricing?.models.find((item) => item.provider === record.provider && item.model === record.model);
+      if (!rate || !record.usage) return total;
+      return total + ((record.usage.inputTokens ?? 0) * rate.input_usd_per_million
+        + (record.usage.outputTokens ?? 0) * rate.output_usd_per_million) / 1_000_000;
+    }, 0));
     return {
       calls: this.records.length,
       input_tokens: sum("inputTokens"),
@@ -443,6 +519,16 @@ class MeteredProviderRegistry implements ProviderRegistry {
         .filter((record) => record.provider === strongEmber.provider && record.model === strongEmber.model)
         .reduce((total, record) => total + (record.usage?.totalTokens ?? 0), 0),
       usage_status: usageStatus as "measured" | "partial" | "unknown",
+      pricing_status: pricingStatus as "configured" | "partial" | "unconfigured",
+      ...(pricingStatus === "configured" ? {
+        estimated_cost_usd: cost(priceable),
+        strong_model_cost_usd: cost(priceable.filter((record) =>
+          record.provider === strongEmber.provider && record.model === strongEmber.model)),
+      } : {}),
     };
   }
+}
+
+function roundUsd(value: number): number {
+  return Math.round(value * 1_000_000_000) / 1_000_000_000;
 }

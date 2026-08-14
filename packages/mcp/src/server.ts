@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod/v4";
+import { totemoraProductVersion } from "@totemora/core";
 
 import { TotemoraGatewayClient, type DevelopmentProposalSummary } from "./gateway-client";
 
@@ -11,7 +12,7 @@ const capabilityText = [
 ].join("\n");
 
 export function createTotemoraMcpServer(gateway: TotemoraGatewayClient): McpServer {
-  const server = new McpServer({ name: "totemora-tribe", version: "0.6.0-living-tribe" }, {
+  const server = new McpServer({ name: "totemora-tribe", version: totemoraProductVersion() }, {
     instructions: "Discover tribe assets and members, talk to a specialist with optional mentor escalation, run AI or finance intelligence watches, or delegate a gated Git management outcome.",
   });
 
@@ -44,6 +45,33 @@ export function createTotemoraMcpServer(gateway: TotemoraGatewayClient): McpServ
     description: "Discover the tribe's typed long-lived services, allowed operations, risk level, acceptance policy, assigned specialist and tool grants.",
     annotations: readOnlyAnnotations("List professional services"),
   }, async () => toolCall(() => gateway.listServices()));
+
+  server.registerTool("totemora_list_skill_commissions", {
+    title: "List tribe Skill commissions",
+    description: "Inspect persistent conversational capability commissions, their Chief dialogue, target member, governed package, trial evidence and activation state.",
+    annotations: readOnlyAnnotations("List Skill commissions"),
+  }, async () => toolCall(() => gateway.listSkillCommissions()));
+
+  server.registerTool("totemora_commission_skill", {
+    title: "Commission the tribe to learn a Skill",
+    description: "Describe a capability in natural language or provide reference URLs. The Chief creates a durable commission and asks for missing boundaries or acceptance examples; this never installs a file or grants permissions.",
+    inputSchema: { message: z.string().min(1).max(8_000) },
+    annotations: { title: "Commission a Skill", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, async ({ message }) => toolCall(() => gateway.createSkillCommission(message)));
+
+  server.registerTool("totemora_get_skill_commission", {
+    title: "Inspect a Skill commission",
+    description: "Read one capability commission, including its conversation, draft digest, validation state, independent trials and current activation proposal.",
+    inputSchema: { commission_id: z.string().min(1) },
+    annotations: readOnlyAnnotations("Inspect Skill commission"),
+  }, async ({ commission_id }) => toolCall(() => gateway.getSkillCommission(commission_id)));
+
+  server.registerTool("totemora_continue_skill_commission", {
+    title: "Continue a Skill commission conversation",
+    description: "Answer the Chief's clarification or revise a draft through the same persistent commission ID. Permission changes and activation remain separate approval gates.",
+    inputSchema: { commission_id: z.string().min(1), message: z.string().min(1).max(8_000) },
+    annotations: { title: "Continue Skill commission", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, async ({ commission_id, message }) => toolCall(() => gateway.continueSkillCommission(commission_id, message)));
 
   server.registerTool("totemora_list_members", {
     title: "List living tribe members",

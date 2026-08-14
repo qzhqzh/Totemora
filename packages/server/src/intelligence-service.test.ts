@@ -260,3 +260,91 @@ test("AI HOT uses fingerprint caching and preserves original plus aggregator att
   expect(prompt).toContain("这是 AI 生成的聚合摘要");
   await rm(dataDir, { recursive: true, force: true });
 });
+
+test("AI watch filters unrelated general news before model evaluation", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-intelligence-scope-"));
+  await new IntelligencePreferenceStore(dataDir).save({
+    interests: ["AI Agent"],
+    channels: { rss: true, ai_hot: false, x_trends: false, weibo_hot: false },
+    x_woeid: 1,
+  });
+  const config = await loadLocalConfig({ configDir: resolve(import.meta.dir, "../../../configs/example") });
+  let prompt = "";
+  const provider: AgentProvider = { async generate(input) {
+    prompt = input.messages.at(-1)?.content ?? "";
+    return { content: JSON.stringify({
+      title: "AI 更新", summary: "开发工具出现新变化。",
+      items: [{ headline: "AI 编程助手更新", brief: "增加 Agent 能力。", url: "https://example.com/ai-tool" }],
+    }) };
+  } };
+  const fakeFetch = async (input: string | URL | Request) => {
+    const url = String(input);
+    if (url.includes("technology")) return new Response("<rss><channel><item><title>AI coding tool update</title><link>https://example.com/ai-tool</link></item></channel></rss>");
+    if (url.includes("hnrss.org")) return new Response("<rss><channel></channel></rss>");
+    return new Response("<rss><channel><item><title>White House staffing change</title><link>https://example.com/politics</link></item></channel></rss>");
+  };
+  const state = new MemberStateStore(dataDir, config);
+  const service = new IntelligenceService(config, { get: () => provider }, state, dataDir, resolve(import.meta.dir, "../../.."), fakeFetch as typeof fetch);
+  const brief = await service.run({ defer_push: true });
+  expect(brief.sources.map((item) => item.link)).toEqual(["https://example.com/ai-tool"]);
+  expect(prompt).not.toContain("White House staffing change");
+  await rm(dataDir, { recursive: true, force: true });
+});
+
+test("AI watch treats an all-out-of-scope scan as a healthy no-op", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-intelligence-empty-scope-"));
+  await new IntelligencePreferenceStore(dataDir).save({
+    interests: ["AI Agent"],
+    channels: { rss: true, ai_hot: false, x_trends: false, weibo_hot: false },
+    x_woeid: 1,
+  });
+  const config = await loadLocalConfig({ configDir: resolve(import.meta.dir, "../../../configs/example") });
+  let generations = 0;
+  const provider: AgentProvider = { async generate() { generations += 1; return { content: "{}" }; } };
+  const rss = "<rss><channel><item><title>White House staffing change</title><link>https://example.com/politics</link></item></channel></rss>";
+  const fakeFetch = (async (input: string | URL | Request) =>
+    new Response(String(input).includes("technology") || String(input).includes("hnrss.org")
+      ? "<rss><channel></channel></rss>" : rss)) as unknown as typeof fetch;
+  const service = new IntelligenceService(
+    config, { get: () => provider }, new MemberStateStore(dataDir, config), dataDir,
+    resolve(import.meta.dir, "../../.."), fakeFetch,
+  );
+  const brief = await service.run({ defer_push: true });
+  expect(brief).toMatchObject({
+    status: "completed", title: "听风巡查 · 无新增",
+    source_gate: { collected: 2, out_of_scope: 2, model_evaluated: 0 },
+  });
+  expect(generations).toBe(0);
+  await rm(dataDir, { recursive: true, force: true });
+});
+
+test("AI watch skips the model when every collected source was already evaluated", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-intelligence-pre-model-dedupe-"));
+  await new IntelligencePreferenceStore(dataDir).save({
+    interests: ["AI Agent"],
+    channels: { rss: true, ai_hot: false, x_trends: false, weibo_hot: false },
+    x_woeid: 1,
+  });
+  const config = await loadLocalConfig({ configDir: resolve(import.meta.dir, "../../../configs/example") });
+  let generations = 0;
+  const provider: AgentProvider = { async generate() {
+    generations += 1;
+    return { content: JSON.stringify({
+      title: "Agent 更新", summary: "出现新版本。",
+      items: [{
+        headline: "OpenAI 发布新的 Agent 模型", brief: "模型加入新的工具能力。",
+        url: "https://example.com/agent-model", event_key: "openai-agent-model",
+      }],
+    }) };
+  } };
+  const rss = "<rss><channel><item><title>OpenAI 发布新的 Agent 模型</title><link>https://example.com/agent-model</link></item></channel></rss>";
+  const fakeFetch = (async () => new Response(rss)) as unknown as typeof fetch;
+  const state = new MemberStateStore(dataDir, config);
+  const service = new IntelligenceService(config, { get: () => provider }, state, dataDir, resolve(import.meta.dir, "../../.."), fakeFetch);
+  await service.run({ defer_push: true });
+  const repeated = await service.run({ defer_push: true });
+  expect(generations).toBe(1);
+  expect(repeated).toMatchObject({ status: "completed", title: "听风巡查 · 无新增", queued_messages: 0 });
+  expect(repeated.warnings).toContain("预模型历史门禁过滤 1 条已评估来源");
+  await rm(dataDir, { recursive: true, force: true });
+});

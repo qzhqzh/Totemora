@@ -102,6 +102,42 @@ test("benchmark preserves measured usage when a model returns malformed JSON", a
   await rm(root, { recursive: true, force: true });
 });
 
+test("benchmark prices measured calls only from an explicit dated snapshot", async () => {
+  const root = await mkdtemp(join(tmpdir(), "totemora-benchmark-pricing-"));
+  const workspace = join(root, "workspace");
+  await mkdir(workspace);
+  await writeFile(join(workspace, "README.md"), "# Demo\nEvidence.\n");
+  const suitePath = join(root, "suite.json");
+  await writeFile(suitePath, JSON.stringify({
+    schema_version: 1, id: "priced-suite", version: 1,
+    tasks: [{ id: "inspect", goal: "分析 Demo", workspace: "./workspace",
+      acceptance: ["引用真实文件"], expected_evidence: ["README.md"] }],
+  }));
+  const pricingPath = join(root, "pricing.json");
+  await writeFile(pricingPath, JSON.stringify({
+    schema_version: 1, id: "test-prices", as_of: "2026-08-12T00:00:00.000Z",
+    source: "test fixture", currency: "USD",
+    models: [
+      { provider: "deepseek", model: "deepseek-v4-pro[1m]", input_usd_per_million: 1, output_usd_per_million: 2 },
+      { provider: "qwen", model: "qwen3.7-plus", input_usd_per_million: 1, output_usd_per_million: 2 },
+      { provider: "xiaomi", model: "mimo-v2.5-pro", input_usd_per_million: 1, output_usd_per_million: 2 },
+    ],
+  }));
+  const config = await loadLocalConfig({ configDir: "configs/example" });
+  const output = await runBenchmark({
+    suitePath, pricingSnapshotPath: pricingPath, config,
+    providers: new SharedRegistry(new BenchmarkProvider()), dataDir: join(root, "data"),
+    strongMemberId: "deepseek_reasoner", cheapMemberId: "qwen_worker",
+  });
+  expect(output.result.pricing_status).toBe("configured");
+  expect(output.result.pricing_snapshot).toMatchObject({ id: "test-prices", currency: "USD" });
+  expect(output.result.results.find((item) => item.strategy === "single_strong")).toMatchObject({
+    pricing_status: "configured", estimated_cost_usd: 0.000014, strong_model_cost_usd: 0.000014,
+  });
+  expect(output.result.summary.single_strong).toMatchObject({ known_cost_usd: 0.000014, pricing_gap_cases: 0 });
+  await rm(root, { recursive: true, force: true });
+});
+
 class SharedRegistry implements ProviderRegistry {
   constructor(private readonly provider: AgentProvider) {}
   get(): AgentProvider { return this.provider; }

@@ -39,6 +39,10 @@ test("exposes living members, intelligence and persistent Git Flow through MCP",
     if (url.pathname === "/api/settlement") return Response.json({ workplaces: [{ id: "workplace-1", name: "Demo", policy: { version: 1 } }] });
     if (url.pathname === "/api/assets") return Response.json({ assets: [{ id: "git-flow-engine", maturity: "verified" }] });
     if (url.pathname === "/api/services") return Response.json({ services: [{ id: "git.flow" }], bindings: [] });
+    if (url.pathname === "/api/skills/commissions" && init?.method === "POST") return Response.json({ id: "skill-1", status: "discovering" });
+    if (url.pathname === "/api/skills/commissions") return Response.json({ commissions: [{ id: "skill-1", status: "discovering" }] });
+    if (url.pathname === "/api/skills/commissions/skill-1/messages") return Response.json({ id: "skill-1", status: "draft" });
+    if (url.pathname === "/api/skills/commissions/skill-1") return Response.json({ id: "skill-1", status: "draft" });
     if (url.pathname === "/api/service-tasks/task-1") return Response.json({ id: "task-1", service_id: "git.flow", status: "completed", result: proposal });
     if (url.pathname === "/api/members/dossiers") return Response.json({ members: [{ member: { id: "qwen_intelligence" }, identity: { rank: "apprentice" } }] });
     if (url.pathname === "/api/members/qwen_intelligence") return Response.json({ member: { id: "qwen_intelligence" }, growth: { verified_successes: 1 } });
@@ -83,6 +87,10 @@ test("exposes living members, intelligence and persistent Git Flow through MCP",
     "totemora_list_workplaces",
     "totemora_list_assets",
     "totemora_list_services",
+    "totemora_list_skill_commissions",
+    "totemora_commission_skill",
+    "totemora_get_skill_commission",
+    "totemora_continue_skill_commission",
     "totemora_list_members",
     "totemora_get_member",
     "totemora_chat_with_member",
@@ -106,6 +114,10 @@ test("exposes living members, intelligence and persistent Git Flow through MCP",
 
   const assets = await client.callTool({ name: "totemora_list_assets", arguments: {} });
   expect(assets.structuredContent).toMatchObject({ assets: [{ id: "git-flow-engine", maturity: "verified" }] });
+  const commission = await client.callTool({ name: "totemora_commission_skill", arguments: { message: "让执简学习范围检查" } });
+  expect(commission.structuredContent).toMatchObject({ id: "skill-1", status: "discovering" });
+  const continued = await client.callTool({ name: "totemora_continue_skill_commission", arguments: { commission_id: "skill-1", message: "补充验收例子" } });
+  expect(continued.structuredContent).toMatchObject({ id: "skill-1", status: "draft" });
   const intelligence = await client.callTool({ name: "totemora_run_intelligence_brief", arguments: { message_count: 3, idempotency_key: "test" } });
   expect(intelligence.structuredContent).toMatchObject({ id: "intel-task-1", status: "queued" });
   const intelligenceDone = await client.callTool({ name: "totemora_get_intelligence_task", arguments: { task_id: "intel-task-1" } });

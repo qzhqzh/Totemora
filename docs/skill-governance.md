@@ -122,22 +122,34 @@ Chief 可以自动完成：
 - 与上一活动版本或无 Skill 基线的比较；
 - 装备、批准、暂停和回滚记录。
 
-当前 Run 只固定成员 ID 与 Skill 版本号；E2 必须再加入包 digest。加入后，旧 Run 不重解释，新任务也不能静默继承旧版本的信任。
+Git 专业任务现在固定成员 ID、Skill 版本、实际加载内容 digest 和 Commission ID；旧 Run 不重解释，新任务也不能静默继承候选版本的信任。其他专业服务仍需在各自试用适配器中补齐同样的证据字段。
 
 ## 当前实现与下一步
 
 当前仓库已经具备：
 
-- `git-change-management` 规范包；
-- Git 专员在真实任务后提出单条经验改进；
-- SQLite 中的 Skill overlay、Proposal、批准和版本递增；
-- Run 中的成员 Skill 版本快照；
-- Web 中的 Skill 提案批准入口。
+- SQLite 中持久的 `SkillCommission`、消息、规范包、试炼与活动版本；
+- Chief 将自然语言和用户明确给出的 HTTPS 来源整理为澄清问题或结构化草案；
+- 风险、目标专业服务和资产授权的确定性门禁，来源不能由模型自行发明；
+- Web“能力议事”和 MCP 创建、继续、读取入口；MCP 不暴露正式装备动作；
+- `git-change-management` 的无 Skill 基线、validated 包隔离试用、三次独立验收、显式装备和回滚；
+- 稳定包 digest，以及专业任务中的实际加载版本、Commission、Token、时延和 Chief 验收证据；
+- 原 Git overlay 继续兼容，活动通用包会叠加到既有基线，不破坏历史版本。
+- Web 一级入口 `/skills`：从仓库 `skills/**/SKILL.md` 读取真实包，展示来源、相对路径、版本或 content hash、绑定、文件组成、Doctor 结果及现有治理证据；页面不会把数据库正文当作文件真源。
+- 只读 Registry API：`GET /api/skills/registry` 列出允许根目录中的 Skill，`GET /api/skills/registry/:id` 按安全 ID 读取详情。客户端不能提交服务器路径，API 也不返回项目绝对路径。
+- Registry Doctor 当前检查 frontmatter 的 `name` / `description`、可选 `skill.yaml`、重复 ID、包外/损坏引用、符号链接、文件规模，以及 `.env`、密钥文件和无扩展名文本中的疑似 Secret；结果分为已装备、候选、需关注与不可用。
 
-当前 Git 服务仍在代码中镜像基线版本，overlay 也只能追加经验规则；`skill.yaml` 尚未成为通用运行时清单。这不等于通用 Commission、试用评测或装备治理。下一实现节点是：
+当前 Skill 根目录约定为：
 
-1. 增加 `SkillCommission` 与对话消息的 SQLite 模型；
-2. 让 Chief 把聊天转成澄清问题或结构化 draft proposal；
-3. 增加通用 Skill 包校验器、版本 digest 和正反例评测；
-4. 增加成员装备 Proposal 与可回滚的活动版本；
-5. 在 Web 证据台展示 Commission、试用证据和版本效果，不增加文件上传入口。
+```text
+<project-root>/skills/<skill-id>/
+```
+
+Registry 对仓库内真实目录做有界、单航班扫描并计算 SHA-256，短暂复用只读结果以避免匿名请求放大磁盘读取；页面“重新扫描”可立即绕过普通缓存，但同类手动刷新仍受短冷却保护。`skills/` 根软链、包内软链、越界引用和私有绝对来源路径都会被拒绝或隐藏。SQLite 只用于关联 Commission、Trial、Activation 和 Overlay 状态。当前页面不执行 Git clone/update，也不会投影到 Codex、Claude 或 Cursor 的运行目录。
+
+当前仍是首个垂直闭环，不等于任意 Skill 已能安全执行：后台先把规范包持久化为结构化 JSON 和生成的 `SKILL.md` 内容，尚未导出完整目录，也不运行 Commission 提供的脚本。下一实现节点是：
+
+1. Phase A：补齐更严格的 manifest 兼容矩阵、可复现正反例 runner 和跨版本差异；脚本只能在隔离沙箱运行。
+2. Phase B：增加 Skill Binding 与可审计 Projection Plan，再把固定版本安全投影到 Codex、Claude、Cursor；激活与文件复制保持两个独立动作。
+3. Phase C：把同一验证/试用契约接入内容、情报等非 Git 专业服务，并用真实任务观察退化、形成可审批回滚建议。
+4. 后续再接 LogWood 候选晋级、Git 私有来源认证、跨机器同步与签名信任；这些均未进入当前实现。

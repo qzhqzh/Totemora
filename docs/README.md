@@ -26,13 +26,13 @@ Totemora 是一个**预算约束下的异构智能部落**，不是通用聊天�
 
 当前实现与使用方式见 [quickstart.md](quickstart.md)，领域结构见 [architecture-v2.md](architecture-v2.md)，服务器驻扎见 [always-on-gateway.md](always-on-gateway.md)，Gateway 见 [gateway-architecture.md](gateway-architecture.md)，MCP 见 [mcp-gateway.md](mcp-gateway.md)，财经情报见 [finance-intelligence.md](finance-intelligence.md)，Skill 对话治理见 [skill-governance.md](skill-governance.md)，推进顺序见 [execution-plan.md](execution-plan.md)。版本化验收指南属于历史节点快照，不作为当前架构说明。
 
-当前开发节点是 `v0.11.0-finance-intelligence-vertical`：新增独立成员“观潮”和 `finance.watch` 专业服务，以 S0–S4 来源证据、市场/证券语义、确定性质量门和独立反馈历史处理财经情报；Bark 支持按 AI / 财经领域路由多台设备并逐目标熔断。原有内容工坊的听风研究/审校、千工写作、绘影视觉策划/配图责任链保持不变。财经使用见 [finance-intelligence.md](finance-intelligence.md)，决策见 [ADR-0017](adr/0017-finance-intelligence-vertical.md)。
+当前开发节点是 `v0.12.0-evidence-skill-core`：在既有 AI / 财经双域情报、Git Flow 和内容工坊之上，增加跨域证据漏斗、前置去重、统一周期调度器、对话式 Skill Commission、Git Skill 隔离试用/装备/回滚，以及可展示的十任务收益实验。扫描完成继续只算操作，系统故障不计入成员失败，模型自由文本也不能替代确定性财经事实。
 
-这里的 `v0.11.0-*` 是 `/api/status` 暴露的产品节点标签，不等于根 `package.json` 的包版本或 MCP Adapter 的协议兼容版本。当前三者独立演进；统一版本来源属于产品化整理项。
+产品版本由 `@totemora/core` 单一来源暴露，根 `package.json`、Gateway `/api/status` 与 MCP Server 统一为 `0.12.0`；各私有 workspace 包的元数据版本仍只用于包管理。
 
 自动写作默认只在 6–18 小时节律窗口检查一次，并且候选必须同时满足价值、可信度、新颖度、非重复和 72 小时新鲜度门禁；没有合格内容时跳过本轮，不为消耗模型额度制造文章。手动选题仍可随时发起。
 
-下一产品节点是对话式 Skill 治理：用户只需描述希望部落学习的能力或给出参考来源，Chief 形成持久能力委任，组织调研、规范化、受限试用和效果验收；文件是部落维护的后台产物，不提供上传式导入。决策见 [ADR-0016](adr/0016-conversational-skill-governance.md)。
+对话式 Skill 治理已完成 Git 专业服务的首个闭环：用户描述能力，Chief 形成持久案卷和规范包，静态校验后以相同 Git 任务运行无 Skill 基线与隔离试用，三次独立验收后才能显式装备，并可回滚。通用脚本沙箱、Telegram 对话入口和非 Git 服务试用仍属后续工作。决策见 [ADR-0016](adr/0016-conversational-skill-governance.md)。
 
 ## 当前成功标准
 

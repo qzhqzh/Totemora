@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "id": "core-proof",
+  "version": 1,
+  "description": "十个固定只读证据任务，用于比较单强模型、廉价模型和部落策略；任务共享小型业务样本，但从规则、实现、测试和表达边界分别评分。",
+  "tasks": [
+    {
+      "id": "rule-implementation-gap",
+      "goal": "逐条核对折扣业务规则与实现，列出未落实的规则。",
+      "workspace": "../examples/demo-project",
+      "acceptance": ["逐条比较业务规则和实现", "每项差距引用真实文件"],
+      "expected_evidence": ["README.md", "src/pricing.ts"],
+      "required_claims": ["finite number", "rounded to two decimal places"],
+      "forbidden_claims": ["已修改文件"]
+    },
+    {
+      "id": "invalid-input-matrix",
+      "goal": "分析 subtotal 与 discountPercent 的负数、非有限数和越界组合。",
+      "workspace": "../examples/demo-project",
+      "acceptance": ["覆盖两项输入的非法边界", "区分文件事实与推断"],
+      "expected_evidence": ["README.md", "src/pricing.ts"],
+      "required_claims": ["between `0` and `100` inclusive"],
+      "forbidden_claims": ["已经抛出错误"]
+    },
+    {
+      "id": "money-rounding-risk",
+      "goal": "只读评估金额舍入规则与当前浮点计算之间的风险。",
+      "workspace": "../examples/demo-project",
+      "acceptance": ["指出规则要求和实现现状", "不给出已执行验证的虚假声明"],
+      "expected_evidence": ["README.md", "src/pricing.ts"],
+      "required_claims": ["two decimal places"],
+      "forbidden_claims": ["测试已经证明"]
+    },
+    {
+      "id": "existing-test-coverage",
+      "goal": "盘点当前测试已覆盖与未覆盖的折扣行为。",
+      "workspace": "../examples/demo-project",
+      "acceptance": ["分别列出已覆盖和缺失行为", "引用测试和规则文件"],
+      "expected_evidence": ["README.md", "src/pricing.test.ts"],
+      "required_claims": ["applyDiscount(100, 20)", "applyDiscount(100, 0)"],
+      "forbidden_claims": ["已新增测试"]
+    },
+    {
+      "id": "boundary-test-plan",
+      "goal": "提出最小但完整的边界测试计划，不修改文件。",
+      "workspace": "../examples/demo-project",
+      "acceptance": ["测试计划覆盖合法边界与非法输入", "每组测试能回溯到规则"],
+      "expected_evidence": ["README.md", "src/pricing.test.ts"],
+      "required_claims": ["0", "100"],
+      "forbidden_claims": ["已运行"]
+    },
+    {
+      "id": "implementation-fact-summary",
+      "goal": "用面向工程师的短报告准确描述当前 applyDiscount 行为与限制。",
+      "workspace": "../examples/demo-project",
+      "acceptance": ["只陈述文件可支持的当前行为", "显式说明没有输入校验"],
+      "expected_evidence": ["src/pricing.ts"],
+      "required_claims": ["return subtotal - subtotal * (discountPercent / 100)"],
+      "forbidden_claims": ["生产可用"]
+    },
+    {
+      "id": "risk-prioritization",
+      "goal": "按影响和发生可能性排序当前实现风险，并解释排序依据。",
+      "workspace": "../examples/demo-project",
+      "acceptance": ["风险有明确优先级", "排序依据引用规则与实现"],
+      "expected_evidence": ["README.md", "src/pricing.ts"],
+      "required_claims": ["Invalid input"],
+      "forbidden_claims": ["零风险"]
+    },
+    {
+      "id": "evidence-discipline",
+      "goal": "审计一份只读分析应如何区分事实、推断和未验证项。",
+      "workspace": "../examples/demo-project",
+      "acceptance": ["至少给出一个文件事实和一个推断", "明确未执行命令或修改"],
+      "expected_evidence": ["README.md", "src/pricing.ts", "src/pricing.test.ts"],
+      "required_claims": ["read-only"],
+      "forbidden_claims": ["已修复"]
+    },
+    {
+      "id": "minimal-change-plan",
+      "goal": "给出满足现有业务规则的最小改动计划和验证顺序，但保持只读。",
+      "workspace": "../examples/demo-project",
+      "acceptance": ["计划同时覆盖实现与测试", "不扩大到折扣模块之外"],
+      "expected_evidence": ["README.md", "src/pricing.ts", "src/pricing.test.ts"],
+      "required_claims": ["finite"],
+      "forbidden_claims": ["新增依赖"]
+    },
+    {
+      "id": "stakeholder-brief",
+      "goal": "给非技术负责人解释当前折扣模块为何尚未满足 README 承诺。",
+      "workspace": "../examples/demo-project",
+      "acceptance": ["结论简洁且不隐去关键风险", "关键判断仍保留文件证据"],
+      "expected_evidence": ["README.md", "src/pricing.ts", "src/pricing.test.ts"],
+      "required_claims": ["clear error"],
+      "forbidden_claims": ["完全符合"]
+    }
+  ]
+}

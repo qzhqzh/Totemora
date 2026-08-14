@@ -52,6 +52,12 @@ export interface FinanceIntelligenceBrief {
   market_snapshot?: FinanceMarketSnapshot;
   delivery_idempotency_key?: string;
   delivery_pending?: boolean;
+  source_gate?: {
+    collected: number;
+    out_of_scope: number;
+    history_suppressed: number;
+    model_evaluated: number;
+  };
   error?: string;
 }
 
@@ -121,9 +127,21 @@ export class FinanceIntelligenceService {
         brief.market_snapshot = await this.marketSnapshots.capture();
         if (brief.market_snapshot.cached) brief.warnings.push("晨报结构化行情使用最近 72 小时内缓存");
       }
-      const evidenceSources = input.briefing_type
+      const scopedSources = input.briefing_type
         ? morningEvidence(brief.sources, input.briefing_type)
         : brief.sources;
+      const evidenceGate = await this.candidates.filterNovelEvidence({
+        domain: "finance", evidence: scopedSources,
+        history_hours: preferences.novelty_history_hours,
+      });
+      const evidenceSources = evidenceGate.novel;
+      brief.source_gate = {
+        collected: brief.sources.length,
+        out_of_scope: Math.max(0, brief.sources.length - scopedSources.length),
+        history_suppressed: evidenceGate.suppressed.length,
+        model_evaluated: evidenceSources.length,
+      };
+      if (!evidenceSources.length) brief.warnings.push("本轮证据已在历史窗口内处理，未调用模型重复评估");
       const allowedLinks = new Set([
         ...evidenceSources.map((item) => item.link),
         ...(brief.market_snapshot?.moves.map((move) => move.url) ?? []),
@@ -145,9 +163,14 @@ export class FinanceIntelligenceService {
       }));
       const dossier = await this.memberState.getDossier(member.id);
       let evaluated: Pick<FinanceIntelligenceBrief, "title" | "summary" | "items"> | undefined;
+      if (!evidenceSources.length) evaluated = {
+        title: "部落财经情报 · 无新增",
+        summary: "本轮没有需要模型重新评估的新财经证据。",
+        items: [],
+      };
       let rejected = "";
       let rejectionReason = "";
-      for (let attempt = 0; attempt < 2; attempt += 1) {
+      for (let attempt = 0; !evaluated && attempt < 2; attempt += 1) {
         const response = await this.providers.get(member.provider).generate({
           memberId: member.id, model: member.model, responseFormat: "json", maxTokens: input.briefing_type ? 2_000 : 3_500,
           messages: [
