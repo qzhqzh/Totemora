@@ -4,6 +4,7 @@ import type { AgentConfig, LocalConfigSet, ProviderRegistry } from "@totemora/co
 
 import { SPECIALIST_SERVICES, requireService, type SpecialistServiceDefinition } from "./specialist-service";
 import { StateDatabase } from "./state-database";
+import { GIT_FLOW_SKILL_ID, GIT_FLOW_SKILL_VERSION } from "./git-flow-skill";
 
 export type SkillCommissionStatus =
   | "discovering" | "draft" | "trial" | "activation_proposed"
@@ -118,7 +119,7 @@ interface ChiefDraft {
 }
 
 const BUILT_IN_SKILL_VERSIONS: Record<string, number> = {
-  "git-flow-release": 4,
+  [GIT_FLOW_SKILL_ID]: GIT_FLOW_SKILL_VERSION,
 };
 
 export class SkillCommissionService {
@@ -229,7 +230,13 @@ export class SkillCommissionService {
   > & { trial_id?: string }): SkillCommission {
     const commission = this.requireCommission(id);
     if (commission.status !== "trial" || !commission.package) throw new Error("Skill commission is not ready for trial evidence");
-    this.requireTargetMember(input.reviewer_member_id);
+    if (!(["accepted", "rejected"] as const).includes(input.outcome)) {
+      throw new Error("Skill trial outcome must be accepted or rejected");
+    }
+    const reviewer = this.requireTargetMember(input.reviewer_member_id);
+    if (!reviewer.eligible_roles.includes("reviewer")) {
+      throw new Error("Skill trial reviewer is unavailable or ineligible");
+    }
     if (input.reviewer_member_id === commission.target_member_id) throw new Error("Skill trial reviewer must be independent from the target member");
     if (input.baseline_evidence_id === input.trial_evidence_id) throw new Error("Skill trial requires distinct baseline and trial evidence");
     const baseline = this.requireEvidence(input.baseline_evidence_id, commission, "baseline");

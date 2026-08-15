@@ -12,6 +12,7 @@ import { ToolAssetRegistry } from "./tool-asset-registry";
 import { StateDatabase } from "./state-database";
 import { MemberStateStore } from "./member-state-store";
 import { SkillCommissionService } from "./skill-commission-service";
+import { GIT_FLOW_SKILL_ID, GIT_FLOW_SKILL_VERSION } from "./git-flow-skill";
 
 export interface DevelopmentProposal {
   id: string;
@@ -85,7 +86,6 @@ interface GitSnapshot {
 }
 
 const GIT_COMMIT_SPECIALIST_ID = "deepseek_git_steward";
-const GIT_CHANGE_SKILL_VERSION = 4;
 
 interface SpecialistOutput {
   summary: string;
@@ -128,7 +128,7 @@ export class DevelopmentCommitService {
   ) {
     this.proposalsDir = resolve(dataDir, "development", "proposals");
     this.experienceFile = resolve(dataDir, "member-experience", `${GIT_COMMIT_SPECIALIST_ID}.json`);
-    this.skillStore = new SkillGovernanceStore(dataDir, "git-flow-release", GIT_CHANGE_SKILL_VERSION);
+    this.skillStore = new SkillGovernanceStore(dataDir, GIT_FLOW_SKILL_ID, GIT_FLOW_SKILL_VERSION);
     this.assetRegistry = new ToolAssetRegistry(projectRoot, dataDir);
     this.state = StateDatabase.open(dataDir);
     this.memberState = new MemberStateStore(dataDir, config);
@@ -192,18 +192,18 @@ export class DevelopmentCommitService {
     }
     await this.assetRegistry.assertCanUse(specialist, "git-flow-engine", "plan");
     const [skillInstructions, planContract] = await Promise.all([
-      readFile(resolve(this.projectRoot, "skills/git-flow-release/SKILL.md"), "utf8"),
-      readFile(resolve(this.projectRoot, "skills/git-flow-release/references/totemora-plan-contract.md"), "utf8"),
+      readFile(resolve(this.projectRoot, "skills", GIT_FLOW_SKILL_ID, "SKILL.md"), "utf8"),
+      readFile(resolve(this.projectRoot, "skills", GIT_FLOW_SKILL_ID, "references/totemora-plan-contract.md"), "utf8"),
     ]);
     const baseSkill = `${skillInstructions.trim()}\n\n${planContract.trim()}\n`;
     const legacySkill = await this.skillStore.getActive(baseSkill);
     const candidateManagedSkill = options.trial_commission_id
       ? this.skillCommissions.trialPackage(options.trial_commission_id, specialist.id, "git.flow")
-      : this.skillCommissions.activePackage("git-flow-release", specialist.id, "git.flow");
-    if (options.trial_commission_id && candidateManagedSkill?.base_version !== GIT_CHANGE_SKILL_VERSION) {
-      throw new Error(`Skill trial package targets stale base v${candidateManagedSkill?.base_version ?? "unknown"}; recreate it for v${GIT_CHANGE_SKILL_VERSION}`);
+      : this.skillCommissions.activePackage(GIT_FLOW_SKILL_ID, specialist.id, "git.flow");
+    if (options.trial_commission_id && candidateManagedSkill?.base_version !== GIT_FLOW_SKILL_VERSION) {
+      throw new Error(`Skill trial package targets stale base v${candidateManagedSkill?.base_version ?? "unknown"}; recreate it for v${GIT_FLOW_SKILL_VERSION}`);
     }
-    const managedSkill = candidateManagedSkill?.base_version === GIT_CHANGE_SKILL_VERSION
+    const managedSkill = candidateManagedSkill?.base_version === GIT_FLOW_SKILL_VERSION
       ? candidateManagedSkill
       : undefined;
     const skill = {
@@ -291,7 +291,7 @@ export class DevelopmentCommitService {
       specialist_member_id: specialist.id,
       assignment_reason: assignment.assignment_reason,
       skill: {
-        id: "git-flow-release", version: skill.version, digest: skill.digest,
+        id: GIT_FLOW_SKILL_ID, version: skill.version, digest: skill.digest,
         ...(managedSkill ? { package_digest: managedSkill.digest } : {}),
         ...(skill.commission_id ? { commission_id: skill.commission_id } : {}),
       },

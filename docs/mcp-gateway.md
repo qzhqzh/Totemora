@@ -11,6 +11,9 @@ MCP 对外发布的是一个持久的“部落 Git Flow 能力”。调用方 AI
 | `totemora_status` | 查看 Gateway、成员和能力 |
 | `totemora_list_workplaces` | 查看工作地和 Policy |
 | `totemora_list_assets` | 查看部落资产、成熟度、成员授权、策略要求和运行证据 |
+| `totemora_list_services` | 查看专业服务契约、风险、长期绑定与资产授权 |
+| `totemora_list_skill_commissions` / `totemora_get_skill_commission` | 查看持久 Skill 委任、对话、包摘要、试炼与激活状态 |
+| `totemora_commission_skill` / `totemora_continue_skill_commission` | 创建或继续对话式 Skill 委任；不会直接安装文件或授予权限 |
 | `totemora_list_members` / `totemora_get_member` | 查看成员谱系、正式性格、观察画像、任务统计、重大经历与成长提案 |
 | `totemora_chat_with_member` | 与指定成员持久交流，可请求导师指点 |
 | `totemora_list_intelligence_briefs` | 查看听风台历史情报与通知通道证据 |

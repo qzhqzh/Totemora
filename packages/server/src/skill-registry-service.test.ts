@@ -172,32 +172,3 @@ test("registry bounds skipped entries and Doctor issues", async () => {
   ]));
   await rm(root, { recursive: true, force: true });
 });
-
-test("registry can create new Skill packages directly in repository", async () => {
-  const root = await mkdtemp(join(tmpdir(), "totemora-skill-create-"));
-  const dataDir = join(root, "data");
-  const service = new SkillRegistryService(root, dataDir);
-
-  const created = await service.create({
-    id: "data-analyst",
-    name: "数据分析专员",
-    description: "自动提取并分析指标数据",
-    content: "## 专员指令\n\n按周汇总并输出报表",
-  });
-
-  expect(created.id).toBe("data-analyst");
-  expect(created.name).toBe("数据分析专员");
-  expect(created.description).toBe("自动提取并分析指标数据");
-  expect(created.files.map((file) => file.path)).toEqual(expect.arrayContaining(["SKILL.md", "skill.yaml"]));
-
-  const preview = await service.readFile("data-analyst", "SKILL.md");
-  expect(preview.content).toContain("# 数据分析专员");
-  expect(preview.content).toContain("## 专员指令");
-
-  await expect(service.create({ id: "data-analyst", name: "重复", description: "已存在" }))
-    .rejects.toThrow("Skill already exists");
-  await expect(service.create({ id: "../bad-id" }))
-    .rejects.toThrow("Invalid Skill id");
-
-  await rm(root, { recursive: true, force: true });
-});

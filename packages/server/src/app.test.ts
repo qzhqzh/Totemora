@@ -558,26 +558,13 @@ test("Skill registry API exposes repository-backed metadata without accepting se
     operatorToken: "operator-secret",
     createProviderRegistry: () => ({ get: () => new PlaygroundProvider() }),
   });
-  expect((await app.fetch(new Request("http://local/api/skills/registry", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ id: "created-skill", name: "新建测试技能", description: "用于测试 API 创建" }),
-  }))).status).toBe(401);
-
-  const createdSkillRes = await app.fetch(new Request("http://local/api/skills/registry", {
-    method: "POST",
-    headers: { ...authorized(), "content-type": "application/json" },
-    body: JSON.stringify({ id: "created-skill", name: "新建测试技能", description: "用于测试 API 创建" }),
-  }));
-  expect(createdSkillRes.status).toBe(201);
-  const createdSkillJson = await createdSkillRes.json();
-  expect(createdSkillJson.id).toBe("created-skill");
-  expect(createdSkillJson.name).toBe("新建测试技能");
-
   const listed = await app.fetch(new Request("http://local/api/skills/registry"));
   expect(listed.status).toBe(200);
   const listedBody = await listed.json();
-  expect(listedBody.skills.map((s: { id: string }) => s.id)).toContain("created-skill");
+  expect(listedBody).toMatchObject({
+    root: "skills",
+    skills: [{ id: "sample-skill", path: "skills/sample-skill", status: "warning" }],
+  });
   const detail = await app.fetch(new Request("http://local/api/skills/registry/sample-skill"));
   expect(await detail.json()).toMatchObject({
     id: "sample-skill", files: [{ path: "SKILL.md", kind: "manifest" }],

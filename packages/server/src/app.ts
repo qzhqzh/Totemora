@@ -736,28 +736,6 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
           }
         }
 
-        if (request.method === "POST" && url.pathname === "/api/skills/registry") {
-          requireOperator(request, options.operatorToken);
-          try {
-            const input = await request.json() as { id?: string; name?: string; description?: string; content?: string };
-            if (!input.id || typeof input.id !== "string") return json({ error: "Skill id is required" }, 400);
-            const created = await skillRegistry.create({
-              id: input.id,
-              name: input.name,
-              description: input.description,
-              content: input.content,
-            });
-            return json(created, 201);
-          } catch (error) {
-            const message = error instanceof Error ? error.message : "Failed to create Skill";
-            if (["Invalid Skill id", "Skill already exists", "Skill id is required"].includes(message)) {
-              return json({ error: message }, 400);
-            }
-            console.error(JSON.stringify({ event: "skill_creation_failed", error: message }));
-            return json({ error: message }, 500);
-          }
-        }
-
         const skillRegistryFileMatch = url.pathname.match(/^\/api\/skills\/registry\/([^/]+)\/file$/);
         if (request.method === "GET" && skillRegistryFileMatch) {
           requireOperator(request, options.operatorToken);

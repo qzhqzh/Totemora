@@ -31,21 +31,6 @@
         <div class="operator-dialog-actions"><button id="operator-logout" type="button" class="secondary hidden">退出登录</button><button id="operator-login-submit" type="submit">验证并登录</button></div>
       </form>
     </dialog>
-    <dialog id="create-skill-dialog" class="operator-dialog" aria-labelledby="create-skill-dialog-title">
-      <form id="create-skill-form" method="dialog">
-        <div class="operator-dialog-head"><h2 id="create-skill-dialog-title">新建 Skill</h2><button id="create-skill-dialog-close" type="button" class="secondary" aria-label="关闭新建窗口">关闭</button></div>
-        <p>在仓库 <code>skills/&lt;skill-id&gt;/</code> 目录直接生成规范化 Skill 包（包含 <code>SKILL.md</code> 与 <code>skill.yaml</code>）。</p>
-        <label>Skill 唯一标识 (ID)<input id="new-skill-id" name="id" placeholder="例如：data-analyst 或 code-audit" pattern="^[a-z0-9][a-z0-9._-]{0,127}$" required></label>
-        <label>Skill 名称<input id="new-skill-name" name="name" placeholder="例如：数据分析专员" required></label>
-        <label>简要描述<textarea id="new-skill-description" name="description" rows="2" placeholder="简述该 Skill 的职责、调用场景与预期能力" required></textarea></label>
-        <label>初始正文内容（Markdown，可选）<textarea id="new-skill-content" name="content" rows="4" placeholder="详细规则、执行步骤或提示词模板（可留空使用默认模版）"></textarea></label>
-        <div id="create-skill-status" class="operator-login-status" role="status" aria-live="polite">创建 Skill 需要已验证的操作员身份。</div>
-        <div class="operator-dialog-actions">
-          <button id="create-skill-cancel" type="button" class="secondary">取消</button>
-          <button id="create-skill-submit" type="submit">立即创建并写入仓库</button>
-        </div>
-      </form>
-    </dialog>
   </header>
   <main>
     <section class="panel observatory-panel" aria-labelledby="observatory-title">
@@ -154,20 +139,13 @@ secrets/</textarea></label>
         </div>
         <div class="skill-registry-controls">
           <span id="skill-registry-live" role="status" aria-live="polite">正在扫描允许目录…</span>
-          <button id="create-skill-button" type="button">创建技能</button>
           <button id="refresh-skill-registry" type="button" class="secondary">重新扫描</button>
         </div>
       </div>
       <div id="skill-registry-summary" class="skill-registry-summary"></div>
       <div class="skill-registry-workspace">
         <div class="skill-registry-index">
-          <div class="skill-registry-index-head">
-            <h3>已发现 Skill</h3>
-            <div class="skill-registry-index-actions">
-              <button id="create-skill-index-button" type="button" class="secondary skill-mini-create">+ 新建</button>
-              <span id="skill-registry-root">skills/</span>
-            </div>
-          </div>
+          <div class="skill-registry-index-head"><h3>已发现 Skill</h3><span id="skill-registry-root">skills/</span></div>
           <div id="skill-registry-list" class="skill-registry-list"><p class="skill-empty">正在读取仓库 Skill…</p></div>
         </div>
         <section id="skill-registry-detail" class="skill-registry-detail" aria-label="Skill 详情" tabindex="-1">

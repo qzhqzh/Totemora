@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, mkdir, open, opendir, realpath, writeFile } from "node:fs/promises";
+import { lstat, open, opendir, realpath } from "node:fs/promises";
 import { basename, extname, isAbsolute, relative, resolve, sep } from "node:path";
 
 import { StateDatabase } from "./state-database";
@@ -173,64 +173,6 @@ export class SkillRegistryService {
   async get(id: string): Promise<SkillRegistryEntry | undefined> {
     if (!SAFE_SKILL_ID.test(id)) throw new Error("Invalid Skill id");
     return (await this.list()).skills.find((skill) => skill.id === id);
-  }
-
-  async create(input: { id: string; name?: string; description?: string; content?: string; tags?: string[] }): Promise<SkillRegistryEntry> {
-    const id = input.id?.trim();
-    if (!id || !SAFE_SKILL_ID.test(id)) throw new Error("Invalid Skill id");
-    const name = input.name?.trim() || id;
-    const description = input.description?.trim() || `Skill package for ${name}`;
-    const customContent = input.content?.trim();
-    const tags = Array.isArray(input.tags)
-      ? [...new Set(input.tags.map((t) => String(t).trim().toLowerCase()).filter(Boolean))]
-      : [];
-
-    await mkdir(this.root, { recursive: true });
-    const targetDir = resolve(this.root, id);
-    assertInside(this.root, targetDir);
-
-    try {
-      const existing = await lstat(targetDir);
-      if (existing) throw new Error("Skill already exists");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    }
-
-    await mkdir(targetDir, { recursive: true });
-
-    const skillMarkdown = [
-      "---",
-      `name: ${id}`,
-      `description: ${description.replace(/\r?\n/g, " ")}`,
-      ...(tags.length ? ["tags:", ...tags.map((t) => `  - ${t}`)] : []),
-      "---",
-      "",
-      `# ${name}`,
-      "",
-      customContent || `> ${description}\n\n## 核心规则\n\n- 明确定义输入与输出边界\n- 遵循确定性验证与安全规范\n`,
-      "",
-    ].join("\n");
-
-    const skillYaml = [
-      "schema_version: 1",
-      `id: ${id}`,
-      `name: ${name}`,
-      "version: 1",
-      "status: candidate",
-      ...(tags.length ? ["tags:", ...tags.map((t) => `  - ${t}`)] : []),
-      "source:",
-      "  kind: local",
-      "  reference: user-created",
-      "",
-    ].join("\n");
-
-    await writeFile(resolve(targetDir, "SKILL.md"), skillMarkdown, "utf8");
-    await writeFile(resolve(targetDir, "skill.yaml"), skillYaml, "utf8");
-
-    this.cache = undefined;
-    const created = await this.get(id);
-    if (!created) throw new Error("Failed to initialize created Skill package");
-    return created;
   }
 
   async readFile(id: string, filePath: string): Promise<{

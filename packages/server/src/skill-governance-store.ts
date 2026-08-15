@@ -2,6 +2,12 @@ import { readdirSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { StateDatabase } from "./state-database";
+import {
+  GIT_FLOW_SKILL_ID,
+  GIT_FLOW_SKILL_VERSION,
+  LEGACY_GIT_FLOW_SKILL_ID,
+  LEGACY_GIT_FLOW_SKILL_VERSION,
+} from "./git-flow-skill";
 
 export interface ActiveSkillOverlay {
   skill_id: string;
@@ -99,12 +105,36 @@ export class SkillGovernanceStore {
   }
 
   private importLegacy(): void {
-    const overlayPath = resolve(this.dataDir, "skills", this.skillId, "active.json");
-    this.state.importJsonFile<ActiveSkillOverlay>(
-      overlayPath,
-      (value) => [value as ActiveSkillOverlay],
-      (overlay) => this.state.putRecord("skill_overlays", overlay.skill_id, overlay, overlay.updated_at, overlay.updated_at),
-    );
+    const sourceSkillIds = this.skillId === GIT_FLOW_SKILL_ID
+      ? [LEGACY_GIT_FLOW_SKILL_ID, GIT_FLOW_SKILL_ID]
+      : [this.skillId];
+    for (const sourceSkillId of sourceSkillIds) {
+      const overlayPath = resolve(this.dataDir, "skills", sourceSkillId, "active.json");
+      this.state.importJsonFile<ActiveSkillOverlay>(
+        overlayPath,
+        (value) => {
+          const legacy = value as ActiveSkillOverlay;
+          const additions = Array.isArray(legacy.additions) ? legacy.additions : [];
+          const previousBase = typeof legacy.base_version === "number"
+            ? legacy.base_version
+            : sourceSkillId === LEGACY_GIT_FLOW_SKILL_ID
+              ? LEGACY_GIT_FLOW_SKILL_VERSION
+              : this.baseVersion;
+          const previousVersion = typeof legacy.version === "number"
+            ? legacy.version
+            : previousBase + additions.length;
+          const versionDelta = Math.max(0, this.baseVersion - previousBase);
+          return [{
+            ...legacy,
+            skill_id: this.skillId,
+            base_version: this.baseVersion,
+            version: Math.max(this.baseVersion + additions.length, previousVersion + versionDelta),
+            additions,
+          }];
+        },
+        (overlay) => this.state.putRecord("skill_overlays", overlay.skill_id, overlay, overlay.updated_at, overlay.updated_at),
+      );
+    }
     const directory = resolve(this.dataDir, "skill-proposals");
     let files: string[];
     try { files = readdirSync(directory).filter((file) => file.endsWith(".json")); }
@@ -113,7 +143,15 @@ export class SkillGovernanceStore {
       const path = resolve(directory, file);
       this.state.importJsonFile<SkillImprovementProposal>(
         path,
-        (value) => [value as SkillImprovementProposal],
+        (value) => {
+          const proposal = value as SkillImprovementProposal;
+          if (this.skillId !== GIT_FLOW_SKILL_ID || proposal.skill_id !== LEGACY_GIT_FLOW_SKILL_ID) return [proposal];
+          return [{
+            ...proposal,
+            skill_id: GIT_FLOW_SKILL_ID,
+            base_version: proposal.base_version + GIT_FLOW_SKILL_VERSION - LEGACY_GIT_FLOW_SKILL_VERSION,
+          }];
+        },
         (proposal) => this.state.putRecord("skill_proposals", proposal.id, proposal, proposal.created_at, proposal.approved_at ?? proposal.created_at),
       );
     }

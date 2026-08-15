@@ -550,77 +550,7 @@ function formatFileSize(value) {
   return `${(value / 1024).toFixed(value < 10 * 1024 ? 1 : 0)} KB`;
 }
 
-function openCreateSkillDialog() {
-  if (!operatorAuthenticated) {
-    openOperatorDialog();
-    return;
-  }
-  const status = $("create-skill-status");
-  if (status) {
-    status.className = "operator-login-status";
-    status.textContent = "创建 Skill 需要已验证的操作员身份。";
-  }
-  $("create-skill-dialog").showModal();
-  window.setTimeout(() => $("new-skill-id")?.focus(), 0);
-}
-
 $("refresh-skill-registry").addEventListener("click", () => void loadSkillRegistry({ keepSelection: true, refresh: true }));
-$("create-skill-button")?.addEventListener("click", openCreateSkillDialog);
-$("create-skill-index-button")?.addEventListener("click", openCreateSkillDialog);
-$("create-skill-dialog-close")?.addEventListener("click", () => $("create-skill-dialog").close());
-$("create-skill-cancel")?.addEventListener("click", () => $("create-skill-dialog").close());
-
-$("create-skill-form")?.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const idInput = $("new-skill-id");
-  const nameInput = $("new-skill-name");
-  const descInput = $("new-skill-description");
-  const contentInput = $("new-skill-content");
-  const status = $("create-skill-status");
-  const submit = $("create-skill-submit");
-
-  const id = idInput.value.trim();
-  const name = nameInput.value.trim();
-  const description = descInput.value.trim();
-  const content = contentInput.value.trim();
-
-  if (!id || !name || !description) {
-    status.className = "operator-login-status error";
-    status.textContent = "请完整填写 Skill ID、名称与描述。";
-    return;
-  }
-
-  submit.disabled = true;
-  status.className = "operator-login-status";
-  status.textContent = "正在生成 Skill 包并写入仓库…";
-
-  try {
-    const created = await operatorApi("/api/skills/registry", {
-      method: "POST",
-      body: JSON.stringify({ id, name, description, content }),
-    });
-    status.className = "operator-login-status success";
-    status.textContent = "创建成功！";
-    $("create-skill-dialog").close();
-    $("create-skill-form").reset();
-
-    await loadSkillRegistry({ keepSelection: false, refresh: true });
-    activeRegistrySkillId = created.id;
-    activeRegistryFilePath = undefined;
-    renderSkillRegistryList();
-    renderSkillRegistryDetail(registrySkills.find((skill) => skill.id === activeRegistrySkillId));
-    if (skillsRoute) {
-      const url = new URL(location.href);
-      url.searchParams.set("skill", created.id);
-      history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
-    }
-  } catch (error) {
-    status.className = "operator-login-status error";
-    status.textContent = `创建失败：${error.message}`;
-  } finally {
-    submit.disabled = false;
-  }
-});
 
 $("skill-registry-list").addEventListener("click", (event) => {
   const button = event.target.closest("[data-registry-skill]");

@@ -31,7 +31,7 @@ Web / MCP / Telegram / Cron / Webhook / IDE / Gateway CLI
 - Workplace Policy；
 - Mission、Run、SpecialistTask 和专业状态机；
 - 专员自检、Chief 验收与按风险加入 Reviewer；
-- 规划中的 Skill Commission、包版本、成员装备和效果证据；
+- 持久化 Skill Commission、包版本、独立试炼、成员装备和效果证据；
 - 失败归因、成员经历、画像与受控成长。
 
 入口 Adapter 只能创建命令、查询状态和接收结果，不能绕过这些领域直接调用模型、Shell 或外部系统。
@@ -54,9 +54,9 @@ Web / MCP / Telegram / Cron / Webhook / IDE / Gateway CLI
 
 确定性执行器属于部落资产，不属于成员。`assets/tool-assets.json` 保存图纸、动作、风险和授权；动作账本记录成员、工作流、幂等键、结果和证据。Skill 说明如何判断和工作，资产执行受控动作，专业服务提供稳定契约。
 
-## 目标设计：对话式 Skill Commission
+## 当前设计：对话式 Skill Commission
 
-下一产品节点不会让聊天入口接收上传包。用户描述能力或提供参考来源后，Adapter 将消息交给同一 Gateway；Chief 将创建持久 Commission，组织澄清、调研、起草、验证、试用和激活 Proposal。Web、Telegram 与 MCP 只负责承载对话和展示状态。
+聊天入口不接收上传包。用户描述能力或提供参考来源后，Adapter 将消息交给同一 Gateway；Chief 创建持久 Commission，组织澄清、起草、验证、试用和激活 Proposal。Web 与 MCP 只负责承载对话和展示状态。
 
 Skill 激活不能暗中获得资产、Secrets、Shell、人格或模型权限。完整设计见 [Skill 对话治理](skill-governance.md) 与 [ADR-0016](adr/0016-conversational-skill-governance.md)。
 
@@ -75,8 +75,7 @@ Totemora 继续借鉴 Hermes 的平台无关核心、多入口 Gateway、Fresh S
 
 ## 下一步
 
-1. 为 Skill Commission 增加 SQLite 模型和对话 API；
-2. 统一专业任务进度事件、取消与异步批准；
-3. 为命令资产补统一 policy hooks 和进程级 sandbox；
-4. 在证据台展示服务恢复、Skill 试用与版本效果；
-5. 云端阶段再增加租户、OAuth、配额、计费和公开市场。
+1. 统一专业任务进度事件、取消与异步批准；
+2. 为命令资产补统一 policy hooks 和进程级 sandbox；
+3. 在证据台完善服务恢复、Skill 试用与版本效果窗口；
+4. 云端阶段再增加租户、OAuth、配额、计费和公开市场。

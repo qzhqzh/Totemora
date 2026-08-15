@@ -1,6 +1,6 @@
 ---
 name: prompt-img-sea-girl
-description: 海边美女提示词
+description: 当用户明确要求生成海边成年女性手机快照风格图片或同类提示词时，使用这份构图与质感模板。
 ---
 
 # 【生图】海边美女提示词

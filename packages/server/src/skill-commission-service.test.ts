@@ -101,6 +101,18 @@ test("commission refuses arbitrary records that do not prove the commissioned Sk
   const draft = await service.create("创建一个有证据门禁的 Git 能力");
   service.validate(draft.id);
   const state = StateDatabase.open(dataDir);
+  const reviewer = config.agents.agents.find((member) => member.id === "qwen_worker")!;
+  const reviewerRoles = reviewer.eligible_roles;
+  reviewer.eligible_roles = reviewerRoles.filter((role) => role !== "reviewer");
+  expect(() => service.recordTrial(draft.id, {
+    baseline_evidence_id: "missing-baseline", trial_evidence_id: "missing-trial",
+    reviewer_member_id: reviewer.id, outcome: "accepted", summary: "not reviewed",
+  })).toThrow("reviewer is unavailable or ineligible");
+  reviewer.eligible_roles = reviewerRoles;
+  expect(() => service.recordTrial(draft.id, {
+    baseline_evidence_id: "missing-baseline", trial_evidence_id: "missing-trial",
+    reviewer_member_id: reviewer.id, outcome: "maybe" as "accepted", summary: "invalid outcome",
+  })).toThrow("outcome must be accepted or rejected");
   state.putRecord("benchmark_evidence", "made-up", { accepted: true });
   await expect(() => service.recordTrial(draft.id, {
     baseline_evidence_id: "made-up", trial_evidence_id: "made-up-2",
