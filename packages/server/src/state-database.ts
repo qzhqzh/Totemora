@@ -453,6 +453,22 @@ export class StateDatabase {
     const skillTrialOutcomeConstraint = this.db.query("SELECT version FROM schema_migrations WHERE version = 8").get() as { version: number } | null;
     if (!skillTrialOutcomeConstraint) {
       this.db.transaction(() => {
+        const invalidTrials = this.db.query(`
+          SELECT * FROM skill_trials WHERE outcome NOT IN ('accepted','rejected')
+        `).all() as Array<Record<string, unknown> & { id: string; created_at: string }>;
+        for (const trial of invalidTrials) {
+          const quarantined = {
+            reason: "invalid_outcome_before_migration_8",
+            trial,
+          };
+          this.db.query(`
+            INSERT INTO records(namespace,id,payload_json,created_at,updated_at)
+            VALUES('quarantined_skill_trials',?,?,?,?)
+            ON CONFLICT(namespace,id) DO UPDATE SET
+              payload_json=excluded.payload_json,updated_at=excluded.updated_at
+          `).run(trial.id, JSON.stringify(quarantined), trial.created_at, new Date().toISOString());
+          this.db.query("DELETE FROM skill_trials WHERE id=?").run(trial.id);
+        }
         this.db.exec(`
           CREATE TRIGGER IF NOT EXISTS skill_trials_valid_outcome_insert
           BEFORE INSERT ON skill_trials

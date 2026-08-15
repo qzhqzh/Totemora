@@ -57,6 +57,8 @@ test("migration 7 renames the Git Flow Skill id without losing governance histor
       skill_id: "git-change-management", version: 4,
       additions: ["preserve approved rule"], updated_at: now,
     }), now, now);
+  db.query("INSERT INTO skill_trials VALUES(?,?,?,?,?,?,?,?,?)")
+    .run("legacy-invalid", "commission-1", "base", "trial", "reviewer", "maybe", "{}", "legacy bad outcome", now);
   db.close();
 
   const state = StateDatabase.open(dataDir);
@@ -79,6 +81,14 @@ test("migration 7 renames the Git Flow Skill id without losing governance histor
     }),
   ]);
   expect(state.db.query("SELECT 1 FROM records WHERE namespace='skill_overlays' AND id='git-change-management'").get()).toBeNull();
+  expect(state.db.query("SELECT 1 FROM skill_trials WHERE id='legacy-invalid'").get()).toBeNull();
+  const quarantined = state.db.query(`
+    SELECT payload_json FROM records WHERE namespace='quarantined_skill_trials' AND id='legacy-invalid'
+  `).get() as { payload_json: string };
+  expect(JSON.parse(quarantined.payload_json)).toMatchObject({
+    reason: "invalid_outcome_before_migration_8",
+    trial: { id: "legacy-invalid", outcome: "maybe" },
+  });
   expect(() => state.db.query(`
     INSERT INTO skill_trials VALUES(?,?,?,?,?,?,?,?,?)
   `).run("invalid", "commission-1", "base", "trial", "reviewer", "maybe", "{}", "bad", now))
