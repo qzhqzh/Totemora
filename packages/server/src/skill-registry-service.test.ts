@@ -9,14 +9,14 @@ import { StateDatabase } from "./state-database";
 test("registry scans real local Skill files and joins existing governance evidence", async () => {
   const root = await mkdtemp(join(tmpdir(), "totemora-skill-registry-"));
   const dataDir = join(root, "data");
-  const packageDir = join(root, "skills", "git-change-management");
+  const packageDir = join(root, "skills", "git-flow-release");
   await mkdir(join(packageDir, "agents"), { recursive: true });
   await writeFile(join(packageDir, "SKILL.md"), [
-    "---", "name: git-change-management", "description: Govern Git changes safely.", "---", "",
+    "---", "name: git-flow-release", "description: Govern Git changes safely.", "---", "",
     "# Git Flow Steward", "", "Read [agent metadata](agents/openai.yaml).", "",
   ].join("\n"));
   await writeFile(join(packageDir, "skill.yaml"), [
-    "schema_version: 1", "id: git-change-management", "name: Git 变更提交管理", "version: 4",
+    "schema_version: 1", "id: git-flow-release", "name: Git 变更提交管理", "version: 4",
     "status: active", "owner_member_id: deepseek_git_steward", "source:", "  kind: local", "  reference: user-governed",
   ].join("\n"));
   await writeFile(join(packageDir, "agents", "openai.yaml"), "interface:\n  display_name: Git Flow Steward\n");
@@ -31,7 +31,7 @@ test("registry scans real local Skill files and joins existing governance eviden
     ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).run(
     commissionId, "Git", "Safer Git", "active", "deepseek_reasoner", "deepseek_git_steward", "git.flow",
-    "repository_mutation", JSON.stringify({ skill_id: "git-change-management" }), "digest-4", 4, now, now,
+    "repository_mutation", JSON.stringify({ skill_id: "git-flow-release" }), "digest-4", 4, now, now,
   );
   state.db.query(`
     INSERT INTO skill_trials(
@@ -45,7 +45,7 @@ test("registry scans real local Skill files and joins existing governance eviden
       package_json,status,approved_by,activated_at,updated_at
     ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
   `).run(
-    crypto.randomUUID(), commissionId, "git-change-management", 4, "digest-4",
+    crypto.randomUUID(), commissionId, "git-flow-release", 4, "digest-4",
     "deepseek_git_steward", "git.flow", "{}", "active", "operator", now, now,
   );
 
@@ -54,9 +54,9 @@ test("registry scans real local Skill files and joins existing governance eviden
   expect(result.root).toBe("skills");
   expect(result.skills).toHaveLength(1);
   expect(result.skills[0]).toMatchObject({
-    id: "git-change-management",
+    id: "git-flow-release",
     name: "Git 变更提交管理",
-    path: "skills/git-change-management",
+    path: "skills/git-flow-release",
     version: 4,
     status: "active",
     binding: { member_ids: ["deepseek_git_steward"] },
@@ -71,17 +71,17 @@ test("registry scans real local Skill files and joins existing governance eviden
   expect(result.skills[0]!.files.map((file) => file.path)).toEqual([
     "agents/openai.yaml", "SKILL.md", "skill.yaml",
   ]);
-  await expect(service.readFile("git-change-management", "SKILL.md")).resolves.toMatchObject({
-    skill_id: "git-change-management", path: "SKILL.md", kind: "manifest",
+  await expect(service.readFile("git-flow-release", "SKILL.md")).resolves.toMatchObject({
+    skill_id: "git-flow-release", path: "SKILL.md", kind: "manifest",
     content: expect.stringContaining("# Git Flow Steward"),
   });
-  await expect(service.readFile("git-change-management", "../private.txt")).rejects.toThrow("Invalid Skill file path");
-  await expect(service.readFile("git-change-management", "missing.md")).rejects.toThrow("Skill file not found");
-  const original = await service.readFile("git-change-management", "SKILL.md");
+  await expect(service.readFile("git-flow-release", "../private.txt")).rejects.toThrow("Invalid Skill file path");
+  await expect(service.readFile("git-flow-release", "missing.md")).rejects.toThrow("Skill file not found");
+  const original = await service.readFile("git-flow-release", "SKILL.md");
   await writeFile(join(packageDir, "SKILL.md"), original.content.replace("Govern Git changes safely.", "Govern Git changes secretly"));
-  await expect(service.readFile("git-change-management", "SKILL.md")).rejects.toThrow("changed");
+  await expect(service.readFile("git-flow-release", "SKILL.md")).rejects.toThrow("changed");
   await writeFile(join(packageDir, "SKILL.md"), [
-    "---", "name: git-change-management", "description: Refreshed repository truth.", "---", "",
+    "---", "name: git-flow-release", "description: Refreshed repository truth.", "---", "",
     "# Git Flow Steward", "", "Read [agent metadata](agents/openai.yaml).", "",
   ].join("\n"));
   const refreshed = await service.list({ refresh: true });
@@ -170,5 +170,34 @@ test("registry bounds skipped entries and Doctor issues", async () => {
   expect(skill.validation.issues.map((issue) => issue.code)).toEqual(expect.arrayContaining([
     "symbolic_link", "issue_limit", "too_many_entries",
   ]));
+  await rm(root, { recursive: true, force: true });
+});
+
+test("registry can create new Skill packages directly in repository", async () => {
+  const root = await mkdtemp(join(tmpdir(), "totemora-skill-create-"));
+  const dataDir = join(root, "data");
+  const service = new SkillRegistryService(root, dataDir);
+
+  const created = await service.create({
+    id: "data-analyst",
+    name: "数据分析专员",
+    description: "自动提取并分析指标数据",
+    content: "## 专员指令\n\n按周汇总并输出报表",
+  });
+
+  expect(created.id).toBe("data-analyst");
+  expect(created.name).toBe("数据分析专员");
+  expect(created.description).toBe("自动提取并分析指标数据");
+  expect(created.files.map((file) => file.path)).toEqual(expect.arrayContaining(["SKILL.md", "skill.yaml"]));
+
+  const preview = await service.readFile("data-analyst", "SKILL.md");
+  expect(preview.content).toContain("# 数据分析专员");
+  expect(preview.content).toContain("## 专员指令");
+
+  await expect(service.create({ id: "data-analyst", name: "重复", description: "已存在" }))
+    .rejects.toThrow("Skill already exists");
+  await expect(service.create({ id: "../bad-id" }))
+    .rejects.toThrow("Invalid Skill id");
+
   await rm(root, { recursive: true, force: true });
 });

@@ -1,13 +1,12 @@
 const $ = (id) => document.getElementById(id);
 const skillsRoute = location.pathname === "/skills" || location.pathname === "/skills/";
 document.body.classList.toggle("route-skills", skillsRoute);
-document.title = skillsRoute ? "Skills / 技能 · Totemora" : "Totemora 部落试炼场";
+document.title = skillsRoute ? "技能 · 铁锅部落" : "铁锅部落";
 document.querySelectorAll("[data-primary-route]").forEach((link) => {
   const active = link.dataset.primaryRoute === (skillsRoute ? "skills" : "home");
   if (active) link.setAttribute("aria-current", "page");
   else link.removeAttribute("aria-current");
 });
-$("operator-form").addEventListener("submit", (event) => event.preventDefault());
 const phases = { queued: 8, planning: 25, executing: 55, reviewing: 78, repairing: 68, cancelling: 85, cancelled: 100, completed: 100, failed: 100 };
 let tribe;
 let status;
@@ -28,12 +27,30 @@ let activeRegistryFilePath;
 let skillTrialRuns = [];
 let skillCommissions = [];
 
+let operatorAuthenticated = false;
+let operatorSessionRevision = 0;
 $("operator-token").value = sessionStorage.getItem("totemora_operator_token") || "";
-$("operator-token").addEventListener("change", () => {
-  sessionStorage.setItem("totemora_operator_token", $("operator-token").value);
+
+function setOperatorAuthState(state, message) {
+  operatorAuthenticated = state === "authenticated";
+  $("operator-login-open").classList.toggle("authenticated", operatorAuthenticated);
+  $("operator-auth-state").textContent = operatorAuthenticated ? "已认证" : state === "invalid" ? "认证失败" : "未登录";
+  $("operator-login-label").textContent = operatorAuthenticated ? "操作员账户" : "操作员登录";
+  $("operator-logout").classList.toggle("hidden", !operatorAuthenticated);
+  $("operator-login-status").className = `operator-login-status${state === "authenticated" ? " success" : state === "invalid" ? " error" : ""}`;
+  $("operator-login-status").textContent = message ?? (operatorAuthenticated ? "Token 已通过服务器验证，仅保存在当前标签页。" : "Token 仅保存在当前浏览器标签页。");
+}
+
+function openOperatorDialog() {
+  setOperatorAuthState(operatorAuthenticated ? "authenticated" : "anonymous");
+  $("operator-dialog").showModal();
+  window.setTimeout(() => $("operator-token").focus(), 0);
+}
+
+async function refreshProtectedViews() {
   for (const url of contentIllustrationUrls.values()) URL.revokeObjectURL(url);
   contentIllustrationUrls.clear();
-  if (!$("operator-token").value.trim()) clearProtectedDevelopmentUi();
+  if (!operatorAuthenticated) clearProtectedDevelopmentUi();
   if (skillsRoute) {
     void loadSkillCommissions();
     if (activeRegistrySkillId) renderSkillRegistryDetail(registrySkills.find((skill) => skill.id === activeRegistrySkillId));
@@ -47,7 +64,85 @@ $("operator-token").addEventListener("change", () => {
   void loadBarkTargets();
   void loadSkillCommissions();
   if (activeRegistrySkillId) renderSkillRegistryDetail(registrySkills.find((skill) => skill.id === activeRegistrySkillId));
+}
+
+function invalidateOperatorSession(message, { clearInput = true } = {}) {
+  operatorSessionRevision += 1;
+  sessionStorage.removeItem("totemora_operator_token");
+  operatorAuthenticated = false;
+  if (clearInput) $("operator-token").value = "";
+  for (const url of contentIllustrationUrls.values()) URL.revokeObjectURL(url);
+  contentIllustrationUrls.clear();
+  contentWorks = [];
+  barkTargets = [];
+  skillCommissions = [];
+  skillTrialRuns = [];
+  editingBarkTargetId = undefined;
+  clearProtectedDevelopmentUi();
+  setOperatorAuthState("invalid", message);
+  $("skill-commissions").innerHTML = '<p class="skill-empty">操作员登录已失效；重新登录后显示能力委任。</p>';
+  $("service-observatory").innerHTML = '<p class="observatory-empty">任务状态已锁定；重新登录后刷新。</p>';
+  $("evidence-stream").innerHTML = '<p class="observatory-empty">受保护证据已锁定；重新登录后刷新。</p>';
+  $("bark-target-form").reset();
+  $("bark-editor-title").textContent = "接入一台设备";
+  $("bark-target-summary").textContent = "操作员登录已失效；重新登录后管理通知设备。";
+  $("bark-target-list").innerHTML = '<p class="notification-empty">设备信息已锁定。</p>';
+  $("bark-target-audit").innerHTML = '<p class="notification-empty">审计记录已锁定。</p>';
+  $("bark-target-form-status").textContent = "";
+  $("bark-status").textContent = "Bark 状态等待登录";
+  $("finance-bark-status").textContent = "财经 Bark 路由等待登录";
+  $("intelligence-preferences").reset();
+  $("finance-preferences").reset();
+  $("content-create-form").reset();
+  $("content-schedule-form").reset();
+  $("content-summary").textContent = "操作员登录已失效";
+  $("content-works").innerHTML = '<div class="content-empty"><b>作品案卷已锁定</b><p>重新登录后读取部落作品。</p></div>';
+  $("content-create-status").textContent = "";
+  $("content-schedule-status").textContent = "";
+  if (activeRegistrySkillId) renderSkillRegistryDetail(registrySkills.find((skill) => skill.id === activeRegistrySkillId));
+}
+
+async function validateOperatorSession({ closeOnSuccess = false } = {}) {
+  const submit = $("operator-login-submit");
+  const candidateToken = $("operator-token").value.trim();
+  submit.disabled = true;
+  $("operator-login-status").className = "operator-login-status";
+  $("operator-login-status").textContent = "正在向服务器验证…";
+  try {
+    if (!candidateToken) throw new Error("请输入操作员 Token");
+    await api("/api/operator/session", { headers: { authorization: `Bearer ${candidateToken}` } });
+    if ($("operator-token").value.trim() !== candidateToken) throw new Error("Token 已更改，请重新验证");
+    sessionStorage.setItem("totemora_operator_token", candidateToken);
+    operatorSessionRevision += 1;
+    setOperatorAuthState("authenticated");
+    await refreshProtectedViews();
+    if (closeOnSuccess) $("operator-dialog").close();
+    return true;
+  } catch (error) {
+    invalidateOperatorSession(error.status === 401 ? "Token 不正确，请从服务器的 .totemora/operator-token 重新复制。" : error.message);
+    return false;
+  } finally {
+    submit.disabled = false;
+  }
+}
+
+$("operator-login-open").addEventListener("click", openOperatorDialog);
+$("operator-dialog-close").addEventListener("click", () => $("operator-dialog").close());
+$("operator-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  void validateOperatorSession({ closeOnSuccess: true });
 });
+$("operator-logout").addEventListener("click", () => {
+  invalidateOperatorSession("已退出登录；受保护操作已锁定。");
+  setOperatorAuthState("anonymous", "已退出登录；受保护操作已锁定。");
+  void refreshProtectedViews();
+});
+$("operator-token").addEventListener("input", () => {
+  sessionStorage.removeItem("totemora_operator_token");
+  if (operatorAuthenticated) invalidateOperatorSession("Token 已更改，验证后才会重新解锁。", { clearInput: false });
+  else setOperatorAuthState("anonymous", "验证新 Token 后才会保存。");
+});
+if ($("operator-token").value.trim()) void validateOperatorSession();
 
 $("refresh-observatory").addEventListener("click", () => void loadObservatory());
 
@@ -88,7 +183,7 @@ async function loadObservatory({ quiet = false } = {}) {
     let serviceTasks = [];
     let actions = [];
     let protectedEvidenceError;
-    if ($("operator-token").value.trim()) {
+    if (operatorAuthenticated) {
       try {
         [{ tasks: serviceTasks }, { actions }] = await Promise.all([
           operatorApi("/api/service-tasks?limit=200"), operatorApi("/api/actions"),
@@ -151,7 +246,7 @@ function renderObservatorySummary(latestStatus, serviceData, dossiers, assets, s
   const activeTasks = serviceTasks.filter((task) => activeStatuses.has(task.status)).length;
   const provenAssets = assets.filter((asset) => asset.evidence?.length).length;
   const observedGrowth = dossiers.filter((item) => item.portrait?.evolution?.active_effect).length;
-  const taskValue = !$("operator-token").value.trim() ? "待解锁" : protectedEvidenceError ? "读取失败" : String(activeTasks);
+  const taskValue = !operatorAuthenticated ? "待解锁" : protectedEvidenceError ? "读取失败" : String(activeTasks);
   $("observatory-summary").innerHTML = `<dl class="observatory-ledger">
     <div><dt>驻地</dt><dd>${latestStatus.settlement === "ready" ? "正常值守" : escapeHtml(latestStatus.settlement)}</dd></div>
     <div><dt>可用成员</dt><dd>${latestStatus.active_members} 名</dd></div>
@@ -164,7 +259,7 @@ function renderObservatorySummary(latestStatus, serviceData, dossiers, assets, s
 function renderServiceObservatory(serviceData, tasks, protectedEvidenceError) {
   const membersById = new Map(tribe.members.map((member) => [member.id, member]));
   const activeStatuses = new Set(["queued", "routing", "running", "waiting_approval", "waiting_external"]);
-  const hasTaskEvidence = Boolean($("operator-token").value.trim()) && !protectedEvidenceError;
+  const hasTaskEvidence = operatorAuthenticated && !protectedEvidenceError;
   $("service-observatory").innerHTML = serviceData.services.map((service) => {
     const binding = serviceData.bindings.find((item) => item.service_id === service.id);
     const specialist = membersById.get(binding?.specialist_member_id);
@@ -175,14 +270,14 @@ function renderServiceObservatory(serviceData, tasks, protectedEvidenceError) {
     const completed = serviceTasks.filter((task) => task.status === "completed").length;
     const failed = serviceTasks.filter((task) => task.status === "failed").length;
     const state = !hasTaskEvidence ? "unknown" : active ? "working" : latest?.status === "failed" ? "attention" : "waiting";
-    const stateLabel = !$("operator-token").value.trim()
+    const stateLabel = !operatorAuthenticated
       ? "任务状态受保护"
       : protectedEvidenceError
         ? "任务状态不可用"
         : active
           ? `${active} 项执行中`
           : latest?.status === "failed" ? "最近任务需关注" : "待命";
-    const taskEvidence = !$("operator-token").value.trim()
+    const taskEvidence = !operatorAuthenticated
       ? "输入操作员 Token 后显示任务统计"
       : protectedEvidenceError
         ? `任务证据读取失败：${escapeHtml(protectedEvidenceError)}`
@@ -224,7 +319,7 @@ function renderEvidenceStream(services, tasks, actions, dossiers, protectedEvide
       tone: observatoryTone(action.status),
     })),
   ].sort((left, right) => right.at.localeCompare(left.at)).slice(0, 8);
-  const unlockNote = !$("operator-token").value.trim()
+  const unlockNote = !operatorAuthenticated
     ? '<p class="evidence-unlock">输入操作员 Token 后，任务阶段与资产动作也会加入这条证据流。</p>'
     : protectedEvidenceError
       ? `<p class="evidence-unlock error">受保护证据读取失败：${escapeHtml(protectedEvidenceError)}。请检查 Token 后刷新。</p>`
@@ -257,7 +352,7 @@ function formatObservatoryTime(value) {
 
 async function loadSkillCommissions() {
   const container = $("skill-commissions");
-  if (!$("operator-token").value.trim()) {
+  if (!operatorAuthenticated) {
     container.innerHTML = '<p class="skill-empty">输入操作员 Token 后显示能力委任。对话、试用和激活记录默认不公开。</p>';
     return;
   }
@@ -342,6 +437,10 @@ function renderSkillRegistryDetail(skill) {
     detail.innerHTML = '<div class="skill-registry-placeholder"><h3>选择一个 Skill</h3><p>查看文件组成、content hash、Doctor 结果和现有治理证据。</p></div>';
     return;
   }
+  const defaultFile = skill.files.find((file) => file.path === "SKILL.md") || skill.files[0];
+  if (!activeRegistryFilePath || !skill.files.some((file) => file.path === activeRegistryFilePath)) {
+    activeRegistryFilePath = defaultFile?.path;
+  }
   const validation = skill.validation;
   const binding = skill.binding.member_ids.length
     ? skill.binding.member_ids.map(memberLabel).join(" · ")
@@ -375,6 +474,10 @@ function renderSkillRegistryDetail(skill) {
     <div><span>最近委任</span><strong>${commission ? escapeHtml(skillStatusLabel(commission.status)) : "无案卷"}</strong><small>${commission ? `<code>${escapeHtml(commission.id)}</code><br>${escapeHtml(formatObservatoryTime(commission.updated_at))}` : "还没有 Commission 证据"}</small></div>
     <div><span>最近试炼</span><strong>${trials.accepted}/${trials.total} 通过</strong><small>${trials.total ? `${trials.rejected} 次未通过${trials.last_at ? ` · ${escapeHtml(formatObservatoryTime(trials.last_at))}` : ""}` : "尚无试炼证据"}</small></div>
   </div>${commission ? `<div class="skill-detail-actions"><a href="#skill-council" data-open-skill-commission="${escapeHtml(commission.id)}">查看委任 / 试炼</a></div>` : ""}</div>`;
+
+  if (activeRegistryFilePath) {
+    void loadSkillFilePreview(skill.id, activeRegistryFilePath, { interactive: false });
+  }
 }
 
 function renderSkillFileBrowser(skill) {
@@ -392,7 +495,7 @@ function renderSkillFileBrowser(skill) {
   return `<div class="skill-package-browser">
     <nav class="skill-file-tree" aria-label="${escapeHtml(skill.name)} 文件目录">${renderSkillTreeNode(tree)}</nav>
     <section id="skill-file-preview" class="skill-file-preview" aria-live="polite">
-      <div class="skill-file-preview-empty"><strong>选择文件查看内容</strong><p>${$("operator-token").value.trim() ? "可预览 SKILL.md、配置、脚本和参考文本；资产与敏感文件只显示目录信息。" : "先在页面顶部输入操作员 Token，再选择文本文件。"}</p></div>
+      <div class="skill-file-preview-empty"><strong>选择文件查看内容</strong><p>${operatorAuthenticated ? "可预览 SKILL.md、配置、脚本和参考文本；资产与敏感文件只显示目录信息。" : "先从页面右上角完成操作员登录，再选择文本文件。"}</p></div>
     </section>
   </div>`;
 }
@@ -403,12 +506,17 @@ function renderSkillTreeNode(node) {
   return `<ul>${directories.map(([name, child]) => `<li class="skill-directory"><span><b>目录</b>${escapeHtml(name)}</span>${renderSkillTreeNode(child)}</li>`).join("")}${files.map((file) => `<li><button type="button" data-skill-file="${escapeHtml(file.path)}" aria-pressed="${file.path === activeRegistryFilePath}"><b>${escapeHtml(fileKindLabel(file.kind))}</b><span>${escapeHtml(file.path.split("/").at(-1))}</span><small>${formatFileSize(file.size)}</small></button></li>`).join("")}</ul>`;
 }
 
-async function loadSkillFilePreview(skillId, filePath) {
+async function loadSkillFilePreview(skillId, filePath, { interactive = false } = {}) {
   const preview = $("skill-file-preview");
   if (!preview) return;
   activeRegistryFilePath = filePath;
-  preview.innerHTML = `<div class="skill-file-preview-empty"><strong>正在读取 ${escapeHtml(filePath)}</strong><p>内容来自当前仓库快照。</p></div>`;
   document.querySelectorAll("[data-skill-file]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.skillFile === filePath)));
+  if (!operatorAuthenticated) {
+    preview.innerHTML = `<div class="skill-file-preview-empty"><strong>${escapeHtml(filePath)}</strong><p>完成右上角操作员登录后，可直接预览文件正文与脚本内容。</p></div>`;
+    if (interactive) openOperatorDialog();
+    return;
+  }
+  preview.innerHTML = `<div class="skill-file-preview-empty"><strong>正在读取 ${escapeHtml(filePath)}</strong><p>内容来自当前仓库快照。</p></div>`;
   try {
     const file = await operatorApi(`/api/skills/registry/${encodeURIComponent(skillId)}/file?path=${encodeURIComponent(filePath)}`);
     if (activeRegistrySkillId !== skillId || activeRegistryFilePath !== filePath) return;
@@ -416,7 +524,7 @@ async function loadSkillFilePreview(skillId, filePath) {
   } catch (error) {
     if (activeRegistrySkillId !== skillId || activeRegistryFilePath !== filePath) return;
     preview.innerHTML = `<div class="skill-file-preview-empty error"><strong>无法预览 ${escapeHtml(filePath)}</strong><p>${escapeHtml(error.message)}</p></div>`;
-    if (!$("operator-token").value.trim()) $("operator-token").focus();
+    if (interactive && !operatorAuthenticated) openOperatorDialog();
   }
 }
 
@@ -442,15 +550,87 @@ function formatFileSize(value) {
   return `${(value / 1024).toFixed(value < 10 * 1024 ? 1 : 0)} KB`;
 }
 
+function openCreateSkillDialog() {
+  if (!operatorAuthenticated) {
+    openOperatorDialog();
+    return;
+  }
+  const status = $("create-skill-status");
+  if (status) {
+    status.className = "operator-login-status";
+    status.textContent = "创建 Skill 需要已验证的操作员身份。";
+  }
+  $("create-skill-dialog").showModal();
+  window.setTimeout(() => $("new-skill-id")?.focus(), 0);
+}
+
 $("refresh-skill-registry").addEventListener("click", () => void loadSkillRegistry({ keepSelection: true, refresh: true }));
+$("create-skill-button")?.addEventListener("click", openCreateSkillDialog);
+$("create-skill-index-button")?.addEventListener("click", openCreateSkillDialog);
+$("create-skill-dialog-close")?.addEventListener("click", () => $("create-skill-dialog").close());
+$("create-skill-cancel")?.addEventListener("click", () => $("create-skill-dialog").close());
+
+$("create-skill-form")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const idInput = $("new-skill-id");
+  const nameInput = $("new-skill-name");
+  const descInput = $("new-skill-description");
+  const contentInput = $("new-skill-content");
+  const status = $("create-skill-status");
+  const submit = $("create-skill-submit");
+
+  const id = idInput.value.trim();
+  const name = nameInput.value.trim();
+  const description = descInput.value.trim();
+  const content = contentInput.value.trim();
+
+  if (!id || !name || !description) {
+    status.className = "operator-login-status error";
+    status.textContent = "请完整填写 Skill ID、名称与描述。";
+    return;
+  }
+
+  submit.disabled = true;
+  status.className = "operator-login-status";
+  status.textContent = "正在生成 Skill 包并写入仓库…";
+
+  try {
+    const created = await operatorApi("/api/skills/registry", {
+      method: "POST",
+      body: JSON.stringify({ id, name, description, content }),
+    });
+    status.className = "operator-login-status success";
+    status.textContent = "创建成功！";
+    $("create-skill-dialog").close();
+    $("create-skill-form").reset();
+
+    await loadSkillRegistry({ keepSelection: false, refresh: true });
+    activeRegistrySkillId = created.id;
+    activeRegistryFilePath = undefined;
+    renderSkillRegistryList();
+    renderSkillRegistryDetail(registrySkills.find((skill) => skill.id === activeRegistrySkillId));
+    if (skillsRoute) {
+      const url = new URL(location.href);
+      url.searchParams.set("skill", created.id);
+      history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+    }
+  } catch (error) {
+    status.className = "operator-login-status error";
+    status.textContent = `创建失败：${error.message}`;
+  } finally {
+    submit.disabled = false;
+  }
+});
 
 $("skill-registry-list").addEventListener("click", (event) => {
   const button = event.target.closest("[data-registry-skill]");
   if (!button) return;
   activeRegistrySkillId = button.dataset.registrySkill;
-  activeRegistryFilePath = undefined;
+  const selected = registrySkills.find((skill) => skill.id === activeRegistrySkillId);
+  const defaultFile = selected?.files.find((file) => file.path === "SKILL.md") || selected?.files[0];
+  activeRegistryFilePath = defaultFile?.path;
   renderSkillRegistryList();
-  renderSkillRegistryDetail(registrySkills.find((skill) => skill.id === activeRegistrySkillId));
+  renderSkillRegistryDetail(selected);
   if (skillsRoute) {
     const url = new URL(location.href);
     url.searchParams.set("skill", activeRegistrySkillId);
@@ -469,16 +649,16 @@ $("skill-registry-list").addEventListener("click", (event) => {
 $("skill-registry-detail").addEventListener("click", async (event) => {
   const file = event.target.closest("[data-skill-file]");
   if (file) {
-    await loadSkillFilePreview(activeRegistrySkillId, file.dataset.skillFile);
+    await loadSkillFilePreview(activeRegistrySkillId, file.dataset.skillFile, { interactive: true });
     return;
   }
   const link = event.target.closest("[data-open-skill-commission]");
   if (!link) return;
-  if (!$("operator-token").value.trim()) {
+  if (!operatorAuthenticated) {
     event.preventDefault();
     $("skill-registry-live").classList.add("error");
     $("skill-registry-live").textContent = "输入操作员 Token 后才能查看委任和试炼证据";
-    $("operator-token").focus();
+    openOperatorDialog();
     return;
   }
   await loadSkillCommissions();
@@ -818,7 +998,7 @@ async function loadIntelligence() {
   const [{ briefs }, pool] = await Promise.all([api("/api/intelligence"), api("/api/intelligence/candidates")]);
   renderCandidatePool(pool, "candidate-summary", "intelligence-candidates");
   renderBriefs(briefs, "intelligence-history", "听风尚未带回情报。");
-  if ($("operator-token").value) {
+  if (operatorAuthenticated) {
     try {
       const bark = await operatorApi("/api/intelligence/bark?health=1");
       renderBarkStatus("bark-status", bark, "AI");
@@ -854,7 +1034,7 @@ function renderBarkStatus(elementId, bark, domainLabel) {
 
 async function loadBarkTargets() {
   const summary = $("bark-target-summary");
-  if (!$("operator-token").value.trim()) {
+  if (!operatorAuthenticated) {
     barkTargets = [];
     summary.className = "notification-summary";
     summary.textContent = "输入操作员 Token 后可查看、添加和测试通知设备。";
@@ -1124,7 +1304,7 @@ async function loadFinance() {
   renderCandidatePool(pool, "finance-candidate-summary", "finance-candidates");
   renderBriefs(briefs, "finance-history", "观潮尚未完成首次巡查。");
   $("finance-source-ledger").innerHTML = sources.map((source) => `<div class="source-row"><strong>${externalLink(source.url, source.name)}</strong><span class="source-state ${escapeHtml(source.status)}">${escapeHtml(source.tier)} · ${escapeHtml(source.status)}</span><p>${escapeHtml(source.summary)}</p><small>${source.last_success_at ? `上次成功 ${escapeHtml(source.last_success_at)}` : escapeHtml(source.error || "等待接入")}</small><small>${escapeHtml(source.availability)}</small></div>`).join("");
-  if ($("operator-token").value) {
+  if (operatorAuthenticated) {
     try { renderBarkStatus("finance-bark-status", await operatorApi("/api/finance/bark?health=1"), "财经"); }
     catch (error) {
       $("finance-bark-status").className = "channel-status error";
@@ -1257,7 +1437,7 @@ async function loadContentStudio() {
     .filter((item) => item.scores.confidence >= 0.6)
     .slice(0, 30)
     .map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.headline)} · ${Math.round(item.scores.total * 100)}分</option>`).join("");
-  if (!$("operator-token").value.trim()) {
+  if (!operatorAuthenticated) {
     contentWorks = [];
     $("content-summary").textContent = "输入操作员 Token 后查看未发布作品与配图";
     $("content-works").innerHTML = '<div class="content-empty"><b>创作证据已保护</b><p>作品正文、提示词、失败原因和配图只对操作员开放。</p></div>';
@@ -1312,8 +1492,10 @@ async function hydrateContentIllustrations() {
     try {
       let url = contentIllustrationUrls.get(id);
       if (!url) {
-        const response = await operatorFetch(`/api/content/works/${encodeURIComponent(id)}/illustration`);
-        url = URL.createObjectURL(await response.blob());
+        const protectedResponse = await operatorFetch(`/api/content/works/${encodeURIComponent(id)}/illustration`);
+        const blob = await protectedResponse.response.blob();
+        assertOperatorSession(protectedResponse);
+        url = URL.createObjectURL(blob);
         contentIllustrationUrls.set(id, url);
       }
       const image = document.createElement("img");
@@ -1382,8 +1564,10 @@ $("content-works").addEventListener("click", async (event) => {
       return;
     }
     if (button.matches("[data-download-illustration]")) {
-      const response = await operatorFetch(`/api/content/works/${encodeURIComponent(work.id)}/illustration`);
-      const url = URL.createObjectURL(await response.blob());
+      const protectedResponse = await operatorFetch(`/api/content/works/${encodeURIComponent(work.id)}/illustration`);
+      const blob = await protectedResponse.response.blob();
+      assertOperatorSession(protectedResponse);
+      const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url; link.download = `${work.id}-illustration`; link.click();
       URL.revokeObjectURL(url);
@@ -1510,7 +1694,7 @@ async function loadHistory() {
 }
 
 async function loadDevelopmentHistory() {
-  if (!$("operator-token").value.trim()) {
+  if (!operatorAuthenticated) {
     clearProtectedDevelopmentUi();
     return;
   }
@@ -1830,23 +2014,51 @@ function renderError(message) { $("phase").textContent = "FAILED"; $("run-messag
 function explainFailure(message = "") { return message.includes("stop_reason=max_tokens") || message.includes("returned no text content") ? `${message}。模型输出预算可能耗尽；DeepSeek 建议至少 6000 Token 后重试。` : message; }
 function numberValue(id) { const value = Number($(id).value); return Number.isFinite(value) ? value : undefined; }
 function lines(id) { return $(id).value.split("\n").map((value) => value.trim()).filter(Boolean); }
-async function api(url, options) { const response = await fetch(url, options); const data = await response.json(); if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`); return data; }
+async function api(url, options) {
+  const response = await fetch(url, options);
+  const data = await response.json();
+  if (!response.ok) {
+    const error = new Error(data.error || `HTTP ${response.status}`);
+    error.status = response.status;
+    throw error;
+  }
+  return data;
+}
 async function operatorApi(url, options = {}) {
   const token = $("operator-token").value.trim();
+  const revision = operatorSessionRevision;
   if (!token) throw new Error("请输入操作员 Token");
   const headers = { "content-type": "application/json", authorization: `Bearer ${token}`, ...(options.headers || {}) };
-  return api(url, { ...options, headers });
+  try {
+    const result = await api(url, { ...options, headers });
+    if (!operatorAuthenticated || revision !== operatorSessionRevision) throw new Error("操作员登录状态已变化，请重试");
+    return result;
+  } catch (error) {
+    if (error.status === 401) invalidateOperatorSession("Token 已失效，请重新登录。");
+    throw error;
+  }
 }
 async function operatorFetch(url, options = {}) {
   const token = $("operator-token").value.trim();
+  const revision = operatorSessionRevision;
   if (!token) throw new Error("请输入操作员 Token");
   const response = await fetch(url, { ...options, headers: { authorization: `Bearer ${token}`, ...(options.headers || {}) } });
   if (!response.ok) {
     let message = `HTTP ${response.status}`;
     try { message = (await response.json()).error || message; } catch {}
-    throw new Error(message);
+    if (response.status === 401) invalidateOperatorSession("Token 已失效，请重新登录。");
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
   }
-  return response;
+  const protectedResponse = { response, revision, token };
+  assertOperatorSession(protectedResponse);
+  return protectedResponse;
+}
+function assertOperatorSession(protectedResponse) {
+  if (!operatorAuthenticated || protectedResponse.revision !== operatorSessionRevision || protectedResponse.token !== $("operator-token").value.trim()) {
+    throw new Error("操作员登录状态已变化，请重试");
+  }
 }
 function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, (char) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", "'":"&#39;", "\"":"&quot;" })[char]); }
 function externalLink(value, label) {

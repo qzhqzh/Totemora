@@ -25,6 +25,10 @@ test("exposes tribe and completes a playground run", async () => {
     version: "0.12.0-evidence-skill-core", active_members: 7,
     capabilities: { inspect: "enabled", change: "git_flow_existing_changes", specialist_self_review: "enabled", member_chat: "mentor_escalation_v1" },
   });
+  expect((await app.fetch(new Request("http://local/api/operator/session"))).status).toBe(401);
+  const operatorSession = await app.fetch(new Request("http://local/api/operator/session", { headers: authorized() }));
+  expect(operatorSession.status).toBe(200);
+  expect(await operatorSession.json()).toEqual({ authenticated: true });
   const tribeData = await (await app.fetch(new Request("http://local/api/tribe"))).json();
   expect(tribeData.members.filter((member: any) => !["inactive", "retired"].includes(member.status))).toHaveLength(7);
   expect(tribeData.members.find((member: any) => member.id === "deepseek_reasoner").persona).toContain("深思");
@@ -502,7 +506,7 @@ test("Skill commission API keeps conversational drafts private and durable", asy
   const dataDir = await mkdtemp(join(tmpdir(), "totemora-skill-api-"));
   const provider: AgentProvider = { async generate() { return { content: JSON.stringify({
     ready: true, reply: "草案已形成，等待校验。", title: "Git 范围检查",
-    goal: "Git 专员先核对授权范围", skill_id: "git-change-management",
+    goal: "Git 专员先核对授权范围", skill_id: "git-flow-release",
     target_member_id: "deepseek_git_steward", target_service_id: "git.flow",
     risk: "repository_mutation", trigger: "Git Flow 委任",
     instructions: ["读取完整状态", "逐项核对授权文件"],
@@ -521,7 +525,7 @@ test("Skill commission API keeps conversational drafts private and durable", asy
   }));
   expect(createdResponse.status).toBe(201);
   const created = await createdResponse.json();
-  expect(created).toMatchObject({ status: "draft", package: { version: 4, status: "draft" } });
+  expect(created).toMatchObject({ status: "draft", package: { version: 5, status: "draft" } });
   const validated = await app.fetch(new Request(`http://local/api/skills/commissions/${created.id}/validate`, {
     method: "POST", headers: authorized(), body: "{}",
   }));
@@ -554,13 +558,26 @@ test("Skill registry API exposes repository-backed metadata without accepting se
     operatorToken: "operator-secret",
     createProviderRegistry: () => ({ get: () => new PlaygroundProvider() }),
   });
+  expect((await app.fetch(new Request("http://local/api/skills/registry", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id: "created-skill", name: "新建测试技能", description: "用于测试 API 创建" }),
+  }))).status).toBe(401);
+
+  const createdSkillRes = await app.fetch(new Request("http://local/api/skills/registry", {
+    method: "POST",
+    headers: { ...authorized(), "content-type": "application/json" },
+    body: JSON.stringify({ id: "created-skill", name: "新建测试技能", description: "用于测试 API 创建" }),
+  }));
+  expect(createdSkillRes.status).toBe(201);
+  const createdSkillJson = await createdSkillRes.json();
+  expect(createdSkillJson.id).toBe("created-skill");
+  expect(createdSkillJson.name).toBe("新建测试技能");
+
   const listed = await app.fetch(new Request("http://local/api/skills/registry"));
   expect(listed.status).toBe(200);
   const listedBody = await listed.json();
-  expect(listedBody).toMatchObject({
-    root: "skills",
-    skills: [{ id: "sample-skill", path: "skills/sample-skill", status: "warning" }],
-  });
+  expect(listedBody.skills.map((s: { id: string }) => s.id)).toContain("created-skill");
   const detail = await app.fetch(new Request("http://local/api/skills/registry/sample-skill"));
   expect(await detail.json()).toMatchObject({
     id: "sample-skill", files: [{ path: "SKILL.md", kind: "manifest" }],

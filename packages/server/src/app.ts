@@ -692,6 +692,11 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
           });
         }
 
+        if (request.method === "GET" && url.pathname === "/api/operator/session") {
+          requireOperator(request, options.operatorToken);
+          return json({ authenticated: true });
+        }
+
         if (request.method === "GET" && url.pathname === "/api/services") {
           await ensureServiceBindings();
           return json({ services: SPECIALIST_SERVICES, bindings: specialistTasks.bindings() });
@@ -728,6 +733,28 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
           catch (error) {
             console.error(JSON.stringify({ event: "skill_registry_scan_failed", error: error instanceof Error ? error.message : String(error) }));
             return json({ error: "Skill registry scan failed" }, 500);
+          }
+        }
+
+        if (request.method === "POST" && url.pathname === "/api/skills/registry") {
+          requireOperator(request, options.operatorToken);
+          try {
+            const input = await request.json() as { id?: string; name?: string; description?: string; content?: string };
+            if (!input.id || typeof input.id !== "string") return json({ error: "Skill id is required" }, 400);
+            const created = await skillRegistry.create({
+              id: input.id,
+              name: input.name,
+              description: input.description,
+              content: input.content,
+            });
+            return json(created, 201);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Failed to create Skill";
+            if (["Invalid Skill id", "Skill already exists", "Skill id is required"].includes(message)) {
+              return json({ error: message }, 400);
+            }
+            console.error(JSON.stringify({ event: "skill_creation_failed", error: message }));
+            return json({ error: message }, 500);
           }
         }
 

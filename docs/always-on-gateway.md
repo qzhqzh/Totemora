@@ -1,8 +1,13 @@
 # Gateway 常驻运行
 
-开发时可直接执行 `bun run dev:web`；服务器长期驻扎建议交给用户级 systemd，而不是
-依赖终端、`nohup` 或另一个 Agent 会话。仓库提供
-`ops/systemd/totemora-gateway.service` 模板，失败后 5 秒自动拉起。
+开发时可直接执行 `bun run dev:web`。该命令使用 Bun watch mode：被运行时导入的
+TypeScript/JavaScript 源码变化后自动重启 Gateway，不需要人工执行 `systemctl restart`。
+`packages/web/src` 下的静态页面按请求从磁盘读取并带 `Cache-Control: no-store`，修改后
+只需刷新浏览器。需要稳定、非监听式启动时使用 `bun run start:web`。
+
+服务器长期驻扎建议交给用户级 systemd，而不是依赖终端、`nohup` 或另一个 Agent
+会话。仓库提供 `ops/systemd/totemora-gateway.service` 模板；它运行 `dev:web`，因此
+同时具备源码自动重载和进程异常后 5 秒自动拉起。
 
 ```bash
 mkdir -p ~/.config/systemd/user ~/.config/totemora
@@ -42,3 +47,13 @@ journalctl --user -u totemora-gateway -n 100 --no-pager
 Bark 继续由 `compose.bark.yaml` 的 `restart: unless-stopped` 管理，两者不共享进程
 生命周期。Gateway 重启时，已完成外部动作依靠幂等日志避免重复执行；当前正在运行的
 模型任务会转为可安全重试的失败，后续版本再引入阶段级 checkpoint 恢复。
+
+## 热重载边界
+
+- `packages/server`、被其导入的 workspace 包及依赖源码：保存后自动重载。
+- `packages/web/src/index.html`、`app.js`、`styles.css`：无需重启，刷新浏览器即生效。
+- `configs/`、`skills/`、`.env` 与 systemd unit：它们不是 JavaScript import graph 的
+  一部分。Skill Registry 可在页面点击“重新扫描”；配置和环境变量变化仍需执行一次
+  `systemctl --user restart totemora-gateway`。
+- watch mode 是自动进程重启，不是保存内存对象的 HMR。任务和治理状态继续以 SQLite
+  为真源；正在执行的模型请求不会跨重载续跑。

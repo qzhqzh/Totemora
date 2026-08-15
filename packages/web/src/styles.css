@@ -9,7 +9,27 @@ header { padding:44px 24px 28px; display:flex; justify-content:space-between; al
 .primary-nav a { display:flex; min-height:44px; align-items:center; padding:8px 12px; border:1px solid transparent; color:var(--muted); text-decoration:none; white-space:nowrap; }
 .primary-nav a:hover { color:var(--ink); border-color:var(--line); }
 .primary-nav a[aria-current="page"] { color:var(--amber); border-color:var(--amber); background:#1b1812; }
-.operator { display:grid; gap:8px; justify-items:end; }.operator input { width:280px; padding:7px 9px; font-size:12px; }.token-input { -webkit-text-security:disc; }
+.header-actions { display:grid; gap:8px; justify-items:end; }
+.operator-login { display:grid; min-width:176px; min-height:48px; gap:2px; justify-items:start; padding:8px 12px; text-align:left; }
+.operator-login strong { color:var(--ink); font-size:12px; }
+.operator-auth-state { color:var(--amber); font-size:10px; font-weight:400; letter-spacing:.08em; }
+.operator-login.authenticated { border-color:var(--green); }
+.operator-login.authenticated .operator-auth-state { color:var(--green); }
+.operator-dialog { width:min(480px,calc(100vw - 32px)); padding:0; border:1px solid var(--line); background:var(--paper); color:var(--ink); }
+.operator-dialog::backdrop { background:rgba(5,7,5,.78); }
+.operator-dialog form { display:grid; gap:20px; padding:24px; }
+.operator-dialog-head { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.operator-dialog-head h2 { margin:0; font:600 24px/1.3 Georgia,serif; }
+.operator-dialog-head button { min-height:44px; padding:8px 12px; }
+.operator-dialog p,.operator-login-status { margin:0; color:var(--muted); }
+.operator-token-help { border:1px solid var(--line); padding:12px; }
+.operator-token-help summary { color:var(--ink); cursor:pointer; }
+.operator-token-help p { margin-top:8px; font-size:11px; }
+.operator-token-help code { color:var(--amber); overflow-wrap:anywhere; }
+.operator-login-status { min-height:24px; font-size:11px; }
+.operator-login-status.success { color:var(--green); }
+.operator-login-status.error { color:#e87968; }
+.operator-dialog-actions { display:flex; justify-content:flex-end; gap:12px; }
 h1 { margin:5px 0 0; font:700 clamp(30px,5vw,54px)/1.05 Georgia,serif; letter-spacing:.05em; }
 .eyebrow,.section-title span,small { color:var(--amber); font-size:12px; letter-spacing:.12em; }
 .status { color:var(--green); }
@@ -119,8 +139,10 @@ main { padding:24px; display:grid; grid-template-columns:1fr 1.3fr; gap:20px; }
 .skill-registry-summary strong { margin-top:4px; font:600 20px/1.3 Georgia,serif; }
 .skill-registry-workspace { display:grid; grid-template-columns:minmax(248px,.72fr) minmax(0,1.28fr); margin-top:24px; border:1px solid var(--line); background:#111411; }
 .skill-registry-index { min-width:0; border-right:1px solid var(--line); }
-.skill-registry-index-head { display:flex; justify-content:space-between; gap:12px; align-items:baseline; padding:16px; border-bottom:1px solid var(--line); }
+.skill-registry-index-head { display:flex; justify-content:space-between; gap:12px; align-items:center; padding:16px; border-bottom:1px solid var(--line); }
 .skill-registry-index-head h3 { margin:0; font:600 18px/1.4 Georgia,serif; }
+.skill-registry-index-actions { display:flex; align-items:center; gap:8px; }
+.skill-mini-create { min-height:28px !important; padding:2px 10px !important; font-size:11px !important; }
 .skill-registry-index-head span { color:var(--muted); font-size:11px; }
 .skill-registry-list { display:grid; }
 .skill-registry-item { display:grid; width:100%; min-height:88px; grid-template-columns:minmax(0,1fr) auto; gap:12px; padding:16px; border:0; border-bottom:1px solid var(--line); background:transparent; color:var(--ink); text-align:left; }
@@ -441,3 +463,4 @@ pre { max-height:420px; overflow:auto; background:#0c0e0c; padding:14px; font-si
 @media(max-width:760px){.benchmark-strategies{grid-template-columns:1fr}.benchmark-strategies div{border-right:0;border-bottom:1px solid var(--line)}.benchmark-strategies div:last-child{border-bottom:0}}
 @media(max-width:760px){.proposal-evidence{grid-template-columns:1fr}.proposal-evidence button{width:100%}}
 @media(max-width:760px){.skill-package-browser{grid-template-columns:1fr}.skill-file-tree{border-right:0;border-bottom:1px solid var(--line)}}
+@media(max-width:760px){.header-actions{width:100%;justify-items:stretch}.operator-login{width:100%}.operator-dialog-actions{display:grid}.operator-dialog-actions button{width:100%}}

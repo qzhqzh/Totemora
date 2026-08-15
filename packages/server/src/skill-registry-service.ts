@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, open, opendir, realpath } from "node:fs/promises";
+import { lstat, mkdir, open, opendir, realpath, writeFile } from "node:fs/promises";
 import { basename, extname, isAbsolute, relative, resolve, sep } from "node:path";
 
 import { StateDatabase } from "./state-database";
@@ -18,6 +18,7 @@ export interface SkillRegistryEntry {
   id: string;
   name: string;
   description: string;
+  tags: string[];
   path: string;
   source: {
     kind: "local";
@@ -77,6 +78,7 @@ interface SkillMetadata {
   id?: string;
   name?: string;
   version?: number;
+  tags?: string[];
   status?: string;
   owner_member_id?: string;
   steward_member_id?: string;
@@ -173,6 +175,64 @@ export class SkillRegistryService {
     return (await this.list()).skills.find((skill) => skill.id === id);
   }
 
+  async create(input: { id: string; name?: string; description?: string; content?: string; tags?: string[] }): Promise<SkillRegistryEntry> {
+    const id = input.id?.trim();
+    if (!id || !SAFE_SKILL_ID.test(id)) throw new Error("Invalid Skill id");
+    const name = input.name?.trim() || id;
+    const description = input.description?.trim() || `Skill package for ${name}`;
+    const customContent = input.content?.trim();
+    const tags = Array.isArray(input.tags)
+      ? [...new Set(input.tags.map((t) => String(t).trim().toLowerCase()).filter(Boolean))]
+      : [];
+
+    await mkdir(this.root, { recursive: true });
+    const targetDir = resolve(this.root, id);
+    assertInside(this.root, targetDir);
+
+    try {
+      const existing = await lstat(targetDir);
+      if (existing) throw new Error("Skill already exists");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+
+    await mkdir(targetDir, { recursive: true });
+
+    const skillMarkdown = [
+      "---",
+      `name: ${id}`,
+      `description: ${description.replace(/\r?\n/g, " ")}`,
+      ...(tags.length ? ["tags:", ...tags.map((t) => `  - ${t}`)] : []),
+      "---",
+      "",
+      `# ${name}`,
+      "",
+      customContent || `> ${description}\n\n## 核心规则\n\n- 明确定义输入与输出边界\n- 遵循确定性验证与安全规范\n`,
+      "",
+    ].join("\n");
+
+    const skillYaml = [
+      "schema_version: 1",
+      `id: ${id}`,
+      `name: ${name}`,
+      "version: 1",
+      "status: candidate",
+      ...(tags.length ? ["tags:", ...tags.map((t) => `  - ${t}`)] : []),
+      "source:",
+      "  kind: local",
+      "  reference: user-created",
+      "",
+    ].join("\n");
+
+    await writeFile(resolve(targetDir, "SKILL.md"), skillMarkdown, "utf8");
+    await writeFile(resolve(targetDir, "skill.yaml"), skillYaml, "utf8");
+
+    this.cache = undefined;
+    const created = await this.get(id);
+    if (!created) throw new Error("Failed to initialize created Skill package");
+    return created;
+  }
+
   async readFile(id: string, filePath: string): Promise<{
     skill_id: string;
     path: string;
@@ -211,7 +271,7 @@ export class SkillRegistryService {
     const files = await collectFiles(directory, root, issues, budget);
     const skillFile = files.find((file) => file.path === "SKILL.md");
     const metadataFile = files.find((file) => file.path === "skill.yaml");
-    let frontmatter: { name?: string; description?: string } = {};
+    let frontmatter: { name?: string; description?: string; tags?: string[] } = {};
     let metadata: SkillMetadata = {};
     let skillMarkdown = "";
     if (!skillFile) {
@@ -248,10 +308,16 @@ export class SkillRegistryService {
       code: "private_source_reference", severity: "warning",
       message: "source.reference 包含私有路径或不可公开信息，已从 Registry 隐藏", file: "skill.yaml",
     });
+    const tags = [...new Set([
+      ...(metadata.tags ?? []),
+      ...(frontmatter.tags ?? []),
+    ])].map((tag) => tag.trim().toLowerCase()).filter(Boolean);
+
     const skill: SkillRegistryEntry = {
       id,
       name: metadata.name?.trim() || titleFromMarkdown(skillMarkdown) || id,
       description: frontmatter.description?.trim() || "未提供 Skill 描述",
+      tags,
       path: relativeDirectory,
       source: {
         kind: "local", root: "skills",
@@ -415,21 +481,23 @@ async function collectFiles(
   return files.sort((left, right) => left.path.localeCompare(right.path));
 }
 
-function parseFrontmatter(source: string, issues: SkillValidationIssue[]): { name?: string; description?: string } {
+function parseFrontmatter(source: string, issues: SkillValidationIssue[]): { name?: string; description?: string; tags?: string[] } {
   const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
   if (!match) {
     addIssue(issues, { code: "missing_frontmatter", severity: "error", message: "SKILL.md 缺少 YAML frontmatter", file: "SKILL.md" });
     return {};
   }
   const values = parseFlatYaml(match[1]!);
+  const tags = parseYamlList(match[1]!, "tags");
   if (!values.name) addIssue(issues, { code: "missing_name", severity: "error", message: "SKILL.md frontmatter 缺少 name", file: "SKILL.md" });
   if (!values.description) addIssue(issues, { code: "missing_description", severity: "error", message: "SKILL.md frontmatter 缺少 description", file: "SKILL.md" });
-  return { name: values.name, description: values.description };
+  return { name: values.name, description: values.description, ...(tags.length ? { tags } : {}) };
 }
 
 function parseSkillMetadata(source: string, issues: SkillValidationIssue[]): SkillMetadata {
   const top = parseFlatYaml(source);
   const nested = parseNestedYaml(source);
+  const tags = parseYamlList(source, "tags");
   const version = Number(top.version);
   if (top.schema_version && top.schema_version !== "1") addIssue(issues, {
     code: "unsupported_schema", severity: "warning", message: `skill.yaml schema_version ${top.schema_version} 尚未声明兼容`, file: "skill.yaml",
@@ -440,12 +508,48 @@ function parseSkillMetadata(source: string, issues: SkillValidationIssue[]): Ski
   return {
     id: top.id, name: top.name,
     ...(Number.isInteger(version) && version > 0 ? { version } : {}),
+    ...(tags.length ? { tags } : {}),
     status: top.status,
     owner_member_id: top.owner_member_id,
     steward_member_id: top.steward_member_id,
     source_kind: nested.source?.kind,
     source_reference: nested.source?.reference,
   };
+}
+
+function parseYamlList(source: string, key: string): string[] {
+  const lines = source.split(/\r?\n/);
+  const results: string[] = [];
+  let inKey = false;
+  for (const line of lines) {
+    const inlineMatch = line.match(new RegExp(`^${key}:\\s*(.+)$`));
+    if (inlineMatch) {
+      const raw = inlineMatch[1]!.trim();
+      if (raw.startsWith("[") && raw.endsWith("]")) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) return parsed.map((item) => String(item).trim()).filter(Boolean);
+        } catch {}
+        return raw.slice(1, -1).split(",").map((item) => item.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
+      }
+      return raw.split(",").map((item) => item.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
+    }
+    const blockHeader = line.match(new RegExp(`^${key}:\\s*$`));
+    if (blockHeader) {
+      inKey = true;
+      continue;
+    }
+    if (inKey) {
+      const itemMatch = line.match(/^ {2,4}-\s*(.+)$/);
+      if (itemMatch) {
+        const item = yamlScalar(itemMatch[1]!);
+        if (item) results.push(item);
+      } else if (line.trim() && !line.startsWith(" ")) {
+        inKey = false;
+      }
+    }
+  }
+  return results;
 }
 
 function parseFlatYaml(source: string): Record<string, string> {
