@@ -1,0 +1,8 @@
+schema_version: 1
+id: prompt-img-sea-girl
+name: 【生图】海边美女提示词
+version: 1
+status: candidate
+source:
+  kind: local
+  reference: user-created
