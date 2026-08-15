@@ -17,7 +17,7 @@ test("automatic Skill trial runs the same member twice and records independent r
     if (!drafting) return { content: JSON.stringify({ outcome: "accepted", rationale: "试用符合边界且不弱于基线", issues: [] }) };
     return { content: JSON.stringify({
       ready: true, reply: "draft", title: "Git evidence", goal: "Bind automatic trial evidence",
-      skill_id: "git-change-management", target_member_id: "deepseek_git_steward",
+      skill_id: "git-flow-release", target_member_id: "deepseek_git_steward",
       target_service_id: "git.flow", risk: "repository_mutation", trigger: "git task",
       instructions: ["one", "two"], boundaries: ["gate"], acceptance_examples: ["a", "b"],
       sources: [], requested_assets: ["git-flow-engine"],
@@ -76,7 +76,7 @@ test("automatic Skill trial preserves an independent rejection without publishin
     if (!drafting) return { content: JSON.stringify({ outcome: "rejected", rationale: "试用扩大了边界", issues: ["unsafe scope"] }) };
     return { content: JSON.stringify({
       ready: true, reply: "draft", title: "Git evidence", goal: "Reject unsafe trial",
-      skill_id: "git-change-management", target_member_id: "deepseek_git_steward",
+      skill_id: "git-flow-release", target_member_id: "deepseek_git_steward",
       target_service_id: "git.flow", risk: "repository_mutation", trigger: "git task",
       instructions: ["one", "two"], boundaries: ["gate"], acceptance_examples: ["a", "b"],
       sources: [], requested_assets: ["git-flow-engine"],
@@ -114,7 +114,7 @@ test("automatic Skill trial rejects invalid enums and conflicting active input",
   const config = await loadLocalConfig({ configDir: resolve(import.meta.dir, "../../../configs/example") });
   const provider: AgentProvider = { async generate() { return { content: JSON.stringify({
     ready: true, reply: "draft", title: "Git evidence", goal: "Input validation",
-    skill_id: "git-change-management", target_member_id: "deepseek_git_steward",
+    skill_id: "git-flow-release", target_member_id: "deepseek_git_steward",
     target_service_id: "git.flow", risk: "repository_mutation", trigger: "git task",
     instructions: ["one", "two"], boundaries: ["gate"], acceptance_examples: ["a", "b"],
     sources: [], requested_assets: ["git-flow-engine"],
@@ -159,7 +159,7 @@ function proposal(goal: string, commissionId?: string, packageDigest?: string): 
     chief_member_id: "deepseek_reasoner", specialist_member_id: "deepseek_git_steward",
     assignment_reason: "能力匹配",
     skill: {
-      id: "git-change-management", version: commissionId ? 4 : 3, digest: commissionId ? "trial-loaded" : "baseline-loaded",
+      id: "git-flow-release", version: commissionId ? 5 : 4, digest: commissionId ? "trial-loaded" : "baseline-loaded",
       ...(commissionId ? { commission_id: commissionId, package_digest: packageDigest } : {}),
     },
     evaluation: { accepted: true, calls: 2, total_tokens: commissionId ? 800 : 1_000, usage_status: "measured", latency_ms: 100 },

@@ -18,7 +18,7 @@ const proposal = {
   policy_version: 1,
   specialist_member_id: "deepseek_git_steward",
   assignment_reason: "Git 提交专员最匹配",
-  skill: { id: "git-change-management", version: 3 },
+  skill: { id: "git-flow-release", version: 3 },
   git_context: { branch: "feat/demo", has_develop: false, unpushed_commits: 0, stash_count: 0 },
   files: ["src/demo.ts"],
   summary: "整理现有改动",

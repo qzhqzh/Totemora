@@ -23,7 +23,7 @@ test("conversation creates, validates, trials, activates and rolls back a govern
       reply: "已形成 Git 提交范围治理草案，等待静态校验。",
       title: "Git 提交范围治理",
       goal: "让执简在 Git Flow 任务中先核对用户授权范围，再形成提交计划。",
-      skill_id: "git-change-management",
+      skill_id: "git-flow-release",
       target_member_id: "deepseek_git_steward",
       target_service_id: "git.flow",
       risk: "repository_mutation",
@@ -41,7 +41,7 @@ test("conversation creates, validates, trials, activates and rolls back a govern
   const draft = await service.addMessage(discovering.id, "目标成员是执简；正例是只提交目标文件，反例是混入无关文件。");
   expect(draft).toMatchObject({
     status: "draft", target_member_id: "deepseek_git_steward", target_service_id: "git.flow",
-    package: { skill_id: "git-change-management", base_version: 3, version: 4, status: "draft" },
+    package: { skill_id: "git-flow-release", base_version: 4, version: 5, status: "draft" },
   });
   expect(draft.package?.skill_md).toContain("不得使用 git add .");
   const trialReady = service.validate(draft.id);
@@ -73,17 +73,17 @@ test("conversation creates, validates, trials, activates and rolls back a govern
   }
   expect(service.proposeActivation(draft.id).status).toBe("activation_proposed");
   const active = service.activate(draft.id, "operator");
-  expect(active).toMatchObject({ status: "active", package: { version: 4, status: "active" } });
+  expect(active).toMatchObject({ status: "active", package: { version: 5, status: "active" } });
   expect(active.package?.digest).toBe(draft.package?.digest);
-  expect(service.activePackage("git-change-management", "deepseek_git_steward", "git.flow")).toMatchObject({
-    digest: active.package?.digest, version: 4,
+  expect(service.activePackage("git-flow-release", "deepseek_git_steward", "git.flow")).toMatchObject({
+    digest: active.package?.digest, version: 5,
   });
   expect(service.rollback(draft.id, "operator")).toMatchObject({
     status: "suspended", package: { status: "rolled_back" },
   });
-  expect(service.activePackage("git-change-management", "deepseek_git_steward", "git.flow")).toBeUndefined();
+  expect(service.activePackage("git-flow-release", "deepseek_git_steward", "git.flow")).toBeUndefined();
   const next = await service.create("继续参考 https://example.com/git-guide 改进同一 Git 能力，但不能复用已经回滚的版本号。");
-  expect(next.package).toMatchObject({ base_version: 3, version: 5 });
+  expect(next.package).toMatchObject({ base_version: 4, version: 6 });
   await rm(dataDir, { recursive: true, force: true });
 });
 
@@ -92,7 +92,7 @@ test("commission refuses arbitrary records that do not prove the commissioned Sk
   const config = await loadLocalConfig({ configDir: resolve(import.meta.dir, "../../../configs/example") });
   const provider: AgentProvider = { async generate() { return { content: JSON.stringify({
     ready: true, reply: "draft", title: "Git evidence", goal: "Bind trial evidence",
-    skill_id: "git-change-management", target_member_id: "deepseek_git_steward",
+    skill_id: "git-flow-release", target_member_id: "deepseek_git_steward",
     target_service_id: "git.flow", risk: "repository_mutation", trigger: "git task",
     instructions: ["one", "two"], boundaries: ["gate"],
     acceptance_examples: ["a", "b"], sources: [], requested_assets: ["git-flow-engine"],
@@ -114,7 +114,7 @@ test("commission rejects sources and permissions invented by the Chief", async (
   const config = await loadLocalConfig({ configDir: resolve(import.meta.dir, "../../../configs/example") });
   const provider: AgentProvider = { async generate() { return { content: JSON.stringify({
     ready: true, reply: "draft", title: "unsafe", goal: "unsafe",
-    skill_id: "git-change-management", target_member_id: "deepseek_git_steward",
+    skill_id: "git-flow-release", target_member_id: "deepseek_git_steward",
     target_service_id: "git.flow", risk: "read_only", trigger: "git task",
     instructions: ["one", "two"], boundaries: ["gate"],
     acceptance_examples: ["a", "b"], sources: ["https://invented.example/skill"],
@@ -131,7 +131,7 @@ test("commission rejects a target member without the service capability", async 
   const config = await loadLocalConfig({ configDir: resolve(import.meta.dir, "../../../configs/example") });
   const provider: AgentProvider = { async generate() { return { content: JSON.stringify({
     ready: true, reply: "draft", title: "Git mismatch", goal: "Reject an ineligible target",
-    skill_id: "git-change-management", target_member_id: "qwen_worker",
+    skill_id: "git-flow-release", target_member_id: "qwen_worker",
     target_service_id: "git.flow", risk: "repository_mutation", trigger: "git task",
     instructions: ["one", "two"], boundaries: ["gate"],
     acceptance_examples: ["a", "b"], sources: [], requested_assets: [],
@@ -150,7 +150,7 @@ test("commission requires the service runtime asset even when the Chief omits it
   target.tools = (target.tools ?? []).filter((tool) => tool !== "git-flow-engine");
   const provider: AgentProvider = { async generate() { return { content: JSON.stringify({
     ready: true, reply: "draft", title: "Git asset mismatch", goal: "Reject missing runtime asset",
-    skill_id: "git-change-management", target_member_id: "qwen_worker",
+    skill_id: "git-flow-release", target_member_id: "qwen_worker",
     target_service_id: "git.flow", risk: "repository_mutation", trigger: "git task",
     instructions: ["one", "two"], boundaries: ["gate"],
     acceptance_examples: ["a", "b"], sources: [], requested_assets: [],

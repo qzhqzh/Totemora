@@ -5,6 +5,7 @@ import { StateDatabase } from "./state-database";
 
 export interface ActiveSkillOverlay {
   skill_id: string;
+  base_version: number;
   version: number;
   additions: string[];
   updated_at: string;
@@ -69,7 +70,8 @@ export class SkillGovernanceStore {
       if (!proposal) throw new Error(`Skill proposal not found: ${proposalId}`);
       if (proposal.status !== "pending") throw new Error(`Skill proposal cannot be approved from ${proposal.status}`);
       const active = this.readOverlaySync() ?? {
-        skill_id: this.skillId, version: this.baseVersion, additions: [], updated_at: new Date().toISOString(),
+        skill_id: this.skillId, base_version: this.baseVersion,
+        version: this.baseVersion, additions: [], updated_at: new Date().toISOString(),
       };
       if (active.version !== proposal.base_version) {
         proposal.status = "superseded";
@@ -93,7 +95,7 @@ export class SkillGovernanceStore {
 
   private readOverlaySync(): ActiveSkillOverlay | undefined {
     return this.state.listRecords<ActiveSkillOverlay>("skill_overlays")
-      .find((item) => item.skill_id === this.skillId);
+      .find((item) => item.skill_id === this.skillId && item.base_version === this.baseVersion);
   }
 
   private importLegacy(): void {

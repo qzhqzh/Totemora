@@ -11,7 +11,7 @@
 - Git Flow、听风、观潮和内容工坊已成为强类型专业服务；Bark、Telegram、Git 状态机和 CPA 生图作为受治理资产留下动作证据。
 - Web 已提供任务大厅、部落证据台、成员营帐、火种、资产、AI / 财经双域情报台、内容工坊和审批入口。
 - 成员画像区分正式内核、观察画像、经历、成长 Proposal 与升级后效果窗口。
-- `git-change-management` 已具备活动版本和经验追加 Proposal，但仍是专用过渡实现。
+- `git-flow-release` 已具备活动版本和经验追加 Proposal，但仍是专用过渡实现。
 
 ## E1：对话式 Skill Commission
 

@@ -85,7 +85,7 @@ interface GitSnapshot {
 }
 
 const GIT_COMMIT_SPECIALIST_ID = "deepseek_git_steward";
-const GIT_CHANGE_SKILL_VERSION = 3;
+const GIT_CHANGE_SKILL_VERSION = 4;
 
 interface SpecialistOutput {
   summary: string;
@@ -128,7 +128,7 @@ export class DevelopmentCommitService {
   ) {
     this.proposalsDir = resolve(dataDir, "development", "proposals");
     this.experienceFile = resolve(dataDir, "member-experience", `${GIT_COMMIT_SPECIALIST_ID}.json`);
-    this.skillStore = new SkillGovernanceStore(dataDir, "git-change-management", GIT_CHANGE_SKILL_VERSION);
+    this.skillStore = new SkillGovernanceStore(dataDir, "git-flow-release", GIT_CHANGE_SKILL_VERSION);
     this.assetRegistry = new ToolAssetRegistry(projectRoot, dataDir);
     this.state = StateDatabase.open(dataDir);
     this.memberState = new MemberStateStore(dataDir, config);
@@ -191,11 +191,21 @@ export class DevelopmentCommitService {
       throw new Error("Chief did not assign the Git Flow task to an eligible specialist");
     }
     await this.assetRegistry.assertCanUse(specialist, "git-flow-engine", "plan");
-    const baseSkill = await readFile(resolve(this.projectRoot, "skills/git-change-management/SKILL.md"), "utf8");
+    const [skillInstructions, planContract] = await Promise.all([
+      readFile(resolve(this.projectRoot, "skills/git-flow-release/SKILL.md"), "utf8"),
+      readFile(resolve(this.projectRoot, "skills/git-flow-release/references/totemora-plan-contract.md"), "utf8"),
+    ]);
+    const baseSkill = `${skillInstructions.trim()}\n\n${planContract.trim()}\n`;
     const legacySkill = await this.skillStore.getActive(baseSkill);
-    const managedSkill = options.trial_commission_id
+    const candidateManagedSkill = options.trial_commission_id
       ? this.skillCommissions.trialPackage(options.trial_commission_id, specialist.id, "git.flow")
-      : this.skillCommissions.activePackage("git-change-management", specialist.id, "git.flow");
+      : this.skillCommissions.activePackage("git-flow-release", specialist.id, "git.flow");
+    if (options.trial_commission_id && candidateManagedSkill?.base_version !== GIT_CHANGE_SKILL_VERSION) {
+      throw new Error(`Skill trial package targets stale base v${candidateManagedSkill?.base_version ?? "unknown"}; recreate it for v${GIT_CHANGE_SKILL_VERSION}`);
+    }
+    const managedSkill = candidateManagedSkill?.base_version === GIT_CHANGE_SKILL_VERSION
+      ? candidateManagedSkill
+      : undefined;
     const skill = {
       version: Math.max(legacySkill.version, managedSkill?.version ?? 0),
       content: managedSkill
@@ -234,6 +244,10 @@ export class DevelopmentCommitService {
           new Set(experiences.map((item) => String(item.id ?? ""))),
           mode,
         );
+        if (["main", "master"].includes(snapshot.branch)
+          && (!candidate.remote_plan?.branch_name || candidate.remote_plan.target_branch !== snapshot.branch)) {
+          throw new Error("Git Flow Skill requires a short-lived branch plan targeting the current main/master branch");
+        }
         specialistOutput = candidate;
         break;
       } catch (error) {
@@ -277,7 +291,7 @@ export class DevelopmentCommitService {
       specialist_member_id: specialist.id,
       assignment_reason: assignment.assignment_reason,
       skill: {
-        id: "git-change-management", version: skill.version, digest: skill.digest,
+        id: "git-flow-release", version: skill.version, digest: skill.digest,
         ...(managedSkill ? { package_digest: managedSkill.digest } : {}),
         ...(skill.commission_id ? { commission_id: skill.commission_id } : {}),
       },
@@ -347,8 +361,11 @@ export class DevelopmentCommitService {
       if (afterValidation.hash !== proposal.snapshot_hash) {
         throw new Error("Validation changed the approved Git Snapshot; review the new changes before committing");
       }
-      if (proposal.mode !== "commit" && proposal.remote_plan) {
-        const currentBranch = (await git(workplace.path, ["branch", "--show-current"])).stdout.trim();
+      const currentBranch = (await git(workplace.path, ["branch", "--show-current"])).stdout.trim();
+      if (["main", "master"].includes(currentBranch) && !proposal.remote_plan) {
+        throw new Error("Git Flow Skill forbids committing directly on main/master; prepare a short-lived branch plan");
+      }
+      if (proposal.remote_plan) {
         if (currentBranch === proposal.remote_plan.target_branch) {
           await git(workplace.path, ["checkout", "-b", proposal.remote_plan.branch_name]);
           proposal.git_context.branch = proposal.remote_plan.branch_name;

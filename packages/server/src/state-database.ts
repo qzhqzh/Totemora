@@ -349,6 +349,68 @@ export class StateDatabase {
           .run("skill trial lease fencing", new Date().toISOString());
       })();
     }
+    const gitFlowSkillId = this.db.query("SELECT version FROM schema_migrations WHERE version = 7").get() as { version: number } | null;
+    if (!gitFlowSkillId) {
+      this.db.transaction(() => {
+        const oldId = "git-change-management";
+        const newId = "git-flow-release";
+        const migratePackage = (value: Record<string, unknown>): Record<string, unknown> => {
+          if (value.skill_id !== oldId) return value;
+          const migrated: Record<string, unknown> = {
+            ...value,
+            skill_id: newId,
+            skill_md: typeof value.skill_md === "string"
+              ? value.skill_md.replace(/^name: git-change-management$/m, `name: ${newId}`)
+              : value.skill_md,
+          };
+          const normalized = { ...migrated, digest: undefined, status: undefined };
+          migrated.digest = createHash("sha256").update(JSON.stringify(normalized)).digest("hex");
+          return migrated;
+        };
+
+        const commissions = this.db.query(`
+          SELECT id,package_json FROM skill_commissions WHERE package_json IS NOT NULL
+        `).all() as Array<{ id: string; package_json: string }>;
+        for (const row of commissions) {
+          const pkg = migratePackage(JSON.parse(row.package_json) as Record<string, unknown>);
+          if (pkg.skill_id === newId) {
+            this.db.query(`
+              UPDATE skill_commissions SET package_json=?,package_digest=? WHERE id=?
+            `).run(JSON.stringify(pkg), String(pkg.digest), row.id);
+          }
+        }
+
+        const activations = this.db.query(`
+          SELECT id,package_json FROM skill_activations WHERE skill_id=?
+        `).all(oldId) as Array<{ id: string; package_json: string }>;
+        for (const row of activations) {
+          const pkg = migratePackage(JSON.parse(row.package_json) as Record<string, unknown>);
+          this.db.query(`
+            UPDATE skill_activations SET skill_id=?,package_json=?,digest=? WHERE id=?
+          `).run(newId, JSON.stringify(pkg), String(pkg.digest), row.id);
+        }
+
+        const records = this.db.query(`
+          SELECT namespace,id,payload_json,created_at,updated_at FROM records
+          WHERE namespace IN ('skill_overlays','skill_proposals')
+        `).all() as Array<{ namespace: string; id: string; payload_json: string; created_at: string; updated_at: string }>;
+        for (const row of records) {
+          const payload = JSON.parse(row.payload_json) as Record<string, unknown>;
+          if (payload.skill_id !== oldId) continue;
+          payload.skill_id = newId;
+          const id = row.namespace === "skill_overlays" && row.id === oldId ? newId : row.id;
+          this.db.query(`
+            INSERT INTO records(namespace,id,payload_json,created_at,updated_at)
+            VALUES(?,?,?,?,?)
+            ON CONFLICT(namespace,id) DO UPDATE SET
+              payload_json=excluded.payload_json,updated_at=excluded.updated_at
+          `).run(row.namespace, id, JSON.stringify(payload), row.created_at, row.updated_at);
+          if (id !== row.id) this.db.query("DELETE FROM records WHERE namespace=? AND id=?").run(row.namespace, row.id);
+        }
+        this.db.query("INSERT INTO schema_migrations(version,name,applied_at) VALUES(7,?,?)")
+          .run("rename git flow Skill canonical id", new Date().toISOString());
+      })();
+    }
   }
 
   importJsonFile<T>(sourcePath: string, parse: (value: unknown) => T[], insert: (row: T) => void): LegacyImportResult {

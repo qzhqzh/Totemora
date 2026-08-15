@@ -132,7 +132,7 @@ Git 专业任务现在固定成员 ID、Skill 版本、实际加载内容 digest
 - Chief 将自然语言和用户明确给出的 HTTPS 来源整理为澄清问题或结构化草案；
 - 风险、目标专业服务和资产授权的确定性门禁，来源不能由模型自行发明；
 - Web“能力议事”和 MCP 创建、继续、读取入口；MCP 不暴露正式装备动作；
-- `git-change-management` 的无新 Skill 基线、validated 包隔离试用、三次独立验收、显式装备和回滚；Web 可让同一目标成员自动运行基线/试用，并交给另一名 Reviewer 比较；
+- `git-flow-release` 的无新 Skill 基线、validated 包隔离试用、三次独立验收、显式装备和回滚；Web 可让同一目标成员自动运行基线/试用，并交给另一名 Reviewer 比较；
 - 稳定包 digest，以及专业任务中的实际加载版本、Commission、Token、时延和 Chief 验收证据；
 - 原 Git overlay 继续兼容，活动通用包会叠加到既有基线，不破坏历史版本。
 - Web 一级入口 `/skills`：从仓库 `skills/**/SKILL.md` 读取真实包，展示来源、相对路径、版本或 content hash、绑定、完整目录树、Doctor 结果及现有治理证据；文本文件可在受保护的只读预览器中查看，页面不会把数据库正文当作文件真源。

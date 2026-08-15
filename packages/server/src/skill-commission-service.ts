@@ -118,7 +118,7 @@ interface ChiefDraft {
 }
 
 const BUILT_IN_SKILL_VERSIONS: Record<string, number> = {
-  "git-change-management": 3,
+  "git-flow-release": 4,
 };
 
 export class SkillCommissionService {

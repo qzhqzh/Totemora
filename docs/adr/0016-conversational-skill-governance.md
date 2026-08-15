@@ -7,7 +7,7 @@
 
 文件上传式“导入 Skill”要求用户理解目录、格式和依赖，也会把部落退化成一个 Skill 管理器。用户真正想表达的是“我需要一种能力”“这个方法值得让某个成员学习”或“这个成员应根据近期失败改进”，这些意图天然属于对话、委任和验收。
 
-现有 `git-change-management` 已能在真实 Git Flow 后提出经验规则、批准 overlay 并递增版本，但它是单一专业服务的过渡实现：没有通用 Skill 委任、来源 provenance、正反例、试用期、装备 Proposal 和版本效果比较。
+现有 `git-flow-release` 已能在真实 Git Flow 后提出经验规则、批准 overlay 并递增版本，但它是单一专业服务的过渡实现：没有通用 Skill 委任、来源 provenance、正反例、试用期、装备 Proposal 和版本效果比较。
 
 ## 决策
 

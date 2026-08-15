@@ -27,7 +27,7 @@ Chief 收到 MCP 目标后按 `git-flow-safety` 能力路由。只有一个合�
 ## 经验
 
 成功工作流会记录模式、分支、验证命令、Commit SHA、Issue/PR、专员自检、Chief 验收和结果。
-`skills/git-change-management/skill.yaml` 声明包的基线版本；Git 服务当前仍在代码中镜像该基线，
+`skills/git-flow-release/skill.yaml` 声明包的基线版本；Git 服务当前仍在代码中镜像该基线，
 再由治理 Store 固定实际活动版本和 Run 证据。`SKILL.md` 使用标准 frontmatter，宿主界面元数据位于
 `agents/openai.yaml`。当前 v3 overlay 只支持在真实成功后追加经验规则，
 仍需要治理提案，不会静默修改成员人格、资产权限或外部动作门禁。它将在通用 Skill Commission
