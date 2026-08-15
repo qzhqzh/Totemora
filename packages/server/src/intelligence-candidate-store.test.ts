@@ -169,3 +169,33 @@ test("opaque Bark open callback is idempotent", async () => {
   expect(() => store.createOpenCallback(candidate!.id, "http://127.0.0.1/private")).toThrow("HTTPS URL");
   await rm(dataDir, { recursive: true, force: true });
 });
+
+test("pre-model evidence gate suppresses previously evaluated URLs and reworded headlines", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-candidate-evidence-gate-"));
+  const store = new IntelligenceCandidateStore(dataDir);
+  await store.ingest({
+    domain: "ai", scan_id: "first-scan", member_id: "qwen_intelligence",
+    push_threshold: 0.7, history_hours: 72,
+    evaluations: [{
+      event_key: "nvidia-funding", headline: "华尔街向英伟达提供五千亿美元 AI 项目融资",
+      brief: "融资支持 AI 基础设施。", url: "https://example.com/nvidia-funding", source: "example.com",
+      importance: 1, interest: 1, confidence: 1, novelty: 1,
+      push_worthy: true, rationale: "test", is_update: false,
+    }],
+  });
+
+  const filtered = await store.filterNovelEvidence({
+    domain: "ai", history_hours: 72,
+    evidence: [
+      { title: "华尔街巨头拟为英伟达 AI 项目提供五千亿美元融资", link: "https://other.example/nvidia" },
+      { title: "同一链接出现完全不同的新事实", link: "https://example.com/nvidia-funding" },
+      { title: "新的开源模型发布", link: "https://example.com/new-model" },
+    ],
+  });
+  expect(filtered.suppressed).toHaveLength(1);
+  expect(filtered.novel.map((item) => item.link)).toEqual([
+    "https://example.com/nvidia-funding",
+    "https://example.com/new-model",
+  ]);
+  await rm(dataDir, { recursive: true, force: true });
+});

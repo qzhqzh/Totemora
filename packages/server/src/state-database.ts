@@ -3,6 +3,13 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 
+import {
+  GIT_FLOW_SKILL_ID,
+  GIT_FLOW_SKILL_VERSION,
+  LEGACY_GIT_FLOW_SKILL_ID,
+  LEGACY_GIT_FLOW_SKILL_VERSION,
+} from "./git-flow-skill";
+
 const instances = new Map<string, StateDatabase>();
 
 export interface LegacyImportResult {
@@ -249,6 +256,235 @@ export class StateDatabase {
         `);
         this.db.query("INSERT INTO schema_migrations(version,name,applied_at) VALUES(2,?,?)")
           .run("domain-aware intelligence candidates", new Date().toISOString());
+      })();
+    }
+    const skillCommission = this.db.query("SELECT version FROM schema_migrations WHERE version = 3").get() as { version: number } | null;
+    if (!skillCommission) {
+      this.db.transaction(() => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS skill_commissions (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            goal TEXT NOT NULL,
+            status TEXT NOT NULL,
+            chief_member_id TEXT NOT NULL,
+            target_member_id TEXT,
+            target_service_id TEXT,
+            risk TEXT NOT NULL,
+            package_json TEXT,
+            package_digest TEXT,
+            package_version INTEGER,
+            revision INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS skill_commission_status
+            ON skill_commissions(status, updated_at DESC);
+          CREATE TABLE IF NOT EXISTS skill_commission_messages (
+            id TEXT PRIMARY KEY,
+            commission_id TEXT NOT NULL REFERENCES skill_commissions(id),
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS skill_commission_message_timeline
+            ON skill_commission_messages(commission_id, created_at, id);
+          CREATE TABLE IF NOT EXISTS skill_trials (
+            id TEXT PRIMARY KEY,
+            commission_id TEXT NOT NULL REFERENCES skill_commissions(id),
+            baseline_evidence_id TEXT NOT NULL,
+            trial_evidence_id TEXT NOT NULL,
+            reviewer_member_id TEXT NOT NULL,
+            outcome TEXT NOT NULL CHECK(outcome IN ('accepted','rejected')),
+            metrics_json TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE(commission_id, trial_evidence_id)
+          );
+          CREATE TABLE IF NOT EXISTS skill_activations (
+            id TEXT PRIMARY KEY,
+            commission_id TEXT NOT NULL REFERENCES skill_commissions(id),
+            skill_id TEXT NOT NULL,
+            version INTEGER NOT NULL,
+            digest TEXT NOT NULL,
+            target_member_id TEXT,
+            target_service_id TEXT,
+            package_json TEXT NOT NULL,
+            status TEXT NOT NULL,
+            approved_by TEXT NOT NULL,
+            activated_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS skill_activation_lookup
+            ON skill_activations(skill_id, status, version DESC);
+        `);
+        this.db.query("INSERT INTO schema_migrations(version,name,applied_at) VALUES(3,?,?)")
+          .run("conversational skill commissions", new Date().toISOString());
+      })();
+    }
+    const skillCommissionRevision = this.db.query("SELECT version FROM schema_migrations WHERE version = 4").get() as { version: number } | null;
+    if (!skillCommissionRevision) {
+      this.db.transaction(() => {
+        const columns = new Set((this.db.query("PRAGMA table_info(skill_commissions)").all() as Array<{ name: string }>).map((column) => column.name));
+        if (!columns.has("revision")) this.db.exec("ALTER TABLE skill_commissions ADD COLUMN revision INTEGER NOT NULL DEFAULT 1");
+        this.db.query("INSERT INTO schema_migrations(version,name,applied_at) VALUES(4,?,?)")
+          .run("skill commission optimistic concurrency", new Date().toISOString());
+      })();
+    }
+    const skillTrialRunLease = this.db.query("SELECT version FROM schema_migrations WHERE version = 5").get() as { version: number } | null;
+    if (!skillTrialRunLease) {
+      this.db.transaction(() => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS skill_trial_run_leases (
+            commission_id TEXT PRIMARY KEY,
+            run_id TEXT UNIQUE NOT NULL,
+            owner_id TEXT,
+            claimed_at TEXT
+          )
+        `);
+        this.db.query("INSERT INTO schema_migrations(version,name,applied_at) VALUES(5,?,?)")
+          .run("skill trial active run reservation", new Date().toISOString());
+      })();
+    }
+    const skillTrialLeaseFencing = this.db.query("SELECT version FROM schema_migrations WHERE version = 6").get() as { version: number } | null;
+    if (!skillTrialLeaseFencing) {
+      this.db.transaction(() => {
+        const columns = new Set((this.db.query("PRAGMA table_info(skill_trial_run_leases)").all() as Array<{ name: string }>).map((column) => column.name));
+        if (!columns.has("claim_token")) this.db.exec("ALTER TABLE skill_trial_run_leases ADD COLUMN claim_token TEXT");
+        if (!columns.has("lease_expires_at")) this.db.exec("ALTER TABLE skill_trial_run_leases ADD COLUMN lease_expires_at TEXT");
+        this.db.query("INSERT INTO schema_migrations(version,name,applied_at) VALUES(6,?,?)")
+          .run("skill trial lease fencing", new Date().toISOString());
+      })();
+    }
+    const gitFlowSkillId = this.db.query("SELECT version FROM schema_migrations WHERE version = 7").get() as { version: number } | null;
+    if (!gitFlowSkillId) {
+      this.db.transaction(() => {
+        const oldId = LEGACY_GIT_FLOW_SKILL_ID;
+        const newId = GIT_FLOW_SKILL_ID;
+        const migratePackage = (value: Record<string, unknown>): {
+          value: Record<string, unknown>;
+          superseded: boolean;
+        } => {
+          if (value.skill_id !== oldId) return { value, superseded: false };
+          const staleBase = typeof value.base_version !== "number"
+            || value.base_version < GIT_FLOW_SKILL_VERSION;
+          const superseded = staleBase && ["draft", "validated", "active"].includes(String(value.status));
+          const migrated: Record<string, unknown> = {
+            ...value,
+            skill_id: newId,
+            skill_md: typeof value.skill_md === "string"
+              ? value.skill_md.replace(/^name: git-change-management$/m, `name: ${newId}`)
+              : value.skill_md,
+            ...(superseded ? { status: "superseded" } : {}),
+          };
+          const normalized = { ...migrated, digest: undefined, status: undefined };
+          migrated.digest = createHash("sha256").update(JSON.stringify(normalized)).digest("hex");
+          return { value: migrated, superseded };
+        };
+
+        const commissions = this.db.query(`
+          SELECT id,package_json FROM skill_commissions WHERE package_json IS NOT NULL
+        `).all() as Array<{ id: string; package_json: string }>;
+        for (const row of commissions) {
+          const migrated = migratePackage(JSON.parse(row.package_json) as Record<string, unknown>);
+          if (migrated.value.skill_id === newId) {
+            this.db.query(`
+              UPDATE skill_commissions SET package_json=?,package_digest=?,
+                status=CASE WHEN ?=1 AND status NOT IN ('cancelled','suspended','superseded')
+                  THEN 'superseded' ELSE status END
+              WHERE id=?
+            `).run(JSON.stringify(migrated.value), String(migrated.value.digest), migrated.superseded ? 1 : 0, row.id);
+          }
+        }
+
+        const activations = this.db.query(`
+          SELECT id,package_json FROM skill_activations WHERE skill_id=?
+        `).all(oldId) as Array<{ id: string; package_json: string }>;
+        for (const row of activations) {
+          const migrated = migratePackage(JSON.parse(row.package_json) as Record<string, unknown>);
+          this.db.query(`
+            UPDATE skill_activations SET skill_id=?,package_json=?,digest=?,
+              status=CASE WHEN ?=1 AND status='active' THEN 'superseded' ELSE status END
+            WHERE id=?
+          `).run(
+            newId, JSON.stringify(migrated.value), String(migrated.value.digest),
+            migrated.superseded ? 1 : 0, row.id,
+          );
+        }
+
+        const records = this.db.query(`
+          SELECT namespace,id,payload_json,created_at,updated_at FROM records
+          WHERE namespace IN ('skill_overlays','skill_proposals')
+        `).all() as Array<{ namespace: string; id: string; payload_json: string; created_at: string; updated_at: string }>;
+        for (const row of records) {
+          const payload = JSON.parse(row.payload_json) as Record<string, unknown>;
+          if (payload.skill_id !== oldId) continue;
+          payload.skill_id = newId;
+          if (row.namespace === "skill_overlays") {
+            const additions = Array.isArray(payload.additions) ? payload.additions : [];
+            const previousBase = typeof payload.base_version === "number"
+              ? payload.base_version
+              : LEGACY_GIT_FLOW_SKILL_VERSION;
+            const previousVersion = typeof payload.version === "number"
+              ? payload.version
+              : previousBase + additions.length;
+            const versionDelta = Math.max(0, GIT_FLOW_SKILL_VERSION - previousBase);
+            payload.base_version = GIT_FLOW_SKILL_VERSION;
+            payload.version = Math.max(
+              GIT_FLOW_SKILL_VERSION + additions.length,
+              previousVersion + versionDelta,
+            );
+          } else if (row.namespace === "skill_proposals" && typeof payload.base_version === "number") {
+            payload.base_version += GIT_FLOW_SKILL_VERSION - LEGACY_GIT_FLOW_SKILL_VERSION;
+          }
+          const id = row.namespace === "skill_overlays" && row.id === oldId ? newId : row.id;
+          this.db.query(`
+            INSERT INTO records(namespace,id,payload_json,created_at,updated_at)
+            VALUES(?,?,?,?,?)
+            ON CONFLICT(namespace,id) DO UPDATE SET
+              payload_json=excluded.payload_json,updated_at=excluded.updated_at
+          `).run(row.namespace, id, JSON.stringify(payload), row.created_at, row.updated_at);
+          if (id !== row.id) this.db.query("DELETE FROM records WHERE namespace=? AND id=?").run(row.namespace, row.id);
+        }
+        this.db.query("INSERT INTO schema_migrations(version,name,applied_at) VALUES(7,?,?)")
+          .run("rename git flow Skill canonical id", new Date().toISOString());
+      })();
+    }
+    const skillTrialOutcomeConstraint = this.db.query("SELECT version FROM schema_migrations WHERE version = 8").get() as { version: number } | null;
+    if (!skillTrialOutcomeConstraint) {
+      this.db.transaction(() => {
+        const invalidTrials = this.db.query(`
+          SELECT * FROM skill_trials WHERE outcome NOT IN ('accepted','rejected')
+        `).all() as Array<Record<string, unknown> & { id: string; created_at: string }>;
+        for (const trial of invalidTrials) {
+          const quarantined = {
+            reason: "invalid_outcome_before_migration_8",
+            trial,
+          };
+          this.db.query(`
+            INSERT INTO records(namespace,id,payload_json,created_at,updated_at)
+            VALUES('quarantined_skill_trials',?,?,?,?)
+            ON CONFLICT(namespace,id) DO UPDATE SET
+              payload_json=excluded.payload_json,updated_at=excluded.updated_at
+          `).run(trial.id, JSON.stringify(quarantined), trial.created_at, new Date().toISOString());
+          this.db.query("DELETE FROM skill_trials WHERE id=?").run(trial.id);
+        }
+        this.db.exec(`
+          CREATE TRIGGER IF NOT EXISTS skill_trials_valid_outcome_insert
+          BEFORE INSERT ON skill_trials
+          WHEN NEW.outcome NOT IN ('accepted','rejected')
+          BEGIN
+            SELECT RAISE(ABORT, 'invalid skill trial outcome');
+          END;
+          CREATE TRIGGER IF NOT EXISTS skill_trials_valid_outcome_update
+          BEFORE UPDATE OF outcome ON skill_trials
+          WHEN NEW.outcome NOT IN ('accepted','rejected')
+          BEGIN
+            SELECT RAISE(ABORT, 'invalid skill trial outcome');
+          END;
+        `);
+        this.db.query("INSERT INTO schema_migrations(version,name,applied_at) VALUES(8,?,?)")
+          .run("constrain skill trial outcomes", new Date().toISOString());
       })();
     }
   }

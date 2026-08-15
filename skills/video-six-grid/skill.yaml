@@ -1,0 +1,8 @@
+schema_version: 1
+id: video-six-grid
+name: 六宫格分镜
+version: 1
+status: candidate
+source:
+  kind: local
+  reference: user-created

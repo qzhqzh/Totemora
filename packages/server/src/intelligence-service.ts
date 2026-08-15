@@ -54,6 +54,12 @@ export interface IntelligenceBrief {
   created_at: string;
   candidate_ids?: string[];
   queued_messages?: number;
+  source_gate?: {
+    collected: number;
+    out_of_scope: number;
+    history_suppressed: number;
+    model_evaluated: number;
+  };
   error?: string;
 }
 
@@ -122,8 +128,39 @@ export class IntelligenceService {
       }
       const dossier = await this.memberState.getDossier(member.id);
       const collected = await this.collectSources(preferences);
-      brief.sources = collected.items;
       brief.warnings = collected.warnings;
+      const evidenceGate = await this.candidates.filterNovelEvidence({
+        domain: "ai", evidence: collected.items,
+        history_hours: preferences.novelty_history_hours,
+      });
+      brief.sources = evidenceGate.novel;
+      brief.source_gate = {
+        collected: collected.observed_items,
+        out_of_scope: collected.out_of_scope,
+        history_suppressed: evidenceGate.suppressed.length,
+        model_evaluated: brief.sources.length,
+      };
+      if (evidenceGate.suppressed.length) {
+        brief.warnings.push(`预模型历史门禁过滤 ${evidenceGate.suppressed.length} 条已评估来源`);
+      }
+      if (!brief.sources.length) {
+        brief.title = "听风巡查 · 无新增";
+        brief.summary = "来源采集完成，但没有发现需要再次调用模型评估的新事件。";
+        brief.status = "completed";
+        brief.queued_messages = 0;
+        await this.save(brief);
+        await this.assetRegistry.recordUse({
+          asset_id: "news-intelligence", member_id: member.id, workflow_id: brief.id,
+          action: "collect", outcome: "completed",
+          evidence: `${collected.observed_items} source items; ${collected.out_of_scope} out of scope and ${evidenceGate.suppressed.length} history-suppressed before model evaluation`,
+        });
+        await this.memberState.remember({
+          member_id: member.id, kind: "operation", credit_type: "operation", credit_value: 0,
+          summary: `完成情报巡查，预模型门禁过滤 ${evidenceGate.suppressed.length} 条已评估来源，未调用模型`,
+          verified: true, source_id: brief.id,
+        });
+        return brief;
+      }
       const allowedLinks = new Set(brief.sources.map((item) => item.link));
       const sourceEvidence = brief.sources.map((item, index) => ({
         id: index + 1,
@@ -402,13 +439,18 @@ export class IntelligenceService {
     return result;
   }
 
-  private async collectSources(preferences: Awaited<ReturnType<IntelligencePreferenceStore["get"]>>): Promise<{ items: NewsItem[]; warnings: string[] }> {
+  private async collectSources(preferences: Awaited<ReturnType<IntelligencePreferenceStore["get"]>>): Promise<{
+    items: NewsItem[];
+    warnings: string[];
+    observed_items: number;
+    out_of_scope: number;
+  }> {
     const urls = (process.env.TOTEMORA_NEWS_FEEDS?.split(",").map((item) => item.trim()).filter(Boolean) ?? DEFAULT_FEEDS);
     const collectors: Array<Promise<SourceBatch>> = preferences.channels.rss ? urls.map(async (value) => {
       const url = new URL(value);
       if (url.protocol !== "https:" || !SOURCE_HOSTS.has(url.hostname)) throw new Error(`News source is not allowed: ${url.hostname}`);
       const response = await fetchWithLimit(this.fetchImpl, url, 3_000_000);
-      return { items: parseRss(response, url.hostname), warnings: [] };
+      return { items: parseRss(response, url.hostname, feedCategory(url)), warnings: [] };
     }) : [];
     if (preferences.channels.ai_hot) collectors.push(this.collectAiHot());
     if (preferences.channels.x_trends) collectors.push(this.collectXTrends(preferences.x_woeid).then((items) => ({ items, warnings: [] })));
@@ -419,23 +461,30 @@ export class IntelligenceService {
       : batch.value.warnings);
     const seen = new Set<string>();
     const successful = batches.flatMap((batch) => batch.status === "fulfilled" ? [batch.value.items] : []);
+    if (!successful.length) throw new Error(`All news sources failed: ${warnings.join("; ")}`);
+    let observedItems = 0;
+    let outOfScope = 0;
     const items: NewsItem[] = [];
     for (let index = 0; items.length < 20 && index < 15; index += 1) {
       for (const batch of successful) {
         const item = batch[index];
         if (!item) continue;
+        observedItems += 1;
         try {
           const link = new URL(item.link);
           if (link.protocol !== "https:" || ["localhost", "127.0.0.1", "::1"].includes(link.hostname)) continue;
         } catch { continue; }
+        if (!isAiWatchSource(item)) {
+          outOfScope += 1;
+          continue;
+        }
         const key = item.link || item.title;
         if (seen.has(key)) continue;
         seen.add(key); items.push(item);
         if (items.length >= 20) break;
       }
     }
-    if (!items.length) throw new Error(`All news sources failed: ${warnings.join("; ")}`);
-    return { items, warnings };
+    return { items, warnings, observed_items: observedItems, out_of_scope: outOfScope };
   }
 
   private async collectAiHot(): Promise<SourceBatch> {
@@ -644,14 +693,28 @@ function collectTrendRecords(value: unknown, depth = 0): Array<Record<string, un
   return children.flatMap((item) => collectTrendRecords(item, depth + 1)).slice(0, 20);
 }
 
-function parseRss(xml: string, source: string): NewsItem[] {
+function parseRss(xml: string, source: string, category?: string): NewsItem[] {
   return [...xml.matchAll(/<item\b[\s\S]*?<\/item>/gi)].slice(0, 15).flatMap((match) => {
     const item = match[0];
     const title = field(item, "title");
     const link = field(item, "link");
     if (!title || !link) return [];
-    return [{ title: decodeXml(title), link: decodeXml(link), published_at: field(item, "pubDate"), source }];
+    return [{ title: decodeXml(title), link: decodeXml(link), published_at: field(item, "pubDate"), source, category }];
   });
+}
+
+function feedCategory(url: URL): string {
+  if (url.hostname === "hnrss.org") return "developer";
+  if (url.pathname.includes("technology")) return "technology";
+  return "general";
+}
+
+function isAiWatchSource(item: NewsItem): boolean {
+  const category = item.category?.toLowerCase() ?? "";
+  if (["developer", "technology"].includes(category)
+    || category.includes("artificial intelligence") || category === "ai") return true;
+  const text = `${item.title}\n${item.summary ?? ""}`;
+  return /人工智能|\bAI\b|A\.I\.|大模型|基础模型|智能体|\bAgent(?:s|ic)?\b|\bLLM\b|\bGPT(?:-?\d+)?\b|Claude|Gemini|DeepSeek|Qwen|通义千问|MCP|开源模型|开发者工具|编程|代码生成|芯片|\bGPU\b|英伟达|NVIDIA|网络安全|数据泄露|漏洞|黑客|机器人|自动驾驶/iu.test(text);
 }
 
 function field(xml: string, name: string): string | undefined {

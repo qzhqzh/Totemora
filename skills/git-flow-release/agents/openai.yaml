@@ -1,0 +1,4 @@
+interface:
+  display_name: "Git Flow Release"
+  short_description: "按门禁推进 Commit、GitHub PR 与 Merge"
+  default_prompt: "Use $git-flow-release to review existing changes and advance only the explicitly authorized Git stages."

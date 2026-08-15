@@ -69,6 +69,11 @@ export interface CandidateEvaluation {
   is_update: boolean;
 }
 
+export interface SourceEvidenceCandidate {
+  title: string;
+  link: string;
+}
+
 interface CandidateRow {
   id: string; domain: IntelligenceDomain; scan_id: string; member_id: string; event_key: string; headline: string; brief: string;
   url: string; source: string; importance: number; interest: number; confidence: number; novelty: number;
@@ -309,6 +314,32 @@ export class IntelligenceCandidateStore {
     `).all(domain ?? null, domain ?? null) as Array<{ status: CandidateStatus; count: number }>;
     for (const row of rows) counts[row.status] = row.count;
     return counts;
+  }
+
+  async filterNovelEvidence<T extends SourceEvidenceCandidate>(input: {
+    domain: IntelligenceDomain;
+    evidence: T[];
+    history_hours: number;
+    now?: Date;
+  }): Promise<{ novel: T[]; suppressed: Array<{ evidence: T; candidate_id: string }> }> {
+    const now = input.now ?? new Date();
+    const cutoff = new Date(now.getTime() - input.history_hours * 3_600_000).toISOString();
+    const rows = this.state.db.query(`
+      SELECT id,url,headline FROM intelligence_candidates
+      WHERE domain=? AND created_at>=?
+      ORDER BY created_at DESC LIMIT 1000
+    `).all(input.domain, cutoff) as Array<{ id: string; url: string; headline: string }>;
+    const novel: T[] = [];
+    const suppressed: Array<{ evidence: T; candidate_id: string }> = [];
+    for (const evidence of input.evidence) {
+      const duplicate = rows.find((row) => {
+        const similarity = ngramSimilarity(row.headline, evidence.title);
+        return similarity >= 0.68 || (row.url === evidence.link && similarity >= 0.58);
+      });
+      if (duplicate) suppressed.push({ evidence, candidate_id: duplicate.id });
+      else novel.push(evidence);
+    }
+    return { novel, suppressed };
   }
 
   private finishFailure(id: string, claimToken: string | undefined, status: CandidateStatus, error: string, retryAt: string | null, now: Date): void {

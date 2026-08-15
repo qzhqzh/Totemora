@@ -227,7 +227,7 @@ agents:
       - warrior
       - worker
     skills:
-      - git-change-management
+      - git-flow-release
       - conventional-commit
       - verification-planning
       - git-flow-safety

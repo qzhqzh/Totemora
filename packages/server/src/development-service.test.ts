@@ -23,6 +23,10 @@ test("chief delegates a policy-bound commit and approval creates verified experi
   });
   const config = await exampleConfig();
   const provider = new DevelopmentProvider();
+  StateDatabase.open(dataDir).putRecord("skill_overlays", "git-flow-release", {
+    skill_id: "git-flow-release", version: 4,
+    additions: ["STALE_V3_OVERLAY_MUST_NOT_LOAD"], updated_at: new Date().toISOString(),
+  });
   const service = new DevelopmentCommitService(
     config, { get: () => provider }, settlement, dataDir,
     resolve(import.meta.dir, "../../.."),
@@ -33,17 +37,20 @@ test("chief delegates a policy-bound commit and approval creates verified experi
     status: "awaiting_approval", specialist_member_id: "deepseek_git_steward",
     commit_message: "feat(demo): add greeting",
     files: ["src.ts"], self_check: { outcome: "accepted" }, chief_acceptance: { outcome: "accepted" },
-    skill: { id: "git-change-management", version: 3 },
+    skill: { id: "git-flow-release", version: 4 },
+    evaluation: { accepted: true, calls: 2, total_tokens: 0, usage_status: "unknown" },
     git_context: { branch: "main", has_develop: false, unpushed_commits: 0, stash_count: 0 },
   });
   expect(provider.requests.find((request) => request.memberId === "deepseek_git_steward")?.maxTokens).toBe(8_000);
+  expect(provider.requests.find((request) => request.memberId === "deepseek_git_steward")?.messages.at(-1)?.content).not.toContain("STALE_V3_OVERLAY_MUST_NOT_LOAD");
 
   const completed = await service.approve(proposal.id);
   expect(completed.status).toBe("completed");
+  expect((await command(root, ["branch", "--show-current"])).trim()).toBe("test/tribe-git-flow");
   expect(completed.commit_sha).toMatch(/^[0-9a-f]{40}$/);
   expect((await command(root, ["log", "-1", "--pretty=%s"])).trim()).toBe("feat(demo): add greeting");
   expect(StateDatabase.open(dataDir).listRecords("member_experience:deepseek_git_steward")).toMatchObject([
-    { verified: true, skill: { id: "git-change-management", version: 3 }, self_check_outcome: "accepted", chief_acceptance: "accepted" },
+    { verified: true, skill: { id: "git-flow-release", version: 4 }, self_check_outcome: "accepted", chief_acceptance: "accepted" },
   ]);
   const skillProposals = await service.listSkillProposals();
   expect(skillProposals[0]).toMatchObject({
@@ -52,13 +59,15 @@ test("chief delegates a policy-bound commit and approval creates verified experi
     evidence: { development_proposal_id: proposal.id, commit_sha: completed.commit_sha },
   });
   const activeSkill = await service.approveSkillProposal(skillProposals[0]!.id);
-  expect(activeSkill).toMatchObject({ version: 4, additions: ["提交前确认验证命令没有改写批准文件"] });
+  expect(activeSkill).toMatchObject({ version: 5, additions: ["提交前确认验证命令没有改写批准文件"] });
   await writeFile(join(root, "src.ts"), "export const value = 1;\nexport const greeting = 'hello again';\n", "utf8");
   const nextProposal = await service.prepare(workplace.id, "继续按同一规范提交当前改动");
-  expect(nextProposal.skill.version).toBe(4);
+  expect(nextProposal.skill.version).toBe(5);
   const latestSpecialistPrompt = provider.requests.filter((request) => request.memberId === "deepseek_git_steward").at(-1)?.messages.at(-1)?.content ?? "";
   expect(latestSpecialistPrompt).toContain(completed.commit_sha!);
-  expect(latestSpecialistPrompt).toContain("git-change-management");
+  expect(latestSpecialistPrompt).toContain("git-flow-release");
+  expect(latestSpecialistPrompt).toContain("Totemora Git Flow 计划输出契约");
+  expect(latestSpecialistPrompt).toContain('"remote_plan"');
   expect(latestSpecialistPrompt).toContain("提交前确认验证命令没有改写批准文件");
   await rm(root, { recursive: true, force: true });
   await rm(dataDir, { recursive: true, force: true });
@@ -79,6 +88,32 @@ test("refuses to prepare a commit containing a secret path", async () => {
     dataDir, resolve(import.meta.dir, "../../.."),
   );
   await expect(service.prepare(workplace.id, "提交当前改动")).rejects.toThrow("Forbidden path cannot be committed: .env");
+  await rm(root, { recursive: true, force: true });
+  await rm(dataDir, { recursive: true, force: true });
+});
+
+test("pins a requested eligible specialist even when several Git members are available", async () => {
+  const root = await createRepository();
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-development-pinned-"));
+  const settlement = new SettlementStore(dataDir);
+  const workplace = await settlement.addWorkplace("Pinned Repo", root);
+  await settlement.setWorkplacePolicy(workplace.id, {
+    instructions: "验证后形成提交计划", validation_commands: ["bun test"],
+    allowed_commit_types: ["feat"], forbidden_paths: [".env"],
+  });
+  const config = await exampleConfig();
+  const second = config.agents.agents.find((member) => member.id === "qwen_worker")!;
+  second.skills = [...new Set([...(second.skills ?? []), "git-flow-safety"])];
+  second.tools = [...new Set([...(second.tools ?? []), "git-flow-engine"])];
+  const provider = new DevelopmentProvider();
+  const service = new DevelopmentCommitService(
+    config, { get: () => provider }, settlement, dataDir, resolve(import.meta.dir, "../../.."),
+  );
+  const proposal = await service.prepare(workplace.id, "提交当前改动", {
+    specialist_member_id: "deepseek_git_steward",
+  });
+  expect(proposal.specialist_member_id).toBe("deepseek_git_steward");
+  expect(provider.requests.some((request) => request.messages.at(-1)?.content.includes("候选："))).toBe(false);
   await rm(root, { recursive: true, force: true });
   await rm(dataDir, { recursive: true, force: true });
 });
@@ -122,7 +157,7 @@ test("gives the specialist bounded feedback to repair an invalid plan", async ()
 
   const proposal = await service.prepare(workplace.id, "提交当前改动");
   expect(proposal).toMatchObject({ status: "awaiting_approval", commit_message: "feat(demo): add greeting" });
-  expect(provider.requests.some((request) => request.messages.at(-1)?.content.includes("does not satisfy Policy"))).toBe(true);
+  expect(provider.requests.some((request) => request.messages.at(-1)?.content.includes("targeting the current main/master branch"))).toBe(true);
   await rm(root, { recursive: true, force: true });
   await rm(dataDir, { recursive: true, force: true });
 });
@@ -284,13 +319,18 @@ class SelfCorrectingDevelopmentProvider implements AgentProvider {
     if (request.memberId === "deepseek_git_steward" && !prompt.includes("评审真实 PR Diff") && !this.invalidPlanReturned) {
       this.invalidPlanReturned = true;
       return { content: JSON.stringify({
-        summary: "计划",
-        commit_message: "update files",
+        summary: "新增 greeting 导出并保留现有行为",
+        commit_message: "feat(demo): add greeting",
         files: ["src.ts"],
-        risk: "low",
+        risk: "低风险，仅新增导出",
         validation_commands: ["bun test"],
         experience_used: [],
         self_check: { outcome: "accepted", rationale: "已检查", issues: [] },
+        remote_plan: {
+          target_branch: "develop", branch_name: "test/tribe-git-flow",
+          issue_title: "test: verify tribe Git Flow", issue_body: "验证完整 Git Flow",
+          pr_title: "test: verify tribe Git Flow", pr_body: "新增测试改动并完成验证",
+        },
       }) };
     }
     return this.valid.generate(request);

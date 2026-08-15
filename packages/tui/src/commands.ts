@@ -95,11 +95,12 @@ export async function runCli(
         maxFiles: parsed.maxFiles,
         maxContextBytes: parsed.maxContextBytes,
         maxOutputTokens: parsed.maxOutputTokens,
+        pricingSnapshotPath: parsed.pricingSnapshot,
       });
       streams.stdout.write(`Benchmark: ${benchmark.result.id}\n`);
       for (const [strategy, summary] of Object.entries(benchmark.result.summary)) {
         streams.stdout.write(
-          `- ${strategy}: ${summary.structural_passed}/${summary.attempted} structurally passed, total_tokens=${summary.total_tokens}, strong_tokens=${summary.strong_model_tokens}, latency_ms=${summary.latency_ms}, usage_gaps=${summary.usage_unknown_cases}\n`,
+          `- ${strategy}: ${summary.structural_passed}/${summary.attempted} structurally passed, total_tokens=${summary.total_tokens}, strong_tokens=${summary.strong_model_tokens}, known_cost_usd=${summary.known_cost_usd}, pricing_gaps=${summary.pricing_gap_cases}, latency_ms=${summary.latency_ms}, usage_gaps=${summary.usage_unknown_cases}\n`,
         );
       }
       streams.stdout.write(`JSON: ${benchmark.jsonPath}\nReport: ${benchmark.markdownPath}\n`);
@@ -254,6 +255,7 @@ function parseArgs(args: string[]): {
   suite?: string;
   strongMember?: string;
   cheapMember?: string;
+  pricingSnapshot?: string;
   help: boolean;
 } {
   const command: string[] = [];
@@ -271,6 +273,7 @@ function parseArgs(args: string[]): {
   let suite: string | undefined;
   let strongMember: string | undefined;
   let cheapMember: string | undefined;
+  let pricingSnapshot: string | undefined;
   let help = false;
 
   for (let index = 0; index < args.length; index += 1) {
@@ -371,6 +374,12 @@ function parseArgs(args: string[]): {
       continue;
     }
 
+    if (arg === "--pricing-snapshot") {
+      pricingSnapshot = requireOptionValue(args, index, arg);
+      index += 1;
+      continue;
+    }
+
     command.push(arg);
   }
 
@@ -390,6 +399,7 @@ function parseArgs(args: string[]): {
     suite,
     strongMember,
     cheapMember,
+    pricingSnapshot,
     help,
   };
 }
@@ -598,7 +608,7 @@ function writeHelp(stdout: CliStreams["stdout"]): void {
       "  totemora tribe inspect [--config-dir <path>]",
       '  totemora development prepare --workplace <id> --goal "<text>" [--gateway-url <url>]',
       "  totemora development approve <proposal_id> [--gateway-url <url>]",
-      "  totemora benchmark run --suite <path> --strong-member <id> --cheap-member <id> [--chief <id>] [--data-dir <path>]",
+      "  totemora benchmark run --suite <path> --strong-member <id> --cheap-member <id> [--chief <id>] [--pricing-snapshot <path>] [--data-dir <path>]",
       "  totemora run onboarding-exam [--chief <member_id>] [--config-dir <path>] [--data-dir <path>]",
       '  totemora run "<goal>" [--workspace <path>] [--accept <criterion>] [--chief <member_id>] [--config-dir <path>] [--data-dir <path>]',
       "    Optional budgets: --max-files <n> --max-context-bytes <n> --max-output-tokens <n>",

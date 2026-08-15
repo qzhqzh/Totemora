@@ -70,9 +70,9 @@ export class MemberProfileStore {
   }): Promise<MemberPortrait> {
     const constitution = await this.current(member);
     const proposals = (await this.listProposals(member.id)).sort((a, b) => b.created_at.localeCompare(a.created_at));
-    const judged = counts.successCredit + counts.memberFailures;
-    const successRate = judged ? counts.successCredit / judged : 0;
-    const confidence = Number((judged / (judged + 10)).toFixed(3));
+    const judgedOutcomes = counts.successes + counts.memberFailures;
+    const successRate = judgedOutcomes ? counts.successes / judgedOutcomes : 0;
+    const confidence = Number((judgedOutcomes / (judgedOutcomes + 10)).toFixed(3));
     const helpCount = events.filter((item) => item.kind === "help_request").length;
     const activeProposal = proposals.find((item) => item.status === "approved" && item.effect);
     const activeEffect = activeProposal?.effect ? {
@@ -90,9 +90,9 @@ export class MemberProfileStore {
     return {
       constitution,
       observed_traits: [
-        { name: "经验证的稳定度", score: Number(successRate.toFixed(3)), confidence, evidence: `${judged.toFixed(1)} 份可归因经验信用` },
+        { name: "经验证的稳定度", score: Number(successRate.toFixed(3)), confidence, evidence: `${counts.successes} 次验收成功 / ${judgedOutcomes} 次已归因结果` },
         { name: "求助意识", score: helpCount ? Math.min(1, helpCount / Math.max(1, counts.memberFailures + helpCount)) : 0, confidence: Math.min(1, (helpCount + counts.memberFailures) / 10), evidence: `${helpCount} 次求助` },
-        { name: "抗系统噪声", score: counts.systemFailures ? Number((counts.successCredit / Math.max(1, counts.successCredit + counts.systemFailures)).toFixed(3)) : 1, confidence: Math.min(1, (counts.successCredit + counts.systemFailures) / 20), evidence: `${counts.systemFailures} 次系统故障被隔离` },
+        { name: "系统故障隔离", score: 1, confidence: Math.min(1, counts.systemFailures / 20), evidence: `${counts.systemFailures} 次系统故障独立记录，未计入成员失败` },
       ],
       task_record: {
         completed: counts.successes + counts.memberFailures, accepted: counts.successes,

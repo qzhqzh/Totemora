@@ -22,9 +22,13 @@ test("exposes tribe and completes a playground run", async () => {
   expect(tribe.status).toBe(200);
   expect((await tribe.json()).members.length).toBeGreaterThan(1);
   expect(await (await app.fetch(new Request("http://local/api/status"))).json()).toMatchObject({
-    version: "0.11.0-finance-intelligence-vertical", active_members: 7,
+    version: "0.12.0-evidence-skill-core", active_members: 7,
     capabilities: { inspect: "enabled", change: "git_flow_existing_changes", specialist_self_review: "enabled", member_chat: "mentor_escalation_v1" },
   });
+  expect((await app.fetch(new Request("http://local/api/operator/session"))).status).toBe(401);
+  const operatorSession = await app.fetch(new Request("http://local/api/operator/session", { headers: authorized() }));
+  expect(operatorSession.status).toBe(200);
+  expect(await operatorSession.json()).toEqual({ authenticated: true });
   const tribeData = await (await app.fetch(new Request("http://local/api/tribe"))).json();
   expect(tribeData.members.filter((member: any) => !["inactive", "retired"].includes(member.status))).toHaveLength(7);
   expect(tribeData.members.find((member: any) => member.id === "deepseek_reasoner").persona).toContain("深思");
@@ -34,6 +38,11 @@ test("exposes tribe and completes a playground run", async () => {
     id: "deepseek/deepseek-v4-pro[1m]", status: "available", member_ids: ["deepseek_reasoner", "deepseek_git_steward"],
   });
   expect(embers.embers.find((ember: any) => ember.provider_id === "qwen").member_ids).toEqual(["qwen_worker", "qwen_intelligence", "qwen_finance"]);
+  const evidence = await (await app.fetch(new Request("http://local/api/evidence/overview"))).json();
+  expect(evidence).toMatchObject({
+    candidate_funnels: [{ domain: "ai" }, { domain: "finance" }],
+    member_outcomes: [], service_tasks: [], external_actions: {},
+  });
 
   const workplaceResponse = await app.fetch(new Request("http://local/api/workplaces", {
     method: "POST", headers: authorized(),
@@ -491,6 +500,111 @@ test("content studio gateway completes a two-member work and records its special
   }))).json();
   expect(copied.copy_count).toBe(1);
   await rm(dataDir, { recursive: true, force: true });
+});
+
+test("Skill commission API keeps conversational drafts private and durable", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-skill-api-"));
+  const provider: AgentProvider = { async generate() { return { content: JSON.stringify({
+    ready: true, reply: "草案已形成，等待校验。", title: "Git 范围检查",
+    goal: "Git 专员先核对授权范围", skill_id: "git-flow-release",
+    target_member_id: "deepseek_git_steward", target_service_id: "git.flow",
+    risk: "repository_mutation", trigger: "Git Flow 委任",
+    instructions: ["读取完整状态", "逐项核对授权文件"],
+    boundaries: ["不扩大提交范围"],
+    acceptance_examples: ["目标文件完整", "无关文件不进入提交"],
+    sources: [], requested_assets: ["git-flow-engine"],
+  }) } } };
+  const createApp = () => createPlaygroundApp({
+    configDir: resolve(import.meta.dir, "../../../configs/example"), dataDir,
+    operatorToken: "operator-secret", createProviderRegistry: () => ({ get: () => provider }),
+  });
+  const app = createApp();
+  expect((await app.fetch(new Request("http://local/api/skills/commissions"))).status).toBe(401);
+  const createdResponse = await app.fetch(new Request("http://local/api/skills/commissions", {
+    method: "POST", headers: authorized(), body: JSON.stringify({ message: "让执简学习更严格的提交范围检查" }),
+  }));
+  expect(createdResponse.status).toBe(201);
+  const created = await createdResponse.json();
+  expect(created).toMatchObject({ status: "draft", package: { version: 5, status: "draft" } });
+  const validated = await app.fetch(new Request(`http://local/api/skills/commissions/${created.id}/validate`, {
+    method: "POST", headers: authorized(), body: "{}",
+  }));
+  expect(validated.status).toBe(200);
+  const invalidTrial = await app.fetch(new Request(`http://local/api/skills/commissions/${created.id}/run-trial`, {
+    method: "POST", headers: authorized(), body: JSON.stringify({
+      idempotency_key: "api-invalid-mode", workplace_id: "missing", goal: "check",
+      reviewer_member_id: "qwen_worker", mode: "execute_everything",
+    }),
+  }));
+  expect(invalidTrial.status).toBe(400);
+  expect(await invalidTrial.json()).toEqual({ error: "Invalid Skill trial mode" });
+
+  const restored = createApp();
+  const loaded = await restored.fetch(new Request(`http://local/api/skills/commissions/${created.id}`, { headers: authorized() }));
+  expect(await loaded.json()).toMatchObject({ id: created.id, messages: [{ role: "user" }, { role: "chief" }] });
+  await rm(dataDir, { recursive: true, force: true });
+});
+
+test("Skill registry API exposes repository-backed metadata without accepting server paths", async () => {
+  const root = await mkdtemp(join(tmpdir(), "totemora-skill-registry-api-"));
+  const packageDir = join(root, "skills", "sample-skill");
+  await mkdir(packageDir, { recursive: true });
+  await writeFile(join(packageDir, "SKILL.md"), [
+    "---", "name: sample-skill", "description: A real repository-backed test Skill.", "---", "", "# Sample Skill", "",
+  ].join("\n"));
+  const app = createPlaygroundApp({
+    configDir: resolve(import.meta.dir, "../../../configs/example"),
+    dataDir: join(root, "data"), projectRoot: root,
+    operatorToken: "operator-secret",
+    createProviderRegistry: () => ({ get: () => new PlaygroundProvider() }),
+  });
+  const listed = await app.fetch(new Request("http://local/api/skills/registry"));
+  expect(listed.status).toBe(200);
+  const listedBody = await listed.json();
+  expect(listedBody).toMatchObject({
+    root: "skills",
+    skills: [{ id: "sample-skill", path: "skills/sample-skill", status: "warning" }],
+  });
+  const detail = await app.fetch(new Request("http://local/api/skills/registry/sample-skill"));
+  expect(await detail.json()).toMatchObject({
+    id: "sample-skill", files: [{ path: "SKILL.md", kind: "manifest" }],
+  });
+  expect((await app.fetch(new Request("http://local/api/skills/registry/sample-skill/file?path=SKILL.md"))).status).toBe(401);
+  const preview = await app.fetch(new Request("http://local/api/skills/registry/sample-skill/file?path=SKILL.md", {
+    headers: authorized(),
+  }));
+  expect(preview.status).toBe(200);
+  expect(await preview.json()).toMatchObject({
+    skill_id: "sample-skill", path: "SKILL.md", kind: "manifest",
+    content: expect.stringContaining("# Sample Skill"),
+  });
+  const previewTraversal = await app.fetch(new Request(
+    "http://local/api/skills/registry/sample-skill/file?path=../private.txt",
+    { headers: authorized() },
+  ));
+  expect(previewTraversal.status).toBe(400);
+  const traversal = await app.fetch(new Request("http://local/api/skills/registry/%2E%2E%2Foutside"));
+  expect(traversal.status).toBe(400);
+  expect(JSON.stringify(listedBody).includes(root)).toBe(false);
+
+  const escapedRoot = join(root, "escaped-project");
+  const outsideRoot = join(root, "outside-skills");
+  await mkdir(join(outsideRoot, "private-skill"), { recursive: true });
+  await mkdir(escapedRoot, { recursive: true });
+  await writeFile(join(outsideRoot, "private-skill", "SKILL.md"), [
+    "---", "name: private-skill", "description: Must not be scanned.", "---", "",
+  ].join("\n"));
+  await symlink(outsideRoot, join(escapedRoot, "skills"));
+  const escapedApp = createPlaygroundApp({
+    configDir: resolve(import.meta.dir, "../../../configs/example"),
+    dataDir: join(escapedRoot, "data"), projectRoot: escapedRoot,
+    operatorToken: "operator-secret",
+    createProviderRegistry: () => ({ get: () => new PlaygroundProvider() }),
+  });
+  const escaped = await escapedApp.fetch(new Request("http://local/api/skills/registry"));
+  expect(escaped.status).toBe(500);
+  expect(await escaped.json()).toEqual({ error: "Skill registry scan failed" });
+  await rm(root, { recursive: true, force: true });
 });
 
 function authorized(): Record<string, string> {

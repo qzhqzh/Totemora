@@ -38,3 +38,32 @@ test("growth review remains eligible after the threshold instead of disappearing
   expect(dossier.growth).toMatchObject({ verified_successes: 11, eligible_growth_proposal: true, next_review_after_runs: 0 });
   await rm(dataDir, { recursive: true, force: true });
 });
+
+test("member success rate counts accepted outcomes instead of fractional experience credit", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-member-outcome-rate-"));
+  const config = await loadLocalConfig({ configDir: resolve(import.meta.dir, "../../../configs/example") });
+  const state = new MemberStateStore(dataDir, config);
+  await state.remember({
+    member_id: "qwen_intelligence", kind: "success", verified: true,
+    source_type: "candidate_feedback", source_id: "opened-1",
+    credit_type: "user_feedback", credit_value: 0.2, summary: "用户打开一条情报",
+  });
+  await state.remember({
+    member_id: "qwen_intelligence", kind: "failure", verified: true,
+    source_type: "runtime", source_id: "invalid-1", summary: "成员输出未通过事实门禁",
+  });
+  await state.remember({
+    member_id: "qwen_intelligence", kind: "system_failure", verified: true,
+    source_type: "runtime", source_id: "timeout-1", summary: "Provider timeout",
+  });
+
+  const dossier = await state.getDossier("qwen_intelligence");
+  expect(dossier.portrait.task_record).toMatchObject({
+    completed: 2, accepted: 1, experience_credit: 0.2,
+    member_failures: 1, system_failures: 1, success_rate: 0.5,
+  });
+  expect(dossier.portrait.observed_traits.find((item) => item.name === "系统故障隔离")).toMatchObject({
+    score: 1, evidence: "1 次系统故障独立记录，未计入成员失败",
+  });
+  await rm(dataDir, { recursive: true, force: true });
+});

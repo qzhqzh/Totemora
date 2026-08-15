@@ -17,7 +17,7 @@ export interface DevelopmentProposalSummary {
   policy_version: number;
   specialist_member_id: string;
   assignment_reason: string;
-  skill: { id: string; version: number };
+  skill: { id: string; version: number; digest?: string; package_digest?: string; commission_id?: string };
   git_context: {
     branch: string;
     has_develop: boolean;
@@ -85,6 +85,26 @@ export class TotemoraGatewayClient {
 
   async listServices() {
     return this.request("/api/services");
+  }
+
+  async listSkillCommissions() {
+    return this.request("/api/skills/commissions");
+  }
+
+  async createSkillCommission(message: string) {
+    return this.request("/api/skills/commissions", {
+      method: "POST", body: JSON.stringify({ message }),
+    });
+  }
+
+  async getSkillCommission(commissionId: string) {
+    return this.request(`/api/skills/commissions/${encodeURIComponent(commissionId)}`);
+  }
+
+  async continueSkillCommission(commissionId: string, message: string) {
+    return this.request(`/api/skills/commissions/${encodeURIComponent(commissionId)}/messages`, {
+      method: "POST", body: JSON.stringify({ message }),
+    });
   }
 
   async getSpecialistTask(taskId: string) {

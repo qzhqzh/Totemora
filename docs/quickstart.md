@@ -15,7 +15,20 @@ bun install
 bun run dev:web
 ```
 
-首次启动会生成 `.totemora/operator-token`（权限 `0600`）。登记工作地、发起模型任务、取消、重试及开发门禁都需要把它粘贴到 Web 页头；纯状态和成员浏览保持只读。也可以通过 `TOTEMORA_OPERATOR_TOKEN` 显式提供。
+`dev:web` 默认启用 Bun watch mode，服务端源码保存后会自动重载；Web 静态文件刷新
+浏览器即可看到变化。非监听式启动使用 `bun run start:web`。完整边界见
+[`always-on-gateway.md`](always-on-gateway.md)。
+
+首次启动会生成 `.totemora/operator-token`（权限 `0600`）。登记工作地、发起模型任务、取消、重试及开发门禁都需要点击 Web 右上角“操作员登录”，粘贴 Token 并通过服务器验证；纯状态和成员浏览保持只读。Token 只保存在当前浏览器标签页的 `sessionStorage`，关闭标签页后需要重新登录。也可以通过 `TOTEMORA_OPERATOR_TOKEN` 显式提供。
+
+在运行 Totemora 的服务器上查看当前文件 Token：
+
+```bash
+cd /path/to/Totemora
+cat .totemora/operator-token
+```
+
+不要把该 Token 发到聊天、截图或公开日志中。
 
 浏览器打开：
 
@@ -46,7 +59,11 @@ Web 服务默认只监听本机 `127.0.0.1:4310`。它会产生真实模型调�
 
 Totemora 的目标交互不是上传 Skill 文件。用户应通过部落对话描述能力、提供参考链接或指出成员需要改进的地方，由 Chief 澄清后创建能力委任，再组织起草、校验、试用和装备。
 
-通用 `SkillCommission` 对话入口仍是下一实现节点；当前可在成员营帐讨论能力，并通过 Git Flow 的真实任务产生和批准 `git-change-management` 改进提案。不要把尚未落地的自然语言讨论理解成已经激活或授予权限。完整边界见 [Skill 对话治理](skill-governance.md)。
+输入操作员 Token 后，在 Web 的“能力议事”直接描述能力目标、参考 URL、目标成员和验收例子。Chief 会继续追问或形成持久草案；草案通过静态校验后进入试用，但不会自动装备或增加权限。
+
+当前首个完整试用垂直是 `git-flow-release` v4，内部 ID、目录和流程正文均与用户维护的 Codex Skill 一致。打开 `/skills`，选择 Skill 后可浏览完整目录；输入 Operator Token 后点击文本文件可只读预览 `SKILL.md`、配置、脚本和参考资料。疑似 Secret、二进制、软链和超限文件不会返回正文。SQLite 启动迁移会把旧 `git-change-management` 治理记录原子迁入新 ID。
+
+当能力案卷进入“试用中”，在“让部落完成对照试炼”里选择已登记的 Git 工作地、试炼目标和独立 Reviewer。系统让同一名 Git 专员先形成无新 Skill 基线，再加载案卷固定 digest 形成试用计划；Reviewer 比较两份结果，Chief 门禁随后登记 Evidence ID、Token、耗时和结论。这个动作只形成 Git 计划，不会提交、Push 或 Merge。至少三次独立通过才能提议正式装备，批准与回滚仍需显式点击；原手工登记两份专业任务证据的方式保留在“高级”区域。完整边界见 [Skill 对话治理](skill-governance.md)。
 
 可通过环境变量覆盖启动参数：
 

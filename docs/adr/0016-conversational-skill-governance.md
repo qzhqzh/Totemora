@@ -1,13 +1,13 @@
 # ADR-0016：通过部落对话治理 Skill
 
-- 状态：Planned（目标架构，尚未实现通用 Commission）
+- 状态：Accepted（Git 专业服务已完成首个实现闭环）
 - 日期：2026-08-11
 
 ## 背景
 
 文件上传式“导入 Skill”要求用户理解目录、格式和依赖，也会把部落退化成一个 Skill 管理器。用户真正想表达的是“我需要一种能力”“这个方法值得让某个成员学习”或“这个成员应根据近期失败改进”，这些意图天然属于对话、委任和验收。
 
-现有 `git-change-management` 已能在真实 Git Flow 后提出经验规则、批准 overlay 并递增版本，但它是单一专业服务的过渡实现：没有通用 Skill 委任、来源 provenance、正反例、试用期、装备 Proposal 和版本效果比较。
+现有 `git-flow-release` 已能在真实 Git Flow 后提出经验规则、批准 overlay 并递增版本，但它是单一专业服务的过渡实现：没有通用 Skill 委任、来源 provenance、正反例、试用期、装备 Proposal 和版本效果比较。
 
 ## 决策
 
@@ -49,3 +49,12 @@ Chief 可以在现有权限内自动调研公开来源、起草、静态校验�
 - “用户交给部落一个 Skill”在产品文案中改为“用户委任部落学习一种能力”。
 
 完整规范见 [Skill 对话治理](../skill-governance.md)。
+
+## 2026-08-12 实现记录
+
+- Commission、消息、规范包、试炼和活动版本已进入 SQLite；Web 与 MCP 复用同一案卷。
+- 包 digest 不随 draft / validated / active 生命周期标签变化，旧任务按实际加载 digest 留证。
+- Git Flow 可通过 `trial_commission_id` 临时加载 validated 包；这不改变活动版本。
+- 试炼只接受结构化专业任务证据：目标成员、专业服务、Reviewer、Commission ID、验收、Token 与耗时必须相符，手填指标不再算证据。
+- 三次通过只允许进入 `activation_proposed`；高风险正式装备和回滚仍要求操作员显式动作。
+- 通用文件包导出、脚本沙箱、非 Git 试用适配器与 Telegram Commission 入口尚未实现。

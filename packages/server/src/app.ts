@@ -6,6 +6,7 @@ import {
   validateLocalConfig,
   analyzeTaskIntent,
   attributeFailure,
+  totemoraProductVersion,
   type LocalConfigSet,
   type ProviderRegistry,
   type RuntimeProgress,
@@ -38,6 +39,15 @@ import { CpaIllustrationService } from "./cpa-illustration-service";
 import {
   BarkNotificationService, BarkTargetMutationError, type BarkTargetMutationInput,
 } from "./bark-notification-service";
+import { EvidenceObservatory } from "./evidence-observatory";
+import {
+  SkillCommissionConflictError, SkillCommissionService, type SkillTrial,
+} from "./skill-commission-service";
+import { SkillRegistryService } from "./skill-registry-service";
+import {
+  SkillTrialConflictError, SkillTrialInputError, SkillTrialRunnerService, type SkillTrialRunInput,
+} from "./skill-trial-runner-service";
+import type { RecurringServiceState } from "./recurring-service-runner";
 
 export interface PlaygroundOptions {
   configDir: string;
@@ -47,6 +57,7 @@ export interface PlaygroundOptions {
   projectRoot?: string;
   fetchImpl?: typeof fetch;
   createIllustrationGenerator?: (config: LocalConfigSet) => ContentIllustrationGenerator | undefined;
+  recurringServiceStatus?: () => RecurringServiceState[];
 }
 
 interface RunJob {
@@ -100,6 +111,7 @@ interface DevelopmentTaskInput {
   goal: string;
   mode?: "commit" | "pull_request" | "merge";
   issue_mode?: "auto" | "none";
+  trial_commission_id?: string;
 }
 
 interface IntelligenceTask {
@@ -145,6 +157,9 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
   const intelligenceTaskStore = new JobStore<IntelligenceTask, IntelligenceTaskInput>(options.dataDir, "intelligence-tasks");
   const specialistTasks = new SpecialistTaskRepository(options.dataDir);
   const barkManagement = new BarkNotificationService(options.dataDir, options.fetchImpl ?? fetch);
+  const skillRegistry = new SkillRegistryService(
+    options.projectRoot ?? resolve(import.meta.dir, "../../.."), options.dataDir,
+  );
   const failInterruptedSpecialistTask = (taskId: string, summary: string) => {
     const task = specialistTasks.get(taskId);
     if (!task || !["queued", "routing", "running"].includes(task.status)) return;
@@ -209,6 +224,8 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
     intelligence: IntelligenceService;
     finance: FinanceIntelligenceService;
     content: ContentStudioService;
+    skills: SkillCommissionService;
+    skillTrials: SkillTrialRunnerService;
   }> | undefined;
   let bindingsRegistered = false;
   const getConfig = async () => {
@@ -280,6 +297,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
           failInterruptedSpecialistTask(work.id, work.error);
         }
       }
+      const skills = new SkillCommissionService(config, providers, options.dataDir);
       return {
         state,
         conversations: new MemberConversationService(config, providers, state, options.dataDir),
@@ -293,6 +311,11 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
           config, providers, state, options.dataDir,
           options.projectRoot ?? resolve(import.meta.dir, "../../.."),
           options.fetchImpl ?? fetch,
+        ),
+        skills,
+        skillTrials: new SkillTrialRunnerService(
+          config, providers, skills, options.dataDir,
+          async (workplaceId, goal, trialOptions) => (await getDevelopmentService()).prepare(workplaceId, goal, trialOptions),
         ),
         content,
       };
@@ -325,7 +348,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
       });
       try {
         task.result = await (await getDevelopmentService()).prepare(input.workplace_id, input.goal.trim(), {
-          mode: task.mode, issue_mode: task.issue_mode,
+          mode: task.mode, issue_mode: task.issue_mode, trial_commission_id: input.trial_commission_id,
         });
         task.proposal_id = task.result.id;
       } catch (error) {
@@ -638,7 +661,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
         if (request.method === "GET" && url.pathname === "/api/status") {
           const config = await getConfig();
           return json({
-            version: "0.11.0-finance-intelligence-vertical",
+            version: totemoraProductVersion(),
             settlement: "ready",
             active_members: config.agents.agents.filter((member) => !["inactive", "retired"].includes(member.status ?? "active")).length,
             capabilities: {
@@ -661,13 +684,162 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
               telegram_bot: "group_commands_feedback_v1",
               content_studio: "three_member_text_visual_evidence_v2",
               specialist_services: "typed_contract_v1",
+              evidence_observatory: "cross_domain_funnel_v1",
+              conversational_skills: "commission_trial_activation_v1",
+              skill_registry: "local_package_browser_v2",
+              skill_trials: "member_baseline_trial_review_v1",
             },
           });
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/operator/session") {
+          requireOperator(request, options.operatorToken);
+          return json({ authenticated: true });
         }
 
         if (request.method === "GET" && url.pathname === "/api/services") {
           await ensureServiceBindings();
           return json({ services: SPECIALIST_SERVICES, bindings: specialistTasks.bindings() });
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/evidence/overview") {
+          return json(await new EvidenceObservatory(options.dataDir, await getConfig()).overview());
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/operations/recurring-services") {
+          requireOperator(request, options.operatorToken);
+          return json({ services: options.recurringServiceStatus?.() ?? [] });
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/skills/commissions") {
+          requireOperator(request, options.operatorToken);
+          return json({ commissions: (await getMemberServices()).skills.list() });
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/skills/trial-runs") {
+          requireOperator(request, options.operatorToken);
+          return json({ runs: (await getMemberServices()).skillTrials.list(url.searchParams.get("commission_id") ?? undefined) });
+        }
+
+        const skillTrialRunDetailMatch = url.pathname.match(/^\/api\/skills\/trial-runs\/([^/]+)$/);
+        if (request.method === "GET" && skillTrialRunDetailMatch) {
+          requireOperator(request, options.operatorToken);
+          const run = (await getMemberServices()).skillTrials.get(skillTrialRunDetailMatch[1]!);
+          return run ? json(run) : json({ error: "Skill trial run not found" }, 404);
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/skills/registry") {
+          try { return json(await skillRegistry.list({ refresh: url.searchParams.get("refresh") === "1" })); }
+          catch (error) {
+            console.error(JSON.stringify({ event: "skill_registry_scan_failed", error: error instanceof Error ? error.message : String(error) }));
+            return json({ error: "Skill registry scan failed" }, 500);
+          }
+        }
+
+        const skillRegistryFileMatch = url.pathname.match(/^\/api\/skills\/registry\/([^/]+)\/file$/);
+        if (request.method === "GET" && skillRegistryFileMatch) {
+          requireOperator(request, options.operatorToken);
+          try {
+            return json(await skillRegistry.readFile(
+              decodeURIComponent(skillRegistryFileMatch[1]!),
+              url.searchParams.get("path") ?? "",
+            ));
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Skill file preview failed";
+            if (["Invalid Skill id", "Invalid Skill file path"].includes(message)) return json({ error: message }, 400);
+            if (["Skill not found", "Skill file not found"].includes(message)) return json({ error: message }, 404);
+            if (message === "Skill file preview forbidden") return json({ error: message }, 415);
+            if (message === "Skill file preview too large") return json({ error: message }, 413);
+            console.error(JSON.stringify({ event: "skill_registry_file_failed", error: message }));
+            return json({ error: "Skill file preview failed" }, 500);
+          }
+        }
+
+        const skillRegistryMatch = url.pathname.match(/^\/api\/skills\/registry\/([^/]+)$/);
+        if (request.method === "GET" && skillRegistryMatch) {
+          try {
+            const skill = await skillRegistry.get(decodeURIComponent(skillRegistryMatch[1]!));
+            return skill ? json(skill) : json({ error: "Skill not found" }, 404);
+          } catch (error) {
+            if (error instanceof Error && error.message === "Invalid Skill id") return json({ error: error.message }, 400);
+            console.error(JSON.stringify({ event: "skill_registry_scan_failed", error: error instanceof Error ? error.message : String(error) }));
+            return json({ error: "Skill registry scan failed" }, 500);
+          }
+        }
+
+        if (request.method === "POST" && url.pathname === "/api/skills/commissions") {
+          requireOperator(request, options.operatorToken);
+          const input = await request.json() as { message?: string };
+          return json(await (await getMemberServices()).skills.create(input.message ?? ""), 201);
+        }
+
+        const skillMessageMatch = url.pathname.match(/^\/api\/skills\/commissions\/([^/]+)\/messages$/);
+        if (request.method === "POST" && skillMessageMatch) {
+          requireOperator(request, options.operatorToken);
+          const input = await request.json() as { message?: string };
+          return json(await (await getMemberServices()).skills.addMessage(skillMessageMatch[1]!, input.message ?? ""));
+        }
+
+        const skillValidateMatch = url.pathname.match(/^\/api\/skills\/commissions\/([^/]+)\/validate$/);
+        if (request.method === "POST" && skillValidateMatch) {
+          requireOperator(request, options.operatorToken);
+          return json((await getMemberServices()).skills.validate(skillValidateMatch[1]!));
+        }
+
+        const skillTrialMatch = url.pathname.match(/^\/api\/skills\/commissions\/([^/]+)\/trials$/);
+        if (request.method === "POST" && skillTrialMatch) {
+          requireOperator(request, options.operatorToken);
+          const input = await request.json() as Pick<SkillTrial,
+            "baseline_evidence_id" | "trial_evidence_id" | "reviewer_member_id" | "outcome" | "summary"
+          >;
+          return json((await getMemberServices()).skills.recordTrial(skillTrialMatch[1]!, input), 201);
+        }
+
+        const skillTrialRunMatch = url.pathname.match(/^\/api\/skills\/commissions\/([^/]+)\/run-trial$/);
+        if (request.method === "POST" && skillTrialRunMatch) {
+          requireOperator(request, options.operatorToken);
+          const input = await request.json() as SkillTrialRunInput;
+          try {
+            return json((await getMemberServices()).skillTrials.start(skillTrialRunMatch[1]!, input), 202);
+          } catch (error) {
+            if (error instanceof SkillTrialInputError || error instanceof SkillTrialConflictError) throw error;
+            const reference = crypto.randomUUID().slice(0, 8);
+            console.error("Skill trial start failed", { reference, error });
+            return json({ error: "Unable to start Skill trial", reference }, 500);
+          }
+        }
+
+        const skillProposalMatch = url.pathname.match(/^\/api\/skills\/commissions\/([^/]+)\/propose-activation$/);
+        if (request.method === "POST" && skillProposalMatch) {
+          requireOperator(request, options.operatorToken);
+          return json((await getMemberServices()).skills.proposeActivation(skillProposalMatch[1]!));
+        }
+
+        const skillActivationMatch = url.pathname.match(/^\/api\/skills\/commissions\/([^/]+)\/activate$/);
+        if (request.method === "POST" && skillActivationMatch) {
+          requireOperator(request, options.operatorToken);
+          const input = await request.json() as { approved_by?: string };
+          return json((await getMemberServices()).skills.activate(skillActivationMatch[1]!, input.approved_by ?? "operator"));
+        }
+
+        const skillRollbackMatch = url.pathname.match(/^\/api\/skills\/commissions\/([^/]+)\/rollback$/);
+        if (request.method === "POST" && skillRollbackMatch) {
+          requireOperator(request, options.operatorToken);
+          const input = await request.json() as { reviewed_by?: string };
+          return json((await getMemberServices()).skills.rollback(skillRollbackMatch[1]!, input.reviewed_by ?? "operator"));
+        }
+
+        const skillCancelMatch = url.pathname.match(/^\/api\/skills\/commissions\/([^/]+)\/cancel$/);
+        if (request.method === "POST" && skillCancelMatch) {
+          requireOperator(request, options.operatorToken);
+          return json((await getMemberServices()).skills.cancel(skillCancelMatch[1]!));
+        }
+
+        const skillCommissionMatch = url.pathname.match(/^\/api\/skills\/commissions\/([^/]+)$/);
+        if (request.method === "GET" && skillCommissionMatch) {
+          requireOperator(request, options.operatorToken);
+          const commission = (await getMemberServices()).skills.get(skillCommissionMatch[1]!);
+          return commission ? json(commission) : json({ error: "Skill commission not found" }, 404);
         }
 
         if (request.method === "GET" && url.pathname === "/api/service-tasks") {
@@ -1069,10 +1241,11 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
           const input = await request.json() as {
             workplace_id?: string; goal?: string;
             mode?: "commit" | "pull_request" | "merge"; issue_mode?: "auto" | "none";
+            trial_commission_id?: string;
           };
           if (!input.workplace_id || !input.goal?.trim()) throw new Error("workplace_id and goal are required");
           return json(await (await getDevelopmentService()).prepare(input.workplace_id, input.goal.trim(), {
-            mode: input.mode, issue_mode: input.issue_mode,
+            mode: input.mode, issue_mode: input.issue_mode, trial_commission_id: input.trial_commission_id,
           }), 201);
         }
 
@@ -1084,7 +1257,15 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
             goal: input.goal ?? "",
             mode: input.mode,
             issue_mode: input.issue_mode,
+            trial_commission_id: input.trial_commission_id,
           }), 202);
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/development/tasks") {
+          requireOperator(request, options.operatorToken);
+          return json({ tasks: [...developmentTasks.values()]
+            .sort((left, right) => right.created_at.localeCompare(left.created_at))
+            .slice(0, 50) });
         }
 
         const developmentTaskMatch = url.pathname.match(/^\/api\/development\/tasks\/([^/]+)$/);
@@ -1216,7 +1397,9 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
       } catch (error) {
         return json(
           { error: error instanceof Error ? error.message : String(error) },
-          error instanceof HttpError ? error.status : 400,
+          error instanceof HttpError ? error.status
+            : error instanceof SkillCommissionConflictError || error instanceof SkillTrialConflictError ? 409
+              : error instanceof SkillTrialInputError ? 400 : 400,
         );
       }
     },
