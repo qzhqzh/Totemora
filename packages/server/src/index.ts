@@ -3,6 +3,7 @@ import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { createTotemoraMcpHttpHandler } from "@totemora/mcp";
 import { createPlaygroundApp } from "./app";
 import { RecurringServiceRunner } from "./recurring-service-runner";
+import { resolveWebAsset } from "./web-assets";
 
 const root = resolve(import.meta.dir, "../../..");
 const webRoot = resolve(root, "packages/web/src");
@@ -31,13 +32,9 @@ const server = Bun.serve({
     if (pathname.startsWith("/api/") || pathname.startsWith("/r/")) return app.fetch(request);
     if (pathname === "/mcp") return mcpHandler(request);
     if (pathname === "/favicon.ico") return new Response(null, { status: 204 });
-    const fileName = pathname === "/" || pathname === "/skills" || pathname === "/skills/"
-      ? "index.html"
-      : pathname.slice(1);
-    if (!["index.html", "app.js", "styles.css"].includes(fileName)) {
-      return new Response("Not found", { status: 404 });
-    }
-    return new Response(Bun.file(resolve(webRoot, fileName)), {
+    const webAsset = resolveWebAsset(webRoot, pathname);
+    if (!webAsset) return new Response("Not found", { status: 404 });
+    return new Response(Bun.file(webAsset), {
       headers: { "Cache-Control": "no-store" },
     });
   },

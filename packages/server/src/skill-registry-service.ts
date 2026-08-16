@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, open, opendir, realpath } from "node:fs/promises";
+import { lstat, mkdir, open, opendir, realpath, rm, writeFile } from "node:fs/promises";
 import { basename, extname, isAbsolute, relative, resolve, sep } from "node:path";
 
 import { StateDatabase } from "./state-database";
@@ -173,6 +173,143 @@ export class SkillRegistryService {
   async get(id: string): Promise<SkillRegistryEntry | undefined> {
     if (!SAFE_SKILL_ID.test(id)) throw new Error("Invalid Skill id");
     return (await this.list()).skills.find((skill) => skill.id === id);
+  }
+
+  async create(input: { id: string; name?: string; description?: string; content?: string; tags?: string[] }): Promise<SkillRegistryEntry> {
+    const id = input.id?.trim();
+    if (!id || !SAFE_SKILL_ID.test(id)) throw new Error("Invalid Skill id");
+    const name = input.name?.trim() || id;
+    const description = input.description?.trim() || `Skill package for ${name}`;
+    const customContent = input.content?.trim();
+    const tags = Array.isArray(input.tags)
+      ? [...new Set(input.tags.map((t) => String(t).trim().toLowerCase()).filter(Boolean))]
+      : [];
+
+    await mkdir(this.root, { recursive: true });
+    const targetDir = resolve(this.root, id);
+    assertInside(this.root, targetDir);
+
+    try {
+      const existing = await lstat(targetDir);
+      if (existing) throw new Error("Skill already exists");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+
+    await mkdir(targetDir, { recursive: true });
+
+    const skillMarkdown = [
+      "---",
+      `name: ${id}`,
+      `description: ${description.replace(/\r?\n/g, " ")}`,
+      ...(tags.length ? ["tags:", ...tags.map((t) => `  - ${t}`)] : []),
+      "---",
+      "",
+      `# ${name}`,
+      "",
+      customContent || `> ${description}\n\n## 核心规则\n\n- 明确定义输入与输出边界\n- 遵循确定性验证与安全规范\n`,
+      "",
+    ].join("\n");
+
+    const skillYaml = [
+      "schema_version: 1",
+      `id: ${id}`,
+      `name: ${name}`,
+      "version: 1",
+      "status: candidate",
+      ...(tags.length ? ["tags:", ...tags.map((t) => `  - ${t}`)] : []),
+      "source:",
+      "  kind: local",
+      "  reference: user-created",
+      "",
+    ].join("\n");
+
+    await writeFile(resolve(targetDir, "SKILL.md"), skillMarkdown, "utf8");
+    await writeFile(resolve(targetDir, "skill.yaml"), skillYaml, "utf8");
+
+    this.cache = undefined;
+    const created = await this.get(id);
+    if (!created) throw new Error("Failed to initialize created Skill package");
+    return created;
+  }
+
+  async update(id: string, input: { name?: string; description?: string; content?: string; tags?: string[] }): Promise<SkillRegistryEntry> {
+    if (!SAFE_SKILL_ID.test(id)) throw new Error("Invalid Skill id");
+    const skill = await this.get(id);
+    if (!skill) throw new Error("Skill not found");
+
+    const packageDirectory = resolve(this.projectRoot, skill.path);
+    assertInside(this.root, packageDirectory);
+
+    const name = input.name?.trim() || skill.name;
+    const description = input.description?.trim() || skill.description;
+    const tags = Array.isArray(input.tags)
+      ? [...new Set(input.tags.map((t) => String(t).trim().toLowerCase()).filter(Boolean))]
+      : skill.tags;
+
+    let markdownBody: string;
+    if (input.content !== undefined) {
+      markdownBody = input.content.trim();
+    } else {
+      const existingFile = skill.files.find((f) => f.path === "SKILL.md");
+      if (existingFile) {
+        const fullContent = (await this.readFile(id, "SKILL.md")).content;
+        const bodyMatch = fullContent.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?([\s\S]*)$/);
+        markdownBody = (bodyMatch ? bodyMatch[1] : fullContent).trim();
+      } else {
+        markdownBody = `> ${description}\n\n## 核心规则\n\n- 明确定义输入与输出边界\n- 遵循确定性验证与安全规范\n`;
+      }
+    }
+
+    const skillMarkdown = [
+      "---",
+      `name: ${id}`,
+      `description: ${description.replace(/\r?\n/g, " ")}`,
+      ...(tags.length ? ["tags:", ...tags.map((t) => `  - ${t}`)] : []),
+      "---",
+      "",
+      markdownBody.startsWith("# ") ? markdownBody : `# ${name}\n\n${markdownBody}`,
+      "",
+    ].join("\n");
+
+    const skillYaml = [
+      "schema_version: 1",
+      `id: ${id}`,
+      `name: ${name}`,
+      ...(skill.version ? [`version: ${skill.version}`] : ["version: 1"]),
+      `status: ${skill.status}`,
+      ...(tags.length ? ["tags:", ...tags.map((t) => `  - ${t}`)] : []),
+      ...(skill.source.provenance_kind || skill.source.reference ? [
+        "source:",
+        ...(skill.source.provenance_kind ? [`  kind: ${skill.source.provenance_kind}`] : ["  kind: local"]),
+        ...(skill.source.reference ? [`  reference: ${skill.source.reference}`] : []),
+      ] : [
+        "source:",
+        "  kind: local",
+        "  reference: user-governed",
+      ]),
+      "",
+    ].join("\n");
+
+    await writeFile(resolve(packageDirectory, "SKILL.md"), skillMarkdown, "utf8");
+    await writeFile(resolve(packageDirectory, "skill.yaml"), skillYaml, "utf8");
+
+    this.cache = undefined;
+    const updated = await this.get(id);
+    if (!updated) throw new Error("Failed to reload updated Skill package");
+    return updated;
+  }
+
+  async delete(id: string): Promise<void> {
+    if (!SAFE_SKILL_ID.test(id)) throw new Error("Invalid Skill id");
+    const skill = await this.get(id);
+    if (!skill) throw new Error("Skill not found");
+
+    const packageDirectory = resolve(this.projectRoot, skill.path);
+    assertInside(this.root, packageDirectory);
+
+    await rm(packageDirectory, { recursive: true, force: true });
+    this.cache = undefined;
   }
 
   async readFile(id: string, filePath: string): Promise<{

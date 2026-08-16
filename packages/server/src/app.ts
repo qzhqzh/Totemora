@@ -736,6 +736,29 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
           }
         }
 
+        if (request.method === "POST" && url.pathname === "/api/skills/registry") {
+          requireOperator(request, options.operatorToken);
+          try {
+            const input = await request.json() as { id?: string; name?: string; description?: string; content?: string; tags?: string[] };
+            if (!input.id || typeof input.id !== "string") return json({ error: "Skill id is required" }, 400);
+            const created = await skillRegistry.create({
+              id: input.id,
+              name: input.name,
+              description: input.description,
+              content: input.content,
+              tags: Array.isArray(input.tags) ? input.tags : [],
+            });
+            return json(created, 201);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Failed to create Skill";
+            if (["Invalid Skill id", "Skill already exists", "Skill id is required"].includes(message)) {
+              return json({ error: message }, 400);
+            }
+            console.error(JSON.stringify({ event: "skill_creation_failed", error: message }));
+            return json({ error: message }, 500);
+          }
+        }
+
         const skillRegistryFileMatch = url.pathname.match(/^\/api\/skills\/registry\/([^/]+)\/file$/);
         if (request.method === "GET" && skillRegistryFileMatch) {
           requireOperator(request, options.operatorToken);
@@ -764,6 +787,39 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
             if (error instanceof Error && error.message === "Invalid Skill id") return json({ error: error.message }, 400);
             console.error(JSON.stringify({ event: "skill_registry_scan_failed", error: error instanceof Error ? error.message : String(error) }));
             return json({ error: "Skill registry scan failed" }, 500);
+          }
+        }
+
+        if (request.method === "PUT" && skillRegistryMatch) {
+          requireOperator(request, options.operatorToken);
+          try {
+            const skillId = decodeURIComponent(skillRegistryMatch[1]!);
+            const input = await request.json() as { name?: string; description?: string; content?: string; tags?: string[] };
+            const updated = await skillRegistry.update(skillId, input);
+            return json(updated);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Failed to update Skill";
+            if (["Invalid Skill id", "Skill file preview forbidden", "Skill file preview too large"].includes(message)) {
+              return json({ error: message }, 400);
+            }
+            if (message === "Skill not found") return json({ error: message }, 404);
+            console.error(JSON.stringify({ event: "skill_update_failed", error: message }));
+            return json({ error: message }, 500);
+          }
+        }
+
+        if (request.method === "DELETE" && skillRegistryMatch) {
+          requireOperator(request, options.operatorToken);
+          try {
+            const skillId = decodeURIComponent(skillRegistryMatch[1]!);
+            await skillRegistry.delete(skillId);
+            return json({ success: true, id: skillId });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Failed to delete Skill";
+            if (message === "Invalid Skill id") return json({ error: message }, 400);
+            if (message === "Skill not found") return json({ error: message }, 404);
+            console.error(JSON.stringify({ event: "skill_deletion_failed", error: message }));
+            return json({ error: message }, 500);
           }
         }
 

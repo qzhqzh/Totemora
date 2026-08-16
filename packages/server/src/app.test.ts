@@ -558,13 +558,60 @@ test("Skill registry API exposes repository-backed metadata without accepting se
     operatorToken: "operator-secret",
     createProviderRegistry: () => ({ get: () => new PlaygroundProvider() }),
   });
+  expect((await app.fetch(new Request("http://local/api/skills/registry", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id: "created-skill", name: "新建测试技能", description: "用于测试 API 创建", tags: ["design", "image"] }),
+  }))).status).toBe(401);
+
+  const createdSkillRes = await app.fetch(new Request("http://local/api/skills/registry", {
+    method: "POST",
+    headers: { ...authorized(), "content-type": "application/json" },
+    body: JSON.stringify({ id: "created-skill", name: "新建测试技能", description: "用于测试 API 创建", tags: ["design", "image"] }),
+  }));
+  expect(createdSkillRes.status).toBe(201);
+  const createdSkillJson = await createdSkillRes.json();
+  expect(createdSkillJson.id).toBe("created-skill");
+  expect(createdSkillJson.name).toBe("新建测试技能");
+  expect(createdSkillJson.tags).toEqual(["design", "image"]);
+
+  const updatedSkillRes = await app.fetch(new Request("http://local/api/skills/registry/created-skill", {
+    method: "PUT",
+    headers: { ...authorized(), "content-type": "application/json" },
+    body: JSON.stringify({ name: "已修改测试技能", description: "更新后的描述", tags: ["design", "image", "updated"] }),
+  }));
+  expect(updatedSkillRes.status).toBe(200);
+  const updatedSkillJson = await updatedSkillRes.json();
+  expect(updatedSkillJson.name).toBe("已修改测试技能");
+  expect(updatedSkillJson.tags).toEqual(["design", "image", "updated"]);
+
   const listed = await app.fetch(new Request("http://local/api/skills/registry"));
   expect(listed.status).toBe(200);
   const listedBody = await listed.json();
-  expect(listedBody).toMatchObject({
-    root: "skills",
-    skills: [{ id: "sample-skill", path: "skills/sample-skill", status: "warning" }],
+  expect(listedBody.root).toBe("skills");
+  expect(listedBody.skills.map((s: { id: string }) => s.id)).toEqual(["created-skill", "sample-skill"]);
+  expect(listedBody.skills.find((s: { id: string }) => s.id === "created-skill")).toMatchObject({
+    id: "created-skill",
+    name: "已修改测试技能",
+    description: "更新后的描述",
+    tags: ["design", "image", "updated"],
   });
+
+  expect((await app.fetch(new Request("http://local/api/skills/registry/created-skill", {
+    method: "DELETE",
+  }))).status).toBe(401);
+
+  const deletedSkillRes = await app.fetch(new Request("http://local/api/skills/registry/created-skill", {
+    method: "DELETE",
+    headers: authorized(),
+  }));
+  expect(deletedSkillRes.status).toBe(200);
+  expect(await deletedSkillRes.json()).toEqual({ success: true, id: "created-skill" });
+
+  const listedAfterDelete = await app.fetch(new Request("http://local/api/skills/registry"));
+  const listedAfterDeleteBody = await listedAfterDelete.json();
+  expect(listedAfterDeleteBody.skills.map((s: { id: string }) => s.id)).toEqual(["sample-skill"]);
+
   const detail = await app.fetch(new Request("http://local/api/skills/registry/sample-skill"));
   expect(await detail.json()).toMatchObject({
     id: "sample-skill", files: [{ path: "SKILL.md", kind: "manifest" }],

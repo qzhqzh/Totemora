@@ -1,7 +1,7 @@
 const $ = (id) => document.getElementById(id);
 const skillsRoute = location.pathname === "/skills" || location.pathname === "/skills/";
 document.body.classList.toggle("route-skills", skillsRoute);
-document.title = skillsRoute ? "技能 · 铁锅部落" : "铁锅部落";
+document.title = skillsRoute ? "能力 · 铁锅部落" : "铁锅部落";
 document.querySelectorAll("[data-primary-route]").forEach((link) => {
   const active = link.dataset.primaryRoute === (skillsRoute ? "skills" : "home");
   if (active) link.setAttribute("aria-current", "page");
@@ -24,6 +24,135 @@ let editingBarkTargetId;
 let registrySkills = [];
 let activeRegistrySkillId;
 let activeRegistryFilePath;
+let activeSkillTagFilter = "all";
+let activeAbilityTab = "skill";
+let activePromptId = "chief-task-router";
+let activePromptFilter = "all";
+let activeWorkflowId = "git-flow-pipeline";
+const newSkillSelectedTags = new Set();
+const editSkillSelectedTags = new Set();
+const PRESET_SKILL_TAGS = ["image", "design", "write", "git", "finance", "ops", "security", "data", "review"];
+
+const PROMPT_TEMPLATES = [
+  {
+    id: "chief-task-router",
+    name: "首领任务路由与选人决策",
+    category: "task",
+    role: "chief",
+    model: "deepseek/deepseek-v4-pro",
+    summary: "分析任务复杂度、安全边界与预算约束，并在部落成员中完成能力匹配和选人排班。",
+    variables: ["goal", "workspace", "budget", "acceptance_criteria"],
+    content: `你是 Totemora 部落的首领（Chief）。你的职责是全面理解任务目标，评估输入输出边界与安全级别，并在可用成员中挑选最胜任的成员分派任务。
+
+## 决策规则
+1. 识别任务模式：只读分析（inspect）、代码变更（change）、情报巡查（watch）、内容创作（content）。
+2. 在预算和上下文窗口约束下，优先选择通过历史验收的专员。
+3. 产出结构化的成员指派（Assignment）与验收标准（Acceptance Plan）。`,
+  },
+  {
+    id: "git-flow-reviewer",
+    name: "Git Flow 变更审核与自检",
+    category: "system",
+    role: "specialist",
+    model: "deepseek/deepseek-v4-pro",
+    summary: "负责检查工作树改动，执行确定性校验命令，确保符合分支模型与 Conventional Commits 规范。",
+    variables: ["git_status", "diff", "branch_model", "validation_commands"],
+    content: `你是 Totemora 的 Git 流程专员（Git Steward）。你负责在受限工作地内拟定变更提交计划。
+
+## 核心规范
+- 严格遵循仓库分支模型（mainline 模式或 develop 模式）。
+- 不顺手重构未要求的代码，保留用户已有工作区改动。
+- 生成规范的 Conventional Commit 提交信息。
+- 提供自检证据，确保所有验证命令全部通过。`,
+  },
+  {
+    id: "content-duo-writer",
+    name: "创作者工坊选题与双人撰写",
+    category: "persona",
+    role: "writer",
+    model: "qwen/qwen-2.5-72b",
+    summary: "结合听风采集的情报与用户选题，撰写结构严密、可读性强、含实操指引的技术文章或热点解读。",
+    variables: ["topic", "source_candidate", "format", "target_audience"],
+    content: `你是 Totemora 创作者工坊的执笔成员。
+
+## 创作原则
+- 事实严谨：核心论点均引用真实来源或代码事实。
+- 结构清晰：采用总-分-总或教程步骤式推进，提供完整上下文。
+- 拒绝套话：直击技术本质与业务价值，输出可直接采纳复制的成果。`,
+  },
+  {
+    id: "finance-market-brief",
+    name: "观潮财经研报结构化提炼",
+    category: "task",
+    role: "analyst",
+    model: "qwen/qwen-2.5-72b",
+    summary: "从多源行情、宏观政策与权威公告中提炼市场异动归因与高价值情报简报。",
+    variables: ["market_sources", "watchlist", "novelty_window", "macro_events"],
+    content: `你是 Totemora 观潮台的财经情报分析员。
+
+## 提炼原则
+- 结构化提取：时间、标的、事件性质、影响范围、核心数据指标。
+- 新颖度去重：过滤 168 小时内的重复或泛化噪音。
+- 风险提示：对不确定市场信息标记置信度与证据来源。`,
+  },
+  {
+    id: "cpa-visual-director",
+    name: "绘影视觉配图策划与提示词构建",
+    category: "persona",
+    role: "illustrator",
+    model: "cpa/flux-pro",
+    summary: "将文章核心意象与技术概念转化为风格一致的高质量视觉提示词与线稿构图。",
+    variables: ["article_title", "article_summary", "visual_style", "aspect_ratio"],
+    content: `你是 Totemora 创作者工坊的绘影视觉策划。
+
+## 视觉原则
+- 意象契合：提炼文章核心技术图腾与概念隐喻。
+- 画面构图：保持暗黑科技与部落图腾融合的克制美学。
+- 提示词构建：精确描述主体、光影、构图与负向排查。`,
+  },
+];
+
+const WORKFLOW_TEMPLATES = [
+  {
+    id: "git-flow-pipeline",
+    name: "Git 变更提交与安全 PR 流水线",
+    trigger: "任务大厅发起或代码提交请求",
+    summary: "从工作区分析到本地提交、自检、首领验收，经操作员门禁后推送到 GitHub/Gitea 并创建 PR。",
+    steps: [
+      { name: "工作区分析与模式识别", actor: "Chief", desc: "分析 diff 改动范围与工作地 Policy 约束" },
+      { name: "编制提交计划与命令自检", actor: "Git Steward", desc: "生成 Conventional Commit 信息并运行验证命令" },
+      { name: "首领双重验收", actor: "Chief", desc: "独立核对验证输出与改动范围，确认无越界修改" },
+      { name: "操作员门禁确认", actor: "Operator", desc: "人工授权执行 Git Commit / Push / PR / Merge" },
+      { name: "证据归档与经历演进", actor: "Observatory", desc: "记录 SHA 与产物证据，更新参与成员能力画像" },
+    ],
+  },
+  {
+    id: "content-duo-studio",
+    name: "创作者工坊双人协作内容管线",
+    trigger: "情报候选采纳或用户手动选题",
+    summary: "听风选题调研 → 千工执笔初稿 → 绘影生成配图 → 双盲交叉审校 → 形成可复制作品案卷。",
+    steps: [
+      { name: "选题与背景调研", actor: "听风 (Researcher)", desc: "搜集权威背景材料与技术线索" },
+      { name: "正文起草与结构化排版", actor: "千工 (Writer)", desc: "撰写教程长文或热点短帖正文" },
+      { name: "视觉配图策划与生成", actor: "绘影 (Illustrator)", desc: "构建配图简报并调用 CPA 模型生成配图" },
+      { name: "独立审校与打分", actor: "Reviewer", desc: "校验事实一致性、代码可运行性与配图语义契合度" },
+      { name: "案卷入库与采纳追踪", actor: "Studio Dossier", desc: "生成作品版本，记录用户复制与采纳信号" },
+    ],
+  },
+  {
+    id: "intelligence-watch-cycle",
+    name: "60s 全局常驻巡查与情报萃取流",
+    trigger: "后台 RecurringService 调度器每 60 秒触发",
+    summary: "自动巡查 AI 与财经权威来源，经价值漏斗与去重打分后推送到 Bark 移动设备与情报台。",
+    steps: [
+      { name: "权威源线索采集", actor: "Watch Runner", desc: "定时轮询官方披露、市场媒体与技术资讯" },
+      { name: "文本清洗与语义去重", actor: "Intelligence Dispatcher", desc: "对比 168 小时历史候选池，剔除冗余相似消息" },
+      { name: "多维价值漏斗评分", actor: "Score Engine", desc: "评估置信度、技术突破性与业务相关度" },
+      { name: "结构化摘要生成", actor: "Analyst Member", desc: "提炼标题要点并生成事实证据" },
+      { name: "多路由设备推送", actor: "Bark Service", desc: "根据用户偏好阈值推送到不同通道的 Bark 设备" },
+    ],
+  },
+];
 let skillTrialRuns = [];
 let skillCommissions = [];
 
@@ -384,6 +513,8 @@ async function loadSkillRegistry({ keepSelection = true, refresh = false } = {})
     registrySkills = result.skills;
     $("skill-registry-root").textContent = `${result.root}/`;
     renderSkillRegistrySummary(registrySkills);
+    renderSkillTagFilterBar();
+    renderNewSkillTagPresets();
     if (!registrySkills.length) {
       activeRegistrySkillId = undefined;
       list.innerHTML = '<div class="skill-registry-placeholder"><h3>还没有 Skill</h3><p>在仓库 skills/&lt;skill-id&gt;/SKILL.md 中加入第一个开放格式 Skill 后重新扫描。</p></div>';
@@ -404,6 +535,7 @@ async function loadSkillRegistry({ keepSelection = true, refresh = false } = {})
     registrySkills = [];
     activeRegistrySkillId = undefined;
     $("skill-registry-summary").innerHTML = "";
+    renderSkillTagFilterBar();
     list.innerHTML = `<div class="skill-registry-placeholder"><h3>技能库读取失败</h3><p>${escapeHtml(error.message)}</p></div>`;
     detail.innerHTML = '<div class="skill-registry-placeholder"><h3>无法显示详情</h3><p>请检查 Gateway 和仓库 skills/ 目录后重新扫描。</p></div>';
     live.classList.add("error");
@@ -411,6 +543,50 @@ async function loadSkillRegistry({ keepSelection = true, refresh = false } = {})
   } finally {
     button.disabled = false;
   }
+}
+
+function renderSkillTagFilterBar() {
+  const bar = $("skill-tag-filter-bar");
+  if (!bar) return;
+  const allTags = new Set();
+  for (const skill of registrySkills) {
+    for (const tag of skill.tags || []) allTags.add(tag);
+  }
+  const tagsList = ["all", ...Array.from(allTags).sort()];
+  bar.innerHTML = tagsList.map((tag) => `
+    <button type="button" class="skill-tag-filter-pill ${tag === activeSkillTagFilter ? "active" : ""}" data-skill-filter-tag="${escapeHtml(tag)}">
+      ${tag === "all" ? "全部" : `#${escapeHtml(tag)}`}
+    </button>
+  `).join("");
+}
+
+function renderNewSkillTagPresets() {
+  const container = $("new-skill-tag-presets");
+  if (!container) return;
+  const existingTags = new Set(PRESET_SKILL_TAGS);
+  for (const skill of registrySkills) {
+    for (const tag of skill.tags || []) existingTags.add(tag);
+  }
+  container.innerHTML = Array.from(existingTags).sort().map((tag) => `
+    <button type="button" class="skill-tag-preset-btn ${newSkillSelectedTags.has(tag) ? "selected" : ""}" data-preset-tag="${escapeHtml(tag)}">
+      ${newSkillSelectedTags.has(tag) ? "✓ " : "+"}${escapeHtml(tag)}
+    </button>
+  `).join("");
+}
+
+function renderNewSkillSelectedTags() {
+  const container = $("new-skill-selected-tags");
+  if (!container) return;
+  if (!newSkillSelectedTags.size) {
+    container.innerHTML = '<span style="color:var(--muted); font-size:11px;">未选择标签（点击上方常用或输入自定义标签）</span>';
+    return;
+  }
+  container.innerHTML = Array.from(newSkillSelectedTags).map((tag) => `
+    <span class="skill-tag-chip">
+      #${escapeHtml(tag)}
+      <button type="button" data-remove-tag="${escapeHtml(tag)}" title="移除标签">×</button>
+    </span>
+  `).join("");
 }
 
 function renderSkillRegistrySummary(skills) {
@@ -425,10 +601,29 @@ function renderSkillRegistrySummary(skills) {
 }
 
 function renderSkillRegistryList() {
-  $("skill-registry-list").innerHTML = registrySkills.map((skill) => `<button type="button" class="skill-registry-item" data-registry-skill="${escapeHtml(skill.id)}" aria-pressed="${skill.id === activeRegistrySkillId}">
-    <span><strong>${escapeHtml(skill.name)}</strong><small>${escapeHtml(skill.id)} · ${escapeHtml(skill.version ? `v${skill.version}` : skill.hash_short)}</small><em>查看详情</em></span>
-    <span class="skill-registry-state ${escapeHtml(skill.status)}">${escapeHtml(registryStatusLabel(skill.status))}</span>
-  </button>`).join("");
+  const filtered = activeSkillTagFilter === "all"
+    ? registrySkills
+    : registrySkills.filter((skill) => (skill.tags || []).includes(activeSkillTagFilter));
+
+  if (!filtered.length) {
+    $("skill-registry-list").innerHTML = `<p class="skill-empty">没有标签为 #${escapeHtml(activeSkillTagFilter)} 的 Skill。</p>`;
+    return;
+  }
+
+  $("skill-registry-list").innerHTML = filtered.map((skill) => {
+    const tagsHtml = (skill.tags && skill.tags.length)
+      ? `<div class="skill-tag-list">${skill.tags.map((t) => `<span class="skill-tag-badge">#${escapeHtml(t)}</span>`).join("")}</div>`
+      : "";
+    return `<button type="button" class="skill-registry-item" data-registry-skill="${escapeHtml(skill.id)}" aria-pressed="${skill.id === activeRegistrySkillId}">
+      <span>
+        <strong>${escapeHtml(skill.name)}</strong>
+        <small>${escapeHtml(skill.id)} · ${escapeHtml(skill.version ? `v${skill.version}` : skill.hash_short)}</small>
+        ${tagsHtml}
+        <em>查看详情</em>
+      </span>
+      <span class="skill-registry-state ${escapeHtml(skill.status)}">${escapeHtml(registryStatusLabel(skill.status))}</span>
+    </button>`;
+  }).join("");
 }
 
 function renderSkillRegistryDetail(skill) {
@@ -457,11 +652,16 @@ function renderSkillRegistryDetail(skill) {
     : skill.status === "active" ? `仓库声明 · ${skill.version ? `v${skill.version}` : skill.hash_short}` : "尚未激活";
   detail.innerHTML = `<div class="skill-detail-head">
     <div><h3>${escapeHtml(skill.name)}</h3><p>${escapeHtml(skill.description)}</p><small><code>${escapeHtml(skill.id)}</code> · ${skill.version ? `v${skill.version}` : escapeHtml(skill.hash_short)}</small></div>
-    <span class="skill-registry-state ${escapeHtml(skill.status)}">${escapeHtml(registryStatusLabel(skill.status))}</span>
+    <div style="display:flex; align-items:center; gap:8px;">
+      <button type="button" class="secondary" data-open-edit-skill="${escapeHtml(skill.id)}">编辑</button>
+      <button type="button" class="secondary" data-open-delete-skill="${escapeHtml(skill.id)}" data-target-name="${escapeHtml(skill.name)}" style="color:#e87968; border-color:rgba(232,121,104,0.4);">删除</button>
+      <span class="skill-registry-state ${escapeHtml(skill.status)}">${escapeHtml(registryStatusLabel(skill.status))}</span>
+    </div>
   </div>
   <div class="skill-detail-section skill-package-primary"><h4>Skill 包</h4><p class="skill-section-note">浏览仓库中的完整目录；文本内容需要操作员 Token，只读且不会执行脚本。</p>${files}</div>
   <dl class="skill-detail-meta">
     <div><dt>Skill ID</dt><dd><code>${escapeHtml(skill.id)}</code></dd></div>
+    <div><dt>标签 (Tags)</dt><dd>${(skill.tags && skill.tags.length) ? skill.tags.map((t) => `<span class="skill-tag-badge">#${escapeHtml(t)}</span>`).join(" ") : '<span style="color:var(--muted)">未打标</span>'}</dd></div>
     <div><dt>来源</dt><dd>本地仓库 · <code>${escapeHtml(skill.path)}</code>${skill.source.reference ? `<br><small>${escapeHtml(skill.source.provenance_kind || "provenance")} · ${escapeHtml(skill.source.reference)}</small>` : ""}</dd></div>
     <div><dt>版本 / Content hash</dt><dd>${skill.version ? `v${skill.version} · ` : ""}<code title="${escapeHtml(skill.content_hash)}">${escapeHtml(skill.hash_short)}</code></dd></div>
     <div><dt>绑定</dt><dd>${escapeHtml(binding)}</dd></div>
@@ -552,6 +752,545 @@ function formatFileSize(value) {
 
 $("refresh-skill-registry").addEventListener("click", () => void loadSkillRegistry({ keepSelection: true, refresh: true }));
 
+function openCreateSkillDialog() {
+  if (!operatorAuthenticated) {
+    openOperatorDialog();
+    return;
+  }
+  newSkillSelectedTags.clear();
+  renderNewSkillTagPresets();
+  renderNewSkillSelectedTags();
+  const status = $("create-skill-status");
+  if (status) {
+    status.className = "operator-login-status";
+    status.textContent = "创建 Skill 需要已验证的操作员身份。";
+  }
+  $("create-skill-dialog").showModal();
+  window.setTimeout(() => $("new-skill-id")?.focus(), 0);
+}
+
+$("create-skill-button")?.addEventListener("click", openCreateSkillDialog);
+$("create-skill-index-button")?.addEventListener("click", openCreateSkillDialog);
+$("create-skill-dialog-close")?.addEventListener("click", () => $("create-skill-dialog").close());
+$("create-skill-cancel")?.addEventListener("click", () => $("create-skill-dialog").close());
+
+$("skill-tag-filter-bar")?.addEventListener("click", (event) => {
+  const btn = event.target.closest("[data-skill-filter-tag]");
+  if (!btn) return;
+  activeSkillTagFilter = btn.dataset.skillFilterTag;
+  renderSkillTagFilterBar();
+  renderSkillRegistryList();
+});
+
+$("new-skill-tag-presets")?.addEventListener("click", (event) => {
+  const btn = event.target.closest("[data-preset-tag]");
+  if (!btn) return;
+  const tag = btn.dataset.presetTag.trim().toLowerCase();
+  if (newSkillSelectedTags.has(tag)) newSkillSelectedTags.delete(tag);
+  else newSkillSelectedTags.add(tag);
+  renderNewSkillTagPresets();
+  renderNewSkillSelectedTags();
+});
+
+$("new-skill-selected-tags")?.addEventListener("click", (event) => {
+  const btn = event.target.closest("[data-remove-tag]");
+  if (!btn) return;
+  const tag = btn.dataset.removeTag;
+  newSkillSelectedTags.delete(tag);
+  renderNewSkillTagPresets();
+  renderNewSkillSelectedTags();
+});
+
+function handleAddNewSkillTag() {
+  const input = $("new-skill-tag-input");
+  if (!input) return;
+  const raw = input.value.trim().toLowerCase();
+  if (!raw) return;
+  const tags = raw.split(/[,，\s]+/).filter(Boolean);
+  for (const tag of tags) newSkillSelectedTags.add(tag);
+  input.value = "";
+  renderNewSkillTagPresets();
+  renderNewSkillSelectedTags();
+}
+
+$("new-skill-tag-add-btn")?.addEventListener("click", handleAddNewSkillTag);
+$("new-skill-tag-input")?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    handleAddNewSkillTag();
+  }
+});
+
+$("create-skill-form")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const idInput = $("new-skill-id");
+  const nameInput = $("new-skill-name");
+  const descInput = $("new-skill-description");
+  const contentInput = $("new-skill-content");
+  const status = $("create-skill-status");
+  const submit = $("create-skill-submit");
+
+  const id = idInput.value.trim();
+  const name = nameInput.value.trim();
+  const description = descInput.value.trim();
+  const content = contentInput.value.trim();
+
+  if (!id || !name || !description) {
+    status.className = "operator-login-status error";
+    status.textContent = "请完整填写 Skill ID、名称与描述。";
+    return;
+  }
+
+  submit.disabled = true;
+  status.className = "operator-login-status";
+  status.textContent = "正在生成 Skill 包并写入仓库…";
+
+  try {
+    const created = await operatorApi("/api/skills/registry", {
+      method: "POST",
+      body: JSON.stringify({
+        id,
+        name,
+        description,
+        content,
+        tags: Array.from(newSkillSelectedTags),
+      }),
+    });
+    status.className = "operator-login-status success";
+    status.textContent = "创建成功！";
+    $("create-skill-dialog").close();
+    $("create-skill-form").reset();
+    newSkillSelectedTags.clear();
+
+    await loadSkillRegistry({ keepSelection: false, refresh: true });
+    activeRegistrySkillId = created.id;
+    activeRegistryFilePath = undefined;
+    renderSkillRegistryList();
+    renderSkillRegistryDetail(registrySkills.find((skill) => skill.id === activeRegistrySkillId));
+    if (skillsRoute) {
+      const url = new URL(location.href);
+      url.searchParams.set("skill", created.id);
+      history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+    }
+  } catch (error) {
+    status.className = "operator-login-status error";
+    status.textContent = `创建失败：${error.message}`;
+  } finally {
+    submit.disabled = false;
+  }
+});
+
+function renderEditSkillTagPresets() {
+  const container = $("edit-skill-tag-presets");
+  if (!container) return;
+  const existingTags = new Set(PRESET_SKILL_TAGS);
+  for (const skill of registrySkills) {
+    for (const tag of skill.tags || []) existingTags.add(tag);
+  }
+  container.innerHTML = Array.from(existingTags).sort().map((tag) => `
+    <button type="button" class="skill-tag-preset-btn ${editSkillSelectedTags.has(tag) ? "selected" : ""}" data-edit-preset-tag="${escapeHtml(tag)}">
+      ${editSkillSelectedTags.has(tag) ? "✓ " : "+"}${escapeHtml(tag)}
+    </button>
+  `).join("");
+}
+
+function renderEditSkillSelectedTags() {
+  const container = $("edit-skill-selected-tags");
+  if (!container) return;
+  if (!editSkillSelectedTags.size) {
+    container.innerHTML = '<span style="color:var(--muted); font-size:11px;">未选择标签（点击上方常用或输入自定义标签）</span>';
+    return;
+  }
+  container.innerHTML = Array.from(editSkillSelectedTags).map((tag) => `
+    <span class="skill-tag-chip">
+      #${escapeHtml(tag)}
+      <button type="button" data-edit-remove-tag="${escapeHtml(tag)}" title="移除标签">×</button>
+    </span>
+  `).join("");
+}
+
+async function openEditSkillDialog(skillId) {
+  if (!operatorAuthenticated) {
+    openOperatorDialog();
+    return;
+  }
+  const skill = registrySkills.find((item) => item.id === skillId);
+  if (!skill) return;
+
+  $("edit-skill-id").value = skill.id;
+  $("edit-skill-name").value = skill.name;
+  $("edit-skill-description").value = skill.description;
+
+  editSkillSelectedTags.clear();
+  for (const tag of skill.tags || []) editSkillSelectedTags.add(tag);
+  renderEditSkillTagPresets();
+  renderEditSkillSelectedTags();
+
+  const status = $("edit-skill-status");
+  if (status) {
+    status.className = "operator-login-status";
+    status.textContent = "正在读取当前 SKILL.md 内容…";
+  }
+  $("edit-skill-dialog").showModal();
+
+  try {
+    const file = await operatorApi(`/api/skills/registry/${encodeURIComponent(skill.id)}/file?path=SKILL.md`);
+    const fullContent = file.content;
+    const bodyMatch = fullContent.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?([\s\S]*)$/);
+    $("edit-skill-content").value = (bodyMatch ? bodyMatch[1] : fullContent).trim();
+    if (status) status.textContent = "保存修改需要已验证的操作员身份。";
+  } catch (error) {
+    $("edit-skill-content").value = "";
+    if (status) {
+      status.className = "operator-login-status error";
+      status.textContent = `读取 SKILL.md 失败：${error.message}，可在下方重新编写。`;
+    }
+  }
+}
+
+$("edit-skill-dialog-close")?.addEventListener("click", () => $("edit-skill-dialog").close());
+$("edit-skill-cancel")?.addEventListener("click", () => $("edit-skill-dialog").close());
+
+$("edit-skill-tag-presets")?.addEventListener("click", (event) => {
+  const btn = event.target.closest("[data-edit-preset-tag]");
+  if (!btn) return;
+  const tag = btn.dataset.editPresetTag.trim().toLowerCase();
+  if (editSkillSelectedTags.has(tag)) editSkillSelectedTags.delete(tag);
+  else editSkillSelectedTags.add(tag);
+  renderEditSkillTagPresets();
+  renderEditSkillSelectedTags();
+});
+
+$("edit-skill-selected-tags")?.addEventListener("click", (event) => {
+  const btn = event.target.closest("[data-edit-remove-tag]");
+  if (!btn) return;
+  const tag = btn.dataset.editRemoveTag;
+  editSkillSelectedTags.delete(tag);
+  renderEditSkillTagPresets();
+  renderEditSkillSelectedTags();
+});
+
+function handleAddEditSkillTag() {
+  const input = $("edit-skill-tag-input");
+  if (!input) return;
+  const raw = input.value.trim().toLowerCase();
+  if (!raw) return;
+  const tags = raw.split(/[,，\s]+/).filter(Boolean);
+  for (const tag of tags) editSkillSelectedTags.add(tag);
+  input.value = "";
+  renderEditSkillTagPresets();
+  renderEditSkillSelectedTags();
+}
+
+$("edit-skill-tag-add-btn")?.addEventListener("click", handleAddEditSkillTag);
+$("edit-skill-tag-input")?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    handleAddEditSkillTag();
+  }
+});
+
+$("edit-skill-form")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const id = $("edit-skill-id").value.trim();
+  const name = $("edit-skill-name").value.trim();
+  const description = $("edit-skill-description").value.trim();
+  const content = $("edit-skill-content").value.trim();
+  const status = $("edit-skill-status");
+  const submit = $("edit-skill-submit");
+
+  if (!id || !name || !description) {
+    status.className = "operator-login-status error";
+    status.textContent = "请完整填写 Skill 名称与描述。";
+    return;
+  }
+
+  submit.disabled = true;
+  status.className = "operator-login-status";
+  status.textContent = "正在更新 Skill 包并写入仓库…";
+
+  try {
+    const updated = await operatorApi(`/api/skills/registry/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        name,
+        description,
+        content,
+        tags: Array.from(editSkillSelectedTags),
+      }),
+    });
+    status.className = "operator-login-status success";
+    status.textContent = "修改已保存！";
+    $("edit-skill-dialog").close();
+
+    await loadSkillRegistry({ keepSelection: true, refresh: true });
+    activeRegistrySkillId = updated.id;
+    activeRegistryFilePath = "SKILL.md";
+    renderSkillRegistryList();
+    renderSkillRegistryDetail(registrySkills.find((skill) => skill.id === activeRegistrySkillId));
+  } catch (error) {
+    status.className = "operator-login-status error";
+    status.textContent = `修改失败：${error.message}`;
+  } finally {
+    submit.disabled = false;
+  }
+});
+
+function switchAbilityTab(tabId) {
+  activeAbilityTab = tabId;
+  document.querySelectorAll(".ability-tab-btn").forEach((btn) => {
+    const isSelected = btn.dataset.abilityTab === tabId;
+    btn.classList.toggle("active", isSelected);
+    btn.setAttribute("aria-selected", String(isSelected));
+  });
+  $("ability-tab-skill")?.classList.toggle("hidden", tabId !== "skill");
+  $("ability-tab-prompt")?.classList.toggle("hidden", tabId !== "prompt");
+  $("ability-tab-workflow")?.classList.toggle("hidden", tabId !== "workflow");
+
+  if (tabId === "prompt") renderPromptList();
+  if (tabId === "workflow") renderWorkflowList();
+
+  if (skillsRoute) {
+    const url = new URL(location.href);
+    url.searchParams.set("tab", tabId);
+    history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  }
+}
+
+document.querySelector(".ability-type-tabs")?.addEventListener("click", (event) => {
+  const btn = event.target.closest("[data-ability-tab]");
+  if (!btn) return;
+  switchAbilityTab(btn.dataset.abilityTab);
+});
+
+function renderPromptList() {
+  const list = $("prompt-list");
+  if (!list) return;
+  const filtered = activePromptFilter === "all"
+    ? PROMPT_TEMPLATES
+    : PROMPT_TEMPLATES.filter((p) => p.category === activePromptFilter);
+
+  list.innerHTML = filtered.map((prompt) => `
+    <button type="button" class="prompt-item" data-prompt-id="${escapeHtml(prompt.id)}" aria-pressed="${prompt.id === activePromptId}">
+      <strong>${escapeHtml(prompt.name)}</strong>
+      <small><code>${escapeHtml(prompt.id)}</code> · ${escapeHtml(prompt.model)}</small>
+      <div class="skill-tag-list"><span class="skill-tag-badge">#${escapeHtml(prompt.category)}</span><span class="skill-tag-badge">@${escapeHtml(prompt.role)}</span></div>
+    </button>
+  `).join("");
+
+  const selected = PROMPT_TEMPLATES.find((p) => p.id === activePromptId) || PROMPT_TEMPLATES[0];
+  if (selected) renderPromptDetail(selected);
+}
+
+function renderPromptDetail(prompt) {
+  const detail = $("prompt-detail");
+  if (!detail || !prompt) return;
+  detail.innerHTML = `
+    <div class="skill-detail-head">
+      <div>
+        <h3>${escapeHtml(prompt.name)}</h3>
+        <p>${escapeHtml(prompt.summary)}</p>
+        <small><code>${escapeHtml(prompt.id)}</code> · 适用角色: ${escapeHtml(prompt.role)}</small>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <button type="button" class="secondary" data-copy-prompt-btn>复制提示词</button>
+        <button type="button" class="secondary" data-open-delete-prompt="${escapeHtml(prompt.id)}" data-target-name="${escapeHtml(prompt.name)}" style="color:#e87968; border-color:rgba(232,121,104,0.4);">删除</button>
+      </div>
+    </div>
+    <dl class="skill-detail-meta">
+      <div><dt>分类</dt><dd><span class="skill-tag-badge">#${escapeHtml(prompt.category)}</span></dd></div>
+      <div><dt>适用模型</dt><dd><code>${escapeHtml(prompt.model)}</code></dd></div>
+      <div><dt>插值槽位 (Variables)</dt><dd>${prompt.variables.map((v) => `<code>{${escapeHtml(v)}}</code>`).join(" ")}</dd></div>
+      <div><dt>状态</dt><dd><span class="skill-registry-state active">系统就绪</span></dd></div>
+    </dl>
+    <div class="skill-detail-section">
+      <h4>提示词正文</h4>
+      <pre><code>${escapeHtml(prompt.content)}</code></pre>
+    </div>
+  `;
+}
+
+$("prompt-tag-filter-bar")?.addEventListener("click", (event) => {
+  const btn = event.target.closest("[data-prompt-filter]");
+  if (!btn) return;
+  activePromptFilter = btn.dataset.promptFilter;
+  document.querySelectorAll("[data-prompt-filter]").forEach((b) => b.classList.toggle("active", b === btn));
+  renderPromptList();
+});
+
+$("prompt-list")?.addEventListener("click", (event) => {
+  const btn = event.target.closest("[data-prompt-id]");
+  if (!btn) return;
+  activePromptId = btn.dataset.promptId;
+  renderPromptList();
+});
+
+$("prompt-detail")?.addEventListener("click", async (event) => {
+  const btn = event.target.closest("[data-copy-prompt-btn]");
+  if (!btn) return;
+  const prompt = PROMPT_TEMPLATES.find((p) => p.id === activePromptId);
+  if (prompt) {
+    await copyText(prompt.content);
+    btn.textContent = "已复制正文";
+    setTimeout(() => { btn.textContent = "复制提示词"; }, 2000);
+  }
+});
+
+function renderWorkflowList() {
+  const list = $("workflow-list");
+  if (!list) return;
+  list.innerHTML = WORKFLOW_TEMPLATES.map((wf) => `
+    <button type="button" class="workflow-item" data-workflow-id="${escapeHtml(wf.id)}" aria-pressed="${wf.id === activeWorkflowId}">
+      <strong>${escapeHtml(wf.name)}</strong>
+      <small><code>${escapeHtml(wf.id)}</code> · ${wf.steps.length} 个协同阶段</small>
+      <small style="color:var(--amber)">触发：${escapeHtml(wf.trigger)}</small>
+    </button>
+  `).join("");
+
+  const selected = WORKFLOW_TEMPLATES.find((wf) => wf.id === activeWorkflowId) || WORKFLOW_TEMPLATES[0];
+  if (selected) renderWorkflowDetail(selected);
+}
+
+function renderWorkflowDetail(wf) {
+  const detail = $("workflow-detail");
+  if (!detail || !wf) return;
+  detail.innerHTML = `
+    <div class="skill-detail-head">
+      <div>
+        <h3>${escapeHtml(wf.name)}</h3>
+        <p>${escapeHtml(wf.summary)}</p>
+        <small><code>${escapeHtml(wf.id)}</code></small>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <button type="button" class="secondary" data-open-delete-workflow="${escapeHtml(wf.id)}" data-target-name="${escapeHtml(wf.name)}" style="color:#e87968; border-color:rgba(232,121,104,0.4);">删除</button>
+        <span class="skill-registry-state active">常驻流水线</span>
+      </div>
+    </div>
+    <dl class="skill-detail-meta">
+      <div><dt>触发条件</dt><dd>${escapeHtml(wf.trigger)}</dd></div>
+      <div><dt>协同阶段</dt><dd>${wf.steps.length} 个流转门禁</dd></div>
+      <div><dt>证据审计</dt><dd>全链路不可篡改 Trace 记录</dd></div>
+      <div><dt>状态</dt><dd><span class="skill-registry-state active">活跃</span></dd></div>
+    </dl>
+    <div class="skill-detail-section">
+      <h4>流水线协同阶段 (Pipeline Steps)</h4>
+      <div class="pipeline-steps">
+        ${wf.steps.map((step, idx) => `
+          <div class="pipeline-step">
+            <span class="pipeline-step-num">${idx + 1}</span>
+            <div>
+              <strong>${escapeHtml(step.name)} <small style="color:var(--amber); font-weight:normal;">[执行者: ${escapeHtml(step.actor)}]</small></strong>
+              <p style="margin:4px 0 0; color:var(--muted); font-size:12px;">${escapeHtml(step.desc)}</p>
+            </div>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
+let pendingDeleteContext = null;
+
+function openDeleteConfirmDialog({ type, id, name }) {
+  if (type === "skill" && !operatorAuthenticated) {
+    openOperatorDialog();
+    return;
+  }
+  pendingDeleteContext = { type, id, name };
+  $("delete-confirm-target-name").textContent = name;
+  const input = $("delete-confirm-input");
+  input.value = "";
+  const submit = $("delete-confirm-submit");
+  submit.disabled = true;
+  const status = $("delete-confirm-status");
+  status.className = "operator-login-status";
+  status.textContent = "输入完全一致后方可确认删除。";
+  $("delete-confirm-dialog").showModal();
+  window.setTimeout(() => input.focus(), 0);
+}
+
+$("delete-confirm-input")?.addEventListener("input", (event) => {
+  if (!pendingDeleteContext) return;
+  const inputVal = event.target.value.trim();
+  const targetVal = pendingDeleteContext.name.trim();
+  const matches = inputVal === targetVal;
+  $("delete-confirm-submit").disabled = !matches;
+  const status = $("delete-confirm-status");
+  if (matches) {
+    status.className = "operator-login-status success";
+    status.textContent = "名称已匹配，点击确认删除即可永久移除。";
+  } else {
+    status.className = "operator-login-status";
+    status.textContent = "输入完全一致后方可确认删除。";
+  }
+});
+
+$("delete-confirm-dialog-close")?.addEventListener("click", () => $("delete-confirm-dialog").close());
+$("delete-confirm-cancel")?.addEventListener("click", () => $("delete-confirm-dialog").close());
+
+$("delete-confirm-form")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!pendingDeleteContext) return;
+  const { type, id, name } = pendingDeleteContext;
+  const submit = $("delete-confirm-submit");
+  const status = $("delete-confirm-status");
+
+  submit.disabled = true;
+  status.className = "operator-login-status";
+  status.textContent = "正在执行删除操作…";
+
+  try {
+    if (type === "skill") {
+      await operatorApi(`/api/skills/registry/${encodeURIComponent(id)}`, { method: "DELETE" });
+      $("delete-confirm-dialog").close();
+      await loadSkillRegistry({ keepSelection: false, refresh: true });
+    } else if (type === "prompt") {
+      const idx = PROMPT_TEMPLATES.findIndex((p) => p.id === id);
+      if (idx >= 0) PROMPT_TEMPLATES.splice(idx, 1);
+      $("delete-confirm-dialog").close();
+      const badge = $("prompt-count-badge");
+      if (badge) badge.textContent = `${PROMPT_TEMPLATES.length} 个模版`;
+      activePromptId = PROMPT_TEMPLATES[0]?.id;
+      renderPromptList();
+    } else if (type === "workflow") {
+      const idx = WORKFLOW_TEMPLATES.findIndex((w) => w.id === id);
+      if (idx >= 0) WORKFLOW_TEMPLATES.splice(idx, 1);
+      $("delete-confirm-dialog").close();
+      activeWorkflowId = WORKFLOW_TEMPLATES[0]?.id;
+      renderWorkflowList();
+    }
+  } catch (error) {
+    status.className = "operator-login-status error";
+    status.textContent = `删除失败：${error.message}`;
+    submit.disabled = false;
+  }
+});
+
+$("workflow-detail")?.addEventListener("click", (event) => {
+  const deleteBtn = event.target.closest("[data-open-delete-workflow]");
+  if (deleteBtn) {
+    const id = deleteBtn.dataset.openDeleteWorkflow;
+    const name = deleteBtn.dataset.targetName;
+    openDeleteConfirmDialog({ type: "workflow", id, name });
+  }
+});
+
+$("prompt-detail")?.addEventListener("click", (event) => {
+  const deleteBtn = event.target.closest("[data-open-delete-prompt]");
+  if (deleteBtn) {
+    const id = deleteBtn.dataset.openDeletePrompt;
+    const name = deleteBtn.dataset.targetName;
+    openDeleteConfirmDialog({ type: "prompt", id, name });
+  }
+});
+
+$("workflow-list")?.addEventListener("click", (event) => {
+  const btn = event.target.closest("[data-workflow-id]");
+  if (!btn) return;
+  activeWorkflowId = btn.dataset.workflowId;
+  renderWorkflowList();
+});
+
 $("skill-registry-list").addEventListener("click", (event) => {
   const button = event.target.closest("[data-registry-skill]");
   if (!button) return;
@@ -577,6 +1316,18 @@ $("skill-registry-list").addEventListener("click", (event) => {
 });
 
 $("skill-registry-detail").addEventListener("click", async (event) => {
+  const deleteBtn = event.target.closest("[data-open-delete-skill]");
+  if (deleteBtn) {
+    const id = deleteBtn.dataset.openDeleteSkill;
+    const name = deleteBtn.dataset.targetName;
+    openDeleteConfirmDialog({ type: "skill", id, name });
+    return;
+  }
+  const editBtn = event.target.closest("[data-open-edit-skill]");
+  if (editBtn) {
+    void openEditSkillDialog(editBtn.dataset.openEditSkill);
+    return;
+  }
   const file = event.target.closest("[data-skill-file]");
   if (file) {
     await loadSkillFilePreview(activeRegistrySkillId, file.dataset.skillFile, { interactive: true });
@@ -2000,13 +2751,17 @@ function externalLink(value, label) {
 }
 
 async function loadSkillsRoute() {
+  const initialTab = new URLSearchParams(location.search).get("tab") || "prompt";
+  if (["skill", "prompt", "workflow"].includes(initialTab)) {
+    switchAbilityTab(initialTab);
+  }
   const registry = loadSkillRegistry();
   try {
     [tribe, status, settlement] = await Promise.all([api("/api/tribe"), api("/api/status"), api("/api/settlement")]);
     $("tribe-status").textContent = `${status.version} · ${tribe.tribe.name} · ${status.active_members} 名可用成员`;
     if (activeRegistrySkillId) renderSkillRegistryDetail(registrySkills.find((skill) => skill.id === activeRegistrySkillId));
   } catch {
-    $("tribe-status").textContent = "Skills 控制面 · 部落状态暂不可用";
+    $("tribe-status").textContent = "能力控制面 · 部落状态暂不可用";
     $("tribe-status").classList.add("error");
   }
   await Promise.allSettled([registry, loadSkillCommissions()]);

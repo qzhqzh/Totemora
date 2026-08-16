@@ -12,7 +12,7 @@
       <a class="site-name" href="/" aria-label="返回 Totemora 驻地总览"><h1>铁锅部落</h1></a>
       <nav class="primary-nav" aria-label="主导航">
         <a href="/" data-primary-route="home">驻地总览</a>
-        <a href="/skills" data-primary-route="skills">技能</a>
+        <a href="/skills" data-primary-route="skills">能力</a>
         <a href="/#task-hall">任务大厅</a>
         <a href="/#intelligence-hall">情报台</a>
       </nav>
@@ -29,6 +29,69 @@
         <label>Operator Token<input id="operator-token" type="password" autocomplete="off" spellcheck="false" required></label>
         <div id="operator-login-status" class="operator-login-status" role="status" aria-live="polite">Token 仅保存在当前浏览器标签页。</div>
         <div class="operator-dialog-actions"><button id="operator-logout" type="button" class="secondary hidden">退出登录</button><button id="operator-login-submit" type="submit">验证并登录</button></div>
+      </form>
+    </dialog>
+    <dialog id="create-skill-dialog" class="operator-dialog" aria-labelledby="create-skill-dialog-title">
+      <form id="create-skill-form" method="dialog">
+        <div class="operator-dialog-head"><h2 id="create-skill-dialog-title">新建 Skill</h2><button id="create-skill-dialog-close" type="button" class="secondary" aria-label="关闭新建窗口">关闭</button></div>
+        <p>在仓库 <code>skills/&lt;skill-id&gt;/</code> 目录直接生成规范化 Skill 包（包含 <code>SKILL.md</code> 与 <code>skill.yaml</code>）。</p>
+        <label>Skill 唯一标识 (ID)<input id="new-skill-id" name="id" placeholder="例如：data-analyst 或 code-audit" pattern="^[a-z0-9][a-z0-9._-]{0,127}$" required></label>
+        <label>Skill 名称<input id="new-skill-name" name="name" placeholder="例如：数据分析专员" required></label>
+        <div class="skill-tag-group">
+          <label>标签 (Tags，支持选择或输入)</label>
+          <div id="new-skill-tag-presets" class="skill-tag-presets"></div>
+          <div class="skill-tag-input-row">
+            <input id="new-skill-tag-input" placeholder="输入标签名，如 image / design / write">
+            <button id="new-skill-tag-add-btn" type="button" class="secondary">+ 添加</button>
+          </div>
+          <div id="new-skill-selected-tags" class="skill-selected-tags"></div>
+        </div>
+        <label>简要描述<textarea id="new-skill-description" name="description" rows="2" placeholder="简述该 Skill 的职责、调用场景与预期能力" required></textarea></label>
+        <label>初始正文内容（Markdown，可选）<textarea id="new-skill-content" name="content" rows="3" placeholder="详细规则、执行步骤或提示词模板（可留空使用默认模版）"></textarea></label>
+        <div id="create-skill-status" class="operator-login-status" role="status" aria-live="polite">创建 Skill 需要已验证的操作员身份。</div>
+        <div class="operator-dialog-actions">
+          <button id="create-skill-cancel" type="button" class="secondary">取消</button>
+          <button id="create-skill-submit" type="submit">立即创建并写入仓库</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="edit-skill-dialog" class="operator-dialog" aria-labelledby="edit-skill-dialog-title">
+      <form id="edit-skill-form" method="dialog">
+        <div class="operator-dialog-head"><h2 id="edit-skill-dialog-title">编辑 Skill</h2><button id="edit-skill-dialog-close" type="button" class="secondary" aria-label="关闭编辑窗口">关闭</button></div>
+        <p>更新仓库 <code>skills/&lt;skill-id&gt;/</code> 下的 <code>SKILL.md</code> 与 <code>skill.yaml</code>。</p>
+        <label>Skill ID<input id="edit-skill-id" name="id" readonly disabled style="opacity:0.75;"></label>
+        <label>Skill 名称<input id="edit-skill-name" name="name" placeholder="例如：数据分析专员" required></label>
+        <div class="skill-tag-group">
+          <label>标签 (Tags，支持选择或输入)</label>
+          <div id="edit-skill-tag-presets" class="skill-tag-presets"></div>
+          <div class="skill-tag-input-row">
+            <input id="edit-skill-tag-input" placeholder="输入标签名，如 image / design / write">
+            <button id="edit-skill-tag-add-btn" type="button" class="secondary">+ 添加</button>
+          </div>
+          <div id="edit-skill-selected-tags" class="skill-selected-tags"></div>
+        </div>
+        <label>简要描述<textarea id="edit-skill-description" name="description" rows="2" placeholder="简述该 Skill 的职责、调用场景与预期能力" required></textarea></label>
+        <label>正文内容与规则（Markdown）<textarea id="edit-skill-content" name="content" rows="6" placeholder="SKILL.md 正文内容与规则定义"></textarea></label>
+        <div id="edit-skill-status" class="operator-login-status" role="status" aria-live="polite">保存修改需要已验证的操作员身份。</div>
+        <div class="operator-dialog-actions">
+          <button id="edit-skill-cancel" type="button" class="secondary">取消</button>
+          <button id="edit-skill-submit" type="submit">保存修改</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="delete-confirm-dialog" class="operator-dialog" aria-labelledby="delete-confirm-dialog-title">
+      <form id="delete-confirm-form" method="dialog">
+        <div class="operator-dialog-head"><h2 id="delete-confirm-dialog-title">删除二次确认</h2><button id="delete-confirm-dialog-close" type="button" class="secondary" aria-label="关闭确认窗口">关闭</button></div>
+        <p id="delete-confirm-prompt-msg">该操作将永久删除此条目。为防止误删，请输入要删除的条目完整名称进行确认：</p>
+        <div style="background:#171b17; padding:10px 14px; border:1px solid var(--line); border-radius:4px; font-family:monospace; color:var(--amber);">
+          <strong id="delete-confirm-target-name"></strong>
+        </div>
+        <label>输入上方名称<input id="delete-confirm-input" autocomplete="off" spellcheck="false" placeholder="在此输入名称以解锁删除按钮" required></label>
+        <div id="delete-confirm-status" class="operator-login-status" role="status" aria-live="polite">输入完全一致后方可确认删除。</div>
+        <div class="operator-dialog-actions">
+          <button id="delete-confirm-cancel" type="button" class="secondary">取消</button>
+          <button id="delete-confirm-submit" type="submit" style="background:#8c2d24; color:#fff; border-color:#e87968;" disabled>确认永久删除</button>
+        </div>
       </form>
     </dialog>
   </header>
@@ -134,23 +197,78 @@ secrets/</textarea></label>
     <section class="panel skill-registry-panel" id="skill-registry" aria-labelledby="skill-registry-title">
       <div class="skill-registry-head">
         <div>
-          <h2 id="skill-registry-title">技能库</h2>
-          <p>仓库文件是 Skill 内容的真实来源；这里汇合校验、绑定、试炼和活动版本证据。</p>
+          <h2 id="skill-registry-title">能力库</h2>
+          <p>汇合部落所掌握的提示词模版、规范化 Skill 包与确定性协作工作流。</p>
         </div>
         <div class="skill-registry-controls">
           <span id="skill-registry-live" role="status" aria-live="polite">正在扫描允许目录…</span>
+          <button id="create-skill-button" type="button">创建能力</button>
           <button id="refresh-skill-registry" type="button" class="secondary">重新扫描</button>
         </div>
       </div>
-      <div id="skill-registry-summary" class="skill-registry-summary"></div>
-      <div class="skill-registry-workspace">
-        <div class="skill-registry-index">
-          <div class="skill-registry-index-head"><h3>已发现 Skill</h3><span id="skill-registry-root">skills/</span></div>
-          <div id="skill-registry-list" class="skill-registry-list"><p class="skill-empty">正在读取仓库 Skill…</p></div>
+      <div class="ability-type-tabs" role="tablist" aria-label="能力类型">
+        <button type="button" class="ability-tab-btn active" data-ability-tab="prompt" role="tab" aria-selected="true">
+          <span class="tab-badge">Prompt</span> 提示词库
+        </button>
+        <button type="button" class="ability-tab-btn" data-ability-tab="skill" role="tab" aria-selected="false">
+          <span class="tab-badge">Skill</span> 技能包
+        </button>
+        <button type="button" class="ability-tab-btn" data-ability-tab="workflow" role="tab" aria-selected="false">
+          <span class="tab-badge">Workflow</span> 协作工作流
+        </button>
+      </div>
+      <div id="ability-tab-prompt" class="ability-tab-content active">
+        <div class="prompt-workbench">
+          <div class="prompt-index">
+            <div class="prompt-index-head">
+              <h3>提示词模版</h3>
+              <span id="prompt-count-badge" class="prompt-count-badge">5 个模版</span>
+            </div>
+            <div id="prompt-tag-filter-bar" class="skill-tag-filter-bar" aria-label="按类型过滤提示词">
+              <button type="button" class="skill-tag-filter-pill active" data-prompt-filter="all">全部</button>
+              <button type="button" class="skill-tag-filter-pill" data-prompt-filter="system">系统提示</button>
+              <button type="button" class="skill-tag-filter-pill" data-prompt-filter="persona">角色人格</button>
+              <button type="button" class="skill-tag-filter-pill" data-prompt-filter="task">任务路由</button>
+            </div>
+            <div id="prompt-list" class="prompt-list"></div>
+          </div>
+          <section id="prompt-detail" class="prompt-detail" aria-label="提示词详情" tabindex="-1">
+            <div class="skill-registry-placeholder"><h3>选择一个提示词</h3><p>查看提示词结构、插值变量、适用的基础模型与成员绑定。</p></div>
+          </section>
         </div>
-        <section id="skill-registry-detail" class="skill-registry-detail" aria-label="Skill 详情" tabindex="-1">
-          <div class="skill-registry-placeholder"><h3>选择一个 Skill</h3><p>查看文件组成、content hash、Doctor 结果和现有治理证据。</p></div>
-        </section>
+      </div>
+      <div id="ability-tab-skill" class="ability-tab-content hidden">
+        <div id="skill-registry-summary" class="skill-registry-summary"></div>
+        <div class="skill-registry-workspace">
+          <div class="skill-registry-index">
+            <div class="skill-registry-index-head">
+              <h3>已发现 Skill</h3>
+              <div class="skill-registry-index-actions">
+                <button id="create-skill-index-button" type="button" class="secondary skill-mini-create">+ 新建</button>
+                <span id="skill-registry-root">skills/</span>
+              </div>
+            </div>
+            <div id="skill-tag-filter-bar" class="skill-tag-filter-bar" aria-label="按标签过滤技能"></div>
+            <div id="skill-registry-list" class="skill-registry-list"><p class="skill-empty">正在读取仓库 Skill…</p></div>
+          </div>
+          <section id="skill-registry-detail" class="skill-registry-detail" aria-label="Skill 详情" tabindex="-1">
+            <div class="skill-registry-placeholder"><h3>选择一个 Skill</h3><p>查看文件组成、content hash、Doctor 结果和现有治理证据。</p></div>
+          </section>
+        </div>
+      </div>
+      <div id="ability-tab-workflow" class="ability-tab-content hidden">
+        <div class="workflow-workbench">
+          <div class="workflow-index">
+            <div class="workflow-index-head">
+              <h3>协作流水线</h3>
+              <span class="prompt-count-badge">3 条管线</span>
+            </div>
+            <div id="workflow-list" class="workflow-list"></div>
+          </div>
+          <section id="workflow-detail" class="workflow-detail" aria-label="工作流详情" tabindex="-1">
+            <div class="skill-registry-placeholder"><h3>选择一个工作流</h3><p>查看拓扑节点、各阶段验收标准、门禁审批与流转指标。</p></div>
+          </section>
+        </div>
       </div>
     </section>
     <section class="panel skill-panel" id="skill-council">

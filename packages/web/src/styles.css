@@ -131,6 +131,29 @@ main { padding:24px; display:grid; grid-template-columns:1fr 1.3fr; gap:20px; }
 .skill-registry-controls span { max-width:34ch; color:var(--green); font-size:11px; }
 .skill-registry-controls span.error { color:#e87968; }
 .skill-registry-controls button { min-height:44px; white-space:nowrap; }
+.ability-type-tabs { display:flex; gap:8px; margin-top:20px; border-bottom:1px solid var(--line); padding-bottom:12px; }
+.ability-tab-btn { display:inline-flex; align-items:center; gap:8px; padding:8px 16px; border:1px solid var(--line); background:#111411; color:var(--muted); font-size:13px; cursor:pointer; border-radius:4px; transition:all .15s ease; }
+.ability-tab-btn:hover { background:#171b17; color:var(--ink); border-color:rgba(224,175,104,.4); }
+.ability-tab-btn.active { background:#1b1812; color:var(--amber); border-color:var(--amber); font-weight:600; box-shadow:inset 0 0 0 1px var(--amber); }
+.ability-tab-btn .tab-badge { font-size:10px; opacity:.75; letter-spacing:.5px; text-transform:uppercase; padding:1px 5px; border-radius:2px; background:rgba(255,255,255,.06); }
+.ability-tab-btn.active .tab-badge { background:rgba(224,175,104,.2); color:var(--amber); opacity:1; }
+.ability-tab-content.hidden { display:none; }
+.prompt-workbench,.workflow-workbench { display:grid; grid-template-columns:minmax(260px,.75fr) minmax(0,1.25fr); margin-top:20px; border:1px solid var(--line); background:#111411; }
+.prompt-index,.workflow-index { min-width:0; border-right:1px solid var(--line); }
+.prompt-index-head,.workflow-index-head { display:flex; justify-content:space-between; align-items:center; padding:16px; border-bottom:1px solid var(--line); }
+.prompt-index-head h3,.workflow-index-head h3 { margin:0; font:600 18px/1.4 Georgia,serif; }
+.prompt-count-badge { font-size:11px; color:var(--muted); padding:2px 8px; border:1px solid var(--line); border-radius:3px; }
+.prompt-list,.workflow-list { display:grid; }
+.prompt-item,.workflow-item { display:grid; width:100%; padding:16px; border:0; border-bottom:1px solid var(--line); background:transparent; color:var(--ink); text-align:left; cursor:pointer; gap:6px; }
+.prompt-item:last-child,.workflow-item:last-child { border-bottom:0; }
+.prompt-item:hover,.workflow-item:hover { background:#171b17; }
+.prompt-item[aria-pressed="true"],.workflow-item[aria-pressed="true"] { background:#1b1812; box-shadow:inset 0 0 0 1px var(--amber); }
+.prompt-item strong,.workflow-item strong { font:600 15px/1.4 Georgia,serif; }
+.prompt-item small,.workflow-item small { color:var(--muted); font-size:11px; }
+.prompt-detail,.workflow-detail { min-width:0; padding:24px; }
+.pipeline-steps { display:grid; gap:12px; margin-top:16px; }
+.pipeline-step { display:flex; gap:12px; align-items:flex-start; padding:12px; background:#171b17; border:1px solid var(--line); border-radius:4px; }
+.pipeline-step-num { display:grid; place-items:center; width:24px; height:24px; border-radius:50%; background:var(--amber); color:#000; font-weight:bold; font-size:11px; flex-shrink:0; }
 .skill-registry-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); margin-top:20px; border:1px solid var(--line); background:#111411; }
 .skill-registry-summary div { min-width:0; padding:16px; border-right:1px solid var(--line); }
 .skill-registry-summary div:last-child { border-right:0; }
@@ -141,7 +164,26 @@ main { padding:24px; display:grid; grid-template-columns:1fr 1.3fr; gap:20px; }
 .skill-registry-index { min-width:0; border-right:1px solid var(--line); }
 .skill-registry-index-head { display:flex; justify-content:space-between; gap:12px; align-items:center; padding:16px; border-bottom:1px solid var(--line); }
 .skill-registry-index-head h3 { margin:0; font:600 18px/1.4 Georgia,serif; }
+.skill-registry-index-actions { display:flex; align-items:center; gap:8px; }
+.skill-mini-create { min-height:28px !important; padding:2px 10px !important; font-size:11px !important; }
 .skill-registry-index-head span { color:var(--muted); font-size:11px; }
+.skill-tag-filter-bar { display:flex; flex-wrap:wrap; gap:6px; padding:10px 16px; border-bottom:1px solid var(--line); background:#0c0f0c; }
+.skill-tag-filter-pill { padding:3px 8px; border:1px solid var(--line); background:transparent; color:var(--muted); font-size:11px; cursor:pointer; border-radius:3px; }
+.skill-tag-filter-pill:hover { background:#171b17; color:var(--ink); }
+.skill-tag-filter-pill.active { background:var(--amber); color:#000; font-weight:600; border-color:var(--amber); }
+.skill-tag-list { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }
+.skill-tag-badge { display:inline-block; padding:1px 6px; border:1px solid rgba(224,175,104,.35); background:rgba(224,175,104,.1); color:var(--amber); font-size:10px; border-radius:2px; letter-spacing:0; }
+.skill-tag-group { display:grid; gap:8px; }
+.skill-tag-presets { display:flex; flex-wrap:wrap; gap:6px; }
+.skill-tag-preset-btn { padding:2px 8px; border:1px solid var(--line); background:transparent; color:var(--muted); font-size:11px; cursor:pointer; }
+.skill-tag-preset-btn:hover { color:var(--ink); border-color:var(--amber); }
+.skill-tag-preset-btn.selected { background:rgba(224,175,104,.2); color:var(--amber); border-color:var(--amber); font-weight:600; }
+.skill-tag-input-row { display:flex; gap:8px; }
+.skill-tag-input-row input { flex:1; min-height:36px; }
+.skill-selected-tags { display:flex; flex-wrap:wrap; gap:6px; min-height:24px; }
+.skill-tag-chip { display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border:1px solid var(--amber); background:rgba(224,175,104,.15); color:var(--amber); font-size:11px; border-radius:3px; }
+.skill-tag-chip button { padding:0 2px; border:0; background:transparent; color:var(--amber); font-size:13px; line-height:1; cursor:pointer; }
+.skill-tag-chip button:hover { color:#e87968; }
 .skill-registry-list { display:grid; }
 .skill-registry-item { display:grid; width:100%; min-height:88px; grid-template-columns:minmax(0,1fr) auto; gap:12px; padding:16px; border:0; border-bottom:1px solid var(--line); background:transparent; color:var(--ink); text-align:left; }
 .skill-registry-item:last-child { border-bottom:0; }
