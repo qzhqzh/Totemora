@@ -178,31 +178,28 @@ export class SkillRegistryService {
   async create(input: { id: string; name?: string; description?: string; content?: string; tags?: string[] }): Promise<SkillRegistryEntry> {
     const id = input.id?.trim();
     if (!id || !SAFE_SKILL_ID.test(id)) throw new Error("Invalid Skill id");
-    const name = input.name?.trim() || id;
-    const description = input.description?.trim() || `Skill package for ${name}`;
+    const name = metadataText(input.name || id, "Skill name", 120);
+    const description = metadataText(input.description || `Skill package for ${name}`, "Skill description", 1_000);
     const customContent = input.content?.trim();
     const tags = Array.isArray(input.tags)
-      ? [...new Set(input.tags.map((t) => String(t).trim().toLowerCase()).filter(Boolean))]
+      ? normalizedTags(input.tags)
       : [];
 
-    await mkdir(this.root, { recursive: true });
-    const targetDir = resolve(this.root, id);
-    assertInside(this.root, targetDir);
-
+    const root = await this.ensureWritableRoot();
+    const targetDir = resolve(root, id);
+    assertInside(root, targetDir);
     try {
-      const existing = await lstat(targetDir);
-      if (existing) throw new Error("Skill already exists");
+      await mkdir(targetDir);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error("Skill already exists");
+      throw error;
     }
-
-    await mkdir(targetDir, { recursive: true });
 
     const skillMarkdown = [
       "---",
-      `name: ${id}`,
-      `description: ${description.replace(/\r?\n/g, " ")}`,
-      ...(tags.length ? ["tags:", ...tags.map((t) => `  - ${t}`)] : []),
+      `name: ${yamlQuoted(id)}`,
+      `description: ${yamlQuoted(description)}`,
+      ...(tags.length ? ["tags:", ...tags.map((tag) => `  - ${yamlQuoted(tag)}`)] : []),
       "---",
       "",
       `# ${name}`,
@@ -213,14 +210,14 @@ export class SkillRegistryService {
 
     const skillYaml = [
       "schema_version: 1",
-      `id: ${id}`,
-      `name: ${name}`,
+      `id: ${yamlQuoted(id)}`,
+      `name: ${yamlQuoted(name)}`,
       "version: 1",
       "status: candidate",
-      ...(tags.length ? ["tags:", ...tags.map((t) => `  - ${t}`)] : []),
+      ...(tags.length ? ["tags:", ...tags.map((tag) => `  - ${yamlQuoted(tag)}`)] : []),
       "source:",
-      "  kind: local",
-      "  reference: user-created",
+      `  kind: ${yamlQuoted("local")}`,
+      `  reference: ${yamlQuoted("user-created")}`,
       "",
     ].join("\n");
 
@@ -238,13 +235,12 @@ export class SkillRegistryService {
     const skill = await this.get(id);
     if (!skill) throw new Error("Skill not found");
 
-    const packageDirectory = resolve(this.projectRoot, skill.path);
-    assertInside(this.root, packageDirectory);
+    const packageDirectory = await this.resolveWritablePackage(skill.path);
 
-    const name = input.name?.trim() || skill.name;
-    const description = input.description?.trim() || skill.description;
+    const name = metadataText(input.name || skill.name, "Skill name", 120);
+    const description = metadataText(input.description || skill.description, "Skill description", 1_000);
     const tags = Array.isArray(input.tags)
-      ? [...new Set(input.tags.map((t) => String(t).trim().toLowerCase()).filter(Boolean))]
+      ? normalizedTags(input.tags)
       : skill.tags;
 
     let markdownBody: string;
@@ -263,9 +259,9 @@ export class SkillRegistryService {
 
     const skillMarkdown = [
       "---",
-      `name: ${id}`,
-      `description: ${description.replace(/\r?\n/g, " ")}`,
-      ...(tags.length ? ["tags:", ...tags.map((t) => `  - ${t}`)] : []),
+      `name: ${yamlQuoted(id)}`,
+      `description: ${yamlQuoted(description)}`,
+      ...(tags.length ? ["tags:", ...tags.map((tag) => `  - ${yamlQuoted(tag)}`)] : []),
       "---",
       "",
       markdownBody.startsWith("# ") ? markdownBody : `# ${name}\n\n${markdownBody}`,
@@ -274,19 +270,21 @@ export class SkillRegistryService {
 
     const skillYaml = [
       "schema_version: 1",
-      `id: ${id}`,
-      `name: ${name}`,
+      `id: ${yamlQuoted(id)}`,
+      `name: ${yamlQuoted(name)}`,
       ...(skill.version ? [`version: ${skill.version}`] : ["version: 1"]),
       `status: ${skill.status}`,
-      ...(tags.length ? ["tags:", ...tags.map((t) => `  - ${t}`)] : []),
+      ...(tags.length ? ["tags:", ...tags.map((tag) => `  - ${yamlQuoted(tag)}`)] : []),
       ...(skill.source.provenance_kind || skill.source.reference ? [
         "source:",
-        ...(skill.source.provenance_kind ? [`  kind: ${skill.source.provenance_kind}`] : ["  kind: local"]),
-        ...(skill.source.reference ? [`  reference: ${skill.source.reference}`] : []),
+        ...(skill.source.provenance_kind
+          ? [`  kind: ${yamlQuoted(skill.source.provenance_kind)}`]
+          : [`  kind: ${yamlQuoted("local")}`]),
+        ...(skill.source.reference ? [`  reference: ${yamlQuoted(skill.source.reference)}`] : []),
       ] : [
         "source:",
-        "  kind: local",
-        "  reference: user-governed",
+        `  kind: ${yamlQuoted("local")}`,
+        `  reference: ${yamlQuoted("user-governed")}`,
       ]),
       "",
     ].join("\n");
@@ -300,13 +298,36 @@ export class SkillRegistryService {
     return updated;
   }
 
+  private async ensureWritableRoot(): Promise<string> {
+    await mkdir(this.root, { recursive: true });
+    const details = await lstat(this.root);
+    if (details.isSymbolicLink() || !details.isDirectory()) {
+      throw new Error("Skill registry root must be a real directory");
+    }
+    const [projectRoot, root] = await Promise.all([realpath(this.projectRoot), realpath(this.root)]);
+    assertInside(projectRoot, root);
+    return root;
+  }
+
+  private async resolveWritablePackage(relativePath: string): Promise<string> {
+    const root = await this.ensureWritableRoot();
+    const candidate = resolve(this.projectRoot, relativePath);
+    assertInside(this.root, candidate);
+    const canonical = await realpath(candidate);
+    const expected = resolve(root, relative(this.root, candidate));
+    assertInside(root, canonical);
+    if (canonical !== expected || !(await lstat(canonical)).isDirectory()) {
+      throw new Error("Skill package must be a real directory inside the registry root");
+    }
+    return canonical;
+  }
+
   async delete(id: string): Promise<void> {
     if (!SAFE_SKILL_ID.test(id)) throw new Error("Invalid Skill id");
     const skill = await this.get(id);
     if (!skill) throw new Error("Skill not found");
 
-    const packageDirectory = resolve(this.projectRoot, skill.path);
-    assertInside(this.root, packageDirectory);
+    const packageDirectory = await this.resolveWritablePackage(skill.path);
 
     await rm(packageDirectory, { recursive: true, force: true });
     this.cache = undefined;
@@ -660,6 +681,26 @@ function yamlScalar(value: string): string {
     catch { return trimmed.slice(1, -1); }
   }
   return trimmed.replace(/\s+#.*$/, "").trim();
+}
+
+function yamlQuoted(value: string): string {
+  return JSON.stringify(value);
+}
+
+function metadataText(value: string, label: string, maximum: number): string {
+  const normalized = String(value).trim().replace(/\s+/gu, " ");
+  if (!normalized || normalized.length > maximum || /[\u0000-\u001F\u007F]/.test(normalized)) {
+    throw new Error(`${label} must contain at most ${maximum} safe characters`);
+  }
+  return normalized;
+}
+
+function normalizedTags(values: string[]): string[] {
+  if (values.length > 50) throw new Error("Skill tags must contain at most 50 values");
+  return [...new Set(values
+    .map((value) => String(value).trim())
+    .filter(Boolean)
+    .map((value) => metadataText(value, "Skill tag", 64).toLowerCase()))];
 }
 
 async function validateReferences(source: string, directory: string, issues: SkillValidationIssue[]): Promise<void> {

@@ -135,7 +135,6 @@ integrations/                Git、Bark、Telegram、Provider、文件和外部 
 - `packages/server/src/skill-registry-service.ts`
 - `packages/server/src/content-studio-service.ts`
 - `packages/tui/src/commands.ts`
-- `packages/server/src/state-database.ts`
 
 触碰 hotspot 时遵循“局部提取，不顺手重写”：
 
@@ -150,11 +149,11 @@ Server 通过 `packages/server/src/web-assets.ts` 显式提供 Web 根资产和�
 
 这是增量路线，不是要求当前任务一次完成：
 
-1. `server/app.ts`：先按 `skills`、`members`、`intelligence`、`finance`、`content`、`development`、`runs` 提取 route modules 和输入 schema；composition 留在 App factory。
+1. `server/app.ts`：`ability-templates`、`skill-registry`、`skill-commission`、`members`、`content`、`intelligence`、`finance`、`development`、`runs`、`workplaces/settlement` route modules 和公共 HTTP/input boundary 已提取；后续按真实变更继续提取通知与运维入口，composition 留在 App factory。
 2. `web/app.js`：薄 bootstrap 和领域 Feature 基线已完成；后续保持该边界，按真实子领域拆分超过预算的 Feature，路由级懒加载另行评估。
-3. `development-service.ts`：分为 Git Flow state machine、plan/review parser、local Git executor、remote GitHub client。
-4. `tribe-runtime.ts`：分离 orchestration、prompt builders、response parsers/validators 和 review policy。
-5. `state-database.ts`：迁移注册器与分版本 migration 文件分离；领域 SQL 继续下沉到 Store/Repository。
+3. `development-service.ts`：本地 Git/进程边界、GitHub remote client 和 plan/review 契约已提取；下一步分离 prepare/publish/merge 状态阶段。
+4. `tribe-runtime.ts`：prompt builders、response parsers/validators 和 staffing policy 已提取；下一步仅在需要新增职责时拆分 onboarding/generic orchestration 阶段。
+5. `state-database.ts`：迁移注册器与 `migrations/<version>-<name>.ts` 已分离；后续 migration 只追加版本文件，领域 SQL 继续下沉到 Store/Repository。
 6. 其余领域服务：优先分离 source/client、domain decision、repository，避免为了行数机械切文件。
 
 每一步都必须保持公共行为兼容，并可独立合并和回滚。

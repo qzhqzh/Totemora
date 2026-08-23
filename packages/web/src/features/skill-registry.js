@@ -14,13 +14,28 @@ import {
 let registrySkills = [];
 let activeRegistrySkillId;
 let activeRegistryFilePath;
+let activeTag = "all";
 
 $("refresh-skill-registry").addEventListener("click", () => void loadRegistry({ keepSelection: true, refresh: true }));
 $("skill-registry-list").addEventListener("click", handleRegistrySelection);
 $("skill-registry-detail").addEventListener("click", handleRegistryDetailClick);
+$("skill-tag-filter-bar").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-skill-filter-tag]");
+  if (!button) return;
+  activeTag = button.dataset.skillFilterTag;
+  renderTagFilter();
+  renderRegistryList();
+});
 
 export const skillRegistryFeature = {
   loadRegistry,
+  list: () => registrySkills,
+  select(id, filePath) {
+    activeRegistrySkillId = id;
+    activeRegistryFilePath = filePath;
+    renderRegistryList();
+    renderRegistryDetail(registrySkills.find((skill) => skill.id === id));
+  },
   refreshSelected,
   refreshProtected: refreshSelected,
   lockProtected: refreshSelected,
@@ -41,6 +56,7 @@ async function loadRegistry({ keepSelection = true, refresh = false } = {}) {
     registrySkills = result.skills;
     $("skill-registry-root").textContent = `${result.root}/`;
     renderRegistrySummary(registrySkills);
+    renderTagFilter();
     if (!registrySkills.length) {
       activeRegistrySkillId = undefined;
       list.innerHTML = '<div class="skill-registry-placeholder"><h3>还没有 Skill</h3><p>在仓库 skills/&lt;skill-id&gt;/SKILL.md 中加入第一个开放格式 Skill 后重新扫描。</p></div>';
@@ -61,6 +77,7 @@ async function loadRegistry({ keepSelection = true, refresh = false } = {}) {
     registrySkills = [];
     activeRegistrySkillId = undefined;
     $("skill-registry-summary").innerHTML = "";
+    renderTagFilter();
     list.innerHTML = `<div class="skill-registry-placeholder"><h3>技能库读取失败</h3><p>${escapeHtml(error.message)}</p></div>`;
     detail.innerHTML = '<div class="skill-registry-placeholder"><h3>无法显示详情</h3><p>请检查 Gateway 和仓库 skills/ 目录后重新扫描。</p></div>';
     live.classList.add("error");
@@ -86,10 +103,28 @@ function renderRegistrySummary(skills) {
 }
 
 function renderRegistryList() {
-  $("skill-registry-list").innerHTML = registrySkills.map((skill) => `<button type="button" class="skill-registry-item" data-registry-skill="${escapeHtml(skill.id)}" aria-pressed="${skill.id === activeRegistrySkillId}">
-    <span><strong>${escapeHtml(skill.name)}</strong><small>${escapeHtml(skill.id)} · ${escapeHtml(skill.version ? `v${skill.version}` : skill.hash_short)}</small><em>查看详情</em></span>
+  const filtered = activeTag === "all"
+    ? registrySkills
+    : registrySkills.filter((skill) => (skill.tags ?? []).includes(activeTag));
+  if (!filtered.length) {
+    $("skill-registry-list").innerHTML = `<p class="skill-empty">没有标签为 #${escapeHtml(activeTag)} 的 Skill。</p>`;
+    return;
+  }
+  $("skill-registry-list").innerHTML = filtered.map((skill) => `<button type="button" class="skill-registry-item" data-registry-skill="${escapeHtml(skill.id)}" aria-pressed="${skill.id === activeRegistrySkillId}">
+    <span><strong>${escapeHtml(skill.name)}</strong><small>${escapeHtml(skill.id)} · ${escapeHtml(skill.version ? `v${skill.version}` : skill.hash_short)}</small>
+      ${(skill.tags ?? []).length ? `<span class="skill-tag-list">${skill.tags.map((tag) => `<span class="skill-tag-badge">#${escapeHtml(tag)}</span>`).join("")}</span>` : ""}<em>查看详情</em></span>
     <span class="skill-registry-state ${escapeHtml(skill.status)}">${escapeHtml(registryStatusLabel(skill.status))}</span>
   </button>`).join("");
+}
+
+function renderTagFilter() {
+  const tags = new Set(registrySkills.flatMap((skill) => skill.tags ?? []));
+  if (activeTag !== "all" && !tags.has(activeTag)) activeTag = "all";
+  $("skill-tag-filter-bar").innerHTML = ["all", ...tags].sort((left, right) => {
+    if (left === "all") return -1;
+    if (right === "all") return 1;
+    return left.localeCompare(right);
+  }).map((tag) => `<button type="button" class="skill-tag-filter-pill ${tag === activeTag ? "active" : ""}" data-skill-filter-tag="${escapeHtml(tag)}">${tag === "all" ? "全部" : `#${escapeHtml(tag)}`}</button>`).join("");
 }
 
 function renderRegistryDetail(skill) {
@@ -118,11 +153,12 @@ function renderRegistryDetail(skill) {
     : skill.status === "active" ? `仓库声明 · ${skill.version ? `v${skill.version}` : skill.hash_short}` : "尚未激活";
   detail.innerHTML = `<div class="skill-detail-head">
     <div><h3>${escapeHtml(skill.name)}</h3><p>${escapeHtml(skill.description)}</p><small><code>${escapeHtml(skill.id)}</code> · ${skill.version ? `v${skill.version}` : escapeHtml(skill.hash_short)}</small></div>
-    <span class="skill-registry-state ${escapeHtml(skill.status)}">${escapeHtml(registryStatusLabel(skill.status))}</span>
+    <div class="skill-detail-actions"><button type="button" class="secondary" data-edit-skill="${escapeHtml(skill.id)}">编辑</button><button type="button" class="secondary destructive" data-delete-skill="${escapeHtml(skill.id)}">删除</button><span class="skill-registry-state ${escapeHtml(skill.status)}">${escapeHtml(registryStatusLabel(skill.status))}</span></div>
   </div>
   <div class="skill-detail-section skill-package-primary"><h4>Skill 包</h4><p class="skill-section-note">浏览仓库中的完整目录；文本内容需要操作员 Token，只读且不会执行脚本。</p>${files}</div>
   <dl class="skill-detail-meta">
     <div><dt>Skill ID</dt><dd><code>${escapeHtml(skill.id)}</code></dd></div>
+    <div><dt>标签</dt><dd>${(skill.tags ?? []).length ? skill.tags.map((tag) => `<span class="skill-tag-badge">#${escapeHtml(tag)}</span>`).join(" ") : "未打标"}</dd></div>
     <div><dt>来源</dt><dd>本地仓库 · <code>${escapeHtml(skill.path)}</code>${skill.source.reference ? `<br><small>${escapeHtml(skill.source.provenance_kind || "provenance")} · ${escapeHtml(skill.source.reference)}</small>` : ""}</dd></div>
     <div><dt>版本 / Content hash</dt><dd>${skill.version ? `v${skill.version} · ` : ""}<code title="${escapeHtml(skill.content_hash)}">${escapeHtml(skill.hash_short)}</code></dd></div>
     <div><dt>绑定</dt><dd>${escapeHtml(binding)}</dd></div>

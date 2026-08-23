@@ -34,20 +34,35 @@ import { FinancePreferenceStore } from "./finance-preference-store";
 import { ActionJournal } from "./action-journal";
 import { SPECIALIST_SERVICES, SpecialistTaskRepository } from "./specialist-service";
 import { MemberProfileStore } from "./member-profile-store";
-import { ContentStudioService, type ContentIllustrationGenerator, type CreateContentInput } from "./content-studio-service";
+import {
+  ContentStudioService,
+  type ContentIllustrationGenerator,
+  type CreateContentInput,
+} from "./content-studio-service";
 import { CpaIllustrationService } from "./cpa-illustration-service";
 import {
   BarkNotificationService, BarkTargetMutationError, type BarkTargetMutationInput,
 } from "./bark-notification-service";
 import { EvidenceObservatory } from "./evidence-observatory";
-import {
-  SkillCommissionConflictError, SkillCommissionService, type SkillTrial,
-} from "./skill-commission-service";
+import { SkillCommissionConflictError, SkillCommissionService } from "./skill-commission-service";
 import { SkillRegistryService } from "./skill-registry-service";
 import {
-  SkillTrialConflictError, SkillTrialInputError, SkillTrialRunnerService, type SkillTrialRunInput,
+  SkillTrialConflictError, SkillTrialInputError, SkillTrialRunnerService,
 } from "./skill-trial-runner-service";
 import type { RecurringServiceState } from "./recurring-service-runner";
+import { AbilityTemplateStore } from "./ability-template-store";
+import { handleAbilityTemplateRoutes } from "./http/ability-template-routes";
+import { handleContentRoutes } from "./http/content-routes";
+import { handleDevelopmentRoutes } from "./http/development-routes";
+import { handleFinanceRoutes } from "./http/finance-routes";
+import { handleIntelligenceRoutes } from "./http/intelligence-routes";
+import { handleMemberRoutes } from "./http/member-routes";
+import { handleRunRoutes } from "./http/run-routes";
+import { handleSkillCommissionRoutes } from "./http/skill-commission-routes";
+import { handleSkillRegistryRoutes } from "./http/skill-registry-routes";
+import { handleWorkplaceRoutes } from "./http/workplace-routes";
+import { HttpError, json, readJson, readOptionalJson } from "./http/http-boundary";
+import type { RunRouteInput } from "./http/run-input-schema";
 
 export interface PlaygroundOptions {
   configDir: string;
@@ -73,21 +88,6 @@ interface RunJob {
   run?: TribeRun;
   error?: string;
   failure?: FailureAttribution;
-}
-
-interface RunInput {
-  goal?: string;
-  workspace?: string;
-  workplace_id?: string;
-  mission_id?: string;
-  acceptance?: string[];
-  chief?: string;
-  max_files?: number;
-  max_context_bytes?: number;
-  max_output_tokens?: number;
-  max_members?: number;
-  max_total_tokens?: number;
-  mission_context?: string[];
 }
 
 interface DevelopmentTask {
@@ -139,24 +139,21 @@ interface IntelligenceTaskInput {
   briefing_type?: FinanceBriefingType;
 }
 
-class HttpError extends Error {
-  constructor(readonly status: number, message: string) {
-    super(message);
-  }
-}
-
 export function createPlaygroundApp(options: PlaygroundOptions) {
   const jobs = new Map<string, RunJob>();
   const controllers = new Map<string, AbortController>();
-  const jobInputs = new Map<string, RunInput>();
+  const jobInputs = new Map<string, RunRouteInput>();
   const settlement = new SettlementStore(options.dataDir);
-  const jobStore = new JobStore<RunJob, RunInput>(options.dataDir);
+  const jobStore = new JobStore<RunJob, RunRouteInput>(options.dataDir);
   const developmentTasks = new Map<string, DevelopmentTask>();
   const developmentTaskStore = new JobStore<DevelopmentTask, DevelopmentTaskInput>(options.dataDir, "development-tasks");
   const intelligenceTasks = new Map<string, IntelligenceTask>();
   const intelligenceTaskStore = new JobStore<IntelligenceTask, IntelligenceTaskInput>(options.dataDir, "intelligence-tasks");
   const specialistTasks = new SpecialistTaskRepository(options.dataDir);
   const barkManagement = new BarkNotificationService(options.dataDir, options.fetchImpl ?? fetch);
+  const abilityTemplates = new AbilityTemplateStore(options.dataDir);
+  const intelligencePreferences = new IntelligencePreferenceStore(options.dataDir);
+  const financePreferences = new FinancePreferenceStore(options.dataDir);
   const skillRegistry = new SkillRegistryService(
     options.projectRoot ?? resolve(import.meta.dir, "../../.."), options.dataDir,
   );
@@ -323,7 +320,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
     return memberServicesPromise;
   };
   const enqueueDevelopmentTask = async (input: DevelopmentTaskInput): Promise<DevelopmentTask> => {
-    if (!input.workplace_id || !input.goal?.trim()) throw new Error("workplace_id and goal are required");
+    if (!input.workplace_id || !input.goal?.trim()) throw new HttpError(400, "workplace_id and goal are required");
     const now = new Date().toISOString();
     const task: DevelopmentTask = {
       id: crypto.randomUUID(), kind: "git_flow", status: "queued",
@@ -532,18 +529,17 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
     });
   };
 
-  const enqueueRun = async (input: RunInput): Promise<RunJob> => {
-    if (!input.goal?.trim()) throw new Error("任务目标不能为空");
+  const enqueueRun = async (input: RunRouteInput): Promise<RunJob> => {
     const settlementData = await settlement.get();
     const existingMission = input.mission_id
       ? settlementData.missions.find((item) => item.id === input.mission_id)
       : undefined;
-    if (input.mission_id && !existingMission) throw new Error("Mission 不存在");
+    if (input.mission_id && !existingMission) throw new HttpError(404, "Mission 不存在");
     const workplaceId = input.workplace_id ?? existingMission?.workplace_id;
     const workplace = workplaceId
       ? settlementData.workplaces.find((item) => item.id === workplaceId)
       : undefined;
-    if (workplaceId && !workplace) throw new Error("工作地不存在");
+    if (workplaceId && !workplace) throw new HttpError(404, "工作地不存在");
     const workspacePath = await registeredWorkspacePath(
       workplace?.path ?? input.workspace,
       settlementData.workplaces.map((item) => item.path),
@@ -553,9 +549,9 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
       continuing: Boolean(input.mission_id),
     });
     if (!taskAnalysis.execution_enabled) {
-      throw new Error(`任务已识别为 ${taskAnalysis.type}，但该执行模式尚未开放：${taskAnalysis.reason}`);
+      throw new HttpError(422, `任务已识别为 ${taskAnalysis.type}，但该执行模式尚未开放：${taskAnalysis.reason}`);
     }
-    if (!workspacePath) throw new Error("请选择工作地或填写 Workspace 路径");
+    if (!workspacePath) throw new HttpError(400, "请选择工作地或填写 Workspace 路径");
     const mission = existingMission
       ?? await settlement.createMission(input.goal.trim(), workplace?.id);
     input.workspace = workspacePath;
@@ -580,6 +576,29 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
     await jobStore.save(job, input);
     void executeRun(job, input, options, await getConfig(), settlement, controller, jobStore);
     return job;
+  };
+
+  const cancelRun = async (id: string): Promise<RunJob> => {
+    const job = jobs.get(id);
+    if (!job) throw new HttpError(404, "Run job not found");
+    if (!["queued", "running"].includes(job.status)) {
+      throw new HttpError(409, `Run cannot be cancelled from status ${job.status}`);
+    }
+    controllers.get(job.id)?.abort();
+    job.message = "正在取消当前模型调用";
+    recordActivity(job, "cancelling", job.message);
+    await jobStore.save(job, jobInputs.get(job.id)!);
+    return job;
+  };
+
+  const retryRun = async (id: string): Promise<RunJob> => {
+    const previous = jobs.get(id);
+    const input = jobInputs.get(id);
+    if (!previous || !input) throw new HttpError(404, "Run job not found or no longer retryable");
+    if (previous.status !== "failed" || !previous.failure?.retryable) {
+      throw new HttpError(409, "Only retryable failed Runs can be retried");
+    }
+    return enqueueRun(structuredClone(input));
   };
 
   return {
@@ -633,9 +652,104 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
       return input ? enqueueContentWork(input, "scheduled") : undefined;
     },
     async fetch(request: Request): Promise<Response> {
-      await hydration;
       const url = new URL(request.url);
       try {
+        await hydration;
+        const abilityTemplateResponse = await handleAbilityTemplateRoutes(request, url, {
+          store: abilityTemplates,
+          requireOperator: (candidate) => requireOperator(candidate, options.operatorToken),
+        });
+        if (abilityTemplateResponse) return abilityTemplateResponse;
+
+        const skillRegistryResponse = await handleSkillRegistryRoutes(request, url, {
+          registry: skillRegistry,
+          requireOperator: (candidate) => requireOperator(candidate, options.operatorToken),
+        });
+        if (skillRegistryResponse) return skillRegistryResponse;
+
+        const skillCommissionResponse = await handleSkillCommissionRoutes(request, url, {
+          getServices: async () => {
+            const services = await getMemberServices();
+            return { skills: services.skills, skillTrials: services.skillTrials };
+          },
+          requireOperator: (candidate) => requireOperator(candidate, options.operatorToken),
+        });
+        if (skillCommissionResponse) return skillCommissionResponse;
+
+        const memberResponse = await handleMemberRoutes(request, url, {
+          getServices: async () => {
+            const services = await getMemberServices();
+            return {
+              state: services.state,
+              conversations: services.conversations,
+              evolution: services.evolution,
+            };
+          },
+          requireOperator: (candidate) => requireOperator(candidate, options.operatorToken),
+        });
+        if (memberResponse) return memberResponse;
+
+        const contentResponse = await handleContentRoutes(request, url, {
+          getContent: async () => (await getMemberServices()).content,
+          enqueue: (input) => enqueueContentWork(input, "web"),
+          requireOperator: (candidate) => requireOperator(candidate, options.operatorToken),
+        });
+        if (contentResponse) return contentResponse;
+
+        const intelligenceResponse = await handleIntelligenceRoutes(request, url, {
+          getIntelligence: async () => (await getMemberServices()).intelligence,
+          preferences: intelligencePreferences,
+          credentialStatus: async () => ({
+            x_trends: await hasLocalSecret(options.dataDir, "x-bearer-token", "TOTEMORA_X_BEARER_TOKEN"),
+            weibo_hot: await hasLocalSecret(options.dataDir, "weibo-access-token", "TOTEMORA_WEIBO_ACCESS_TOKEN"),
+          }),
+          enqueueTask: (input) => enqueueIntelligenceTask(input),
+          getTask: (id) => intelligenceTasks.get(id),
+          requireOperator: (candidate) => requireOperator(candidate, options.operatorToken),
+        });
+        if (intelligenceResponse) return intelligenceResponse;
+
+        const financeResponse = await handleFinanceRoutes(request, url, {
+          getFinance: async () => (await getMemberServices()).finance,
+          preferences: financePreferences,
+          enqueueTask: (input) => enqueueIntelligenceTask(input),
+          getTask: (id) => intelligenceTasks.get(id),
+          requireOperator: (candidate) => requireOperator(candidate, options.operatorToken),
+        });
+        if (financeResponse) return financeResponse;
+
+        const developmentResponse = await handleDevelopmentRoutes(request, url, {
+          getDevelopment: getDevelopmentService,
+          enqueueTask: enqueueDevelopmentTask,
+          listTasks: () => [...developmentTasks.values()],
+          getTask: (id) => developmentTasks.get(id),
+          syncSpecialistTask: syncDevelopmentSpecialistTask,
+          requireOperator: (candidate) => requireOperator(candidate, options.operatorToken),
+        });
+        if (developmentResponse) return developmentResponse;
+
+        const workplaceResponse = await handleWorkplaceRoutes(request, url, {
+          getSettlement: () => settlement.get(),
+          addWorkplace: (name, path) => settlement.addWorkplace(name, path),
+          setWorkplacePolicy: (id, input) => settlement.setWorkplacePolicy(id, input),
+          requireOperator: (candidate) => requireOperator(candidate, options.operatorToken),
+        });
+        if (workplaceResponse) return workplaceResponse;
+
+        const runResponse = await handleRunRoutes(request, url, {
+          createMission: (input) => settlement.createMission(input.title, input.workplace_id),
+          analyzeTask: analyzeTaskIntent,
+          enqueueRun,
+          listPersistedRuns: () => listPersistedRuns(options.dataDir),
+          listJobs: () => [...jobs.values()],
+          getJob: (id) => jobs.get(id),
+          getJobGoal: (id) => jobInputs.get(id)?.goal,
+          cancelRun,
+          retryRun,
+          requireOperator: (candidate) => requireOperator(candidate, options.operatorToken),
+        });
+        if (runResponse) return runResponse;
+
         if (request.method === "GET" && url.pathname === "/api/tribe") {
           const config = await getConfig();
           return json({
@@ -711,193 +825,6 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
           return json({ services: options.recurringServiceStatus?.() ?? [] });
         }
 
-        if (request.method === "GET" && url.pathname === "/api/skills/commissions") {
-          requireOperator(request, options.operatorToken);
-          return json({ commissions: (await getMemberServices()).skills.list() });
-        }
-
-        if (request.method === "GET" && url.pathname === "/api/skills/trial-runs") {
-          requireOperator(request, options.operatorToken);
-          return json({ runs: (await getMemberServices()).skillTrials.list(url.searchParams.get("commission_id") ?? undefined) });
-        }
-
-        const skillTrialRunDetailMatch = url.pathname.match(/^\/api\/skills\/trial-runs\/([^/]+)$/);
-        if (request.method === "GET" && skillTrialRunDetailMatch) {
-          requireOperator(request, options.operatorToken);
-          const run = (await getMemberServices()).skillTrials.get(skillTrialRunDetailMatch[1]!);
-          return run ? json(run) : json({ error: "Skill trial run not found" }, 404);
-        }
-
-        if (request.method === "GET" && url.pathname === "/api/skills/registry") {
-          try { return json(await skillRegistry.list({ refresh: url.searchParams.get("refresh") === "1" })); }
-          catch (error) {
-            console.error(JSON.stringify({ event: "skill_registry_scan_failed", error: error instanceof Error ? error.message : String(error) }));
-            return json({ error: "Skill registry scan failed" }, 500);
-          }
-        }
-
-        if (request.method === "POST" && url.pathname === "/api/skills/registry") {
-          requireOperator(request, options.operatorToken);
-          try {
-            const input = await request.json() as { id?: string; name?: string; description?: string; content?: string; tags?: string[] };
-            if (!input.id || typeof input.id !== "string") return json({ error: "Skill id is required" }, 400);
-            const created = await skillRegistry.create({
-              id: input.id,
-              name: input.name,
-              description: input.description,
-              content: input.content,
-              tags: Array.isArray(input.tags) ? input.tags : [],
-            });
-            return json(created, 201);
-          } catch (error) {
-            const message = error instanceof Error ? error.message : "Failed to create Skill";
-            if (["Invalid Skill id", "Skill already exists", "Skill id is required"].includes(message)) {
-              return json({ error: message }, 400);
-            }
-            console.error(JSON.stringify({ event: "skill_creation_failed", error: message }));
-            return json({ error: message }, 500);
-          }
-        }
-
-        const skillRegistryFileMatch = url.pathname.match(/^\/api\/skills\/registry\/([^/]+)\/file$/);
-        if (request.method === "GET" && skillRegistryFileMatch) {
-          requireOperator(request, options.operatorToken);
-          try {
-            return json(await skillRegistry.readFile(
-              decodeURIComponent(skillRegistryFileMatch[1]!),
-              url.searchParams.get("path") ?? "",
-            ));
-          } catch (error) {
-            const message = error instanceof Error ? error.message : "Skill file preview failed";
-            if (["Invalid Skill id", "Invalid Skill file path"].includes(message)) return json({ error: message }, 400);
-            if (["Skill not found", "Skill file not found"].includes(message)) return json({ error: message }, 404);
-            if (message === "Skill file preview forbidden") return json({ error: message }, 415);
-            if (message === "Skill file preview too large") return json({ error: message }, 413);
-            console.error(JSON.stringify({ event: "skill_registry_file_failed", error: message }));
-            return json({ error: "Skill file preview failed" }, 500);
-          }
-        }
-
-        const skillRegistryMatch = url.pathname.match(/^\/api\/skills\/registry\/([^/]+)$/);
-        if (request.method === "GET" && skillRegistryMatch) {
-          try {
-            const skill = await skillRegistry.get(decodeURIComponent(skillRegistryMatch[1]!));
-            return skill ? json(skill) : json({ error: "Skill not found" }, 404);
-          } catch (error) {
-            if (error instanceof Error && error.message === "Invalid Skill id") return json({ error: error.message }, 400);
-            console.error(JSON.stringify({ event: "skill_registry_scan_failed", error: error instanceof Error ? error.message : String(error) }));
-            return json({ error: "Skill registry scan failed" }, 500);
-          }
-        }
-
-        if (request.method === "PUT" && skillRegistryMatch) {
-          requireOperator(request, options.operatorToken);
-          try {
-            const skillId = decodeURIComponent(skillRegistryMatch[1]!);
-            const input = await request.json() as { name?: string; description?: string; content?: string; tags?: string[] };
-            const updated = await skillRegistry.update(skillId, input);
-            return json(updated);
-          } catch (error) {
-            const message = error instanceof Error ? error.message : "Failed to update Skill";
-            if (["Invalid Skill id", "Skill file preview forbidden", "Skill file preview too large"].includes(message)) {
-              return json({ error: message }, 400);
-            }
-            if (message === "Skill not found") return json({ error: message }, 404);
-            console.error(JSON.stringify({ event: "skill_update_failed", error: message }));
-            return json({ error: message }, 500);
-          }
-        }
-
-        if (request.method === "DELETE" && skillRegistryMatch) {
-          requireOperator(request, options.operatorToken);
-          try {
-            const skillId = decodeURIComponent(skillRegistryMatch[1]!);
-            await skillRegistry.delete(skillId);
-            return json({ success: true, id: skillId });
-          } catch (error) {
-            const message = error instanceof Error ? error.message : "Failed to delete Skill";
-            if (message === "Invalid Skill id") return json({ error: message }, 400);
-            if (message === "Skill not found") return json({ error: message }, 404);
-            console.error(JSON.stringify({ event: "skill_deletion_failed", error: message }));
-            return json({ error: message }, 500);
-          }
-        }
-
-        if (request.method === "POST" && url.pathname === "/api/skills/commissions") {
-          requireOperator(request, options.operatorToken);
-          const input = await request.json() as { message?: string };
-          return json(await (await getMemberServices()).skills.create(input.message ?? ""), 201);
-        }
-
-        const skillMessageMatch = url.pathname.match(/^\/api\/skills\/commissions\/([^/]+)\/messages$/);
-        if (request.method === "POST" && skillMessageMatch) {
-          requireOperator(request, options.operatorToken);
-          const input = await request.json() as { message?: string };
-          return json(await (await getMemberServices()).skills.addMessage(skillMessageMatch[1]!, input.message ?? ""));
-        }
-
-        const skillValidateMatch = url.pathname.match(/^\/api\/skills\/commissions\/([^/]+)\/validate$/);
-        if (request.method === "POST" && skillValidateMatch) {
-          requireOperator(request, options.operatorToken);
-          return json((await getMemberServices()).skills.validate(skillValidateMatch[1]!));
-        }
-
-        const skillTrialMatch = url.pathname.match(/^\/api\/skills\/commissions\/([^/]+)\/trials$/);
-        if (request.method === "POST" && skillTrialMatch) {
-          requireOperator(request, options.operatorToken);
-          const input = await request.json() as Pick<SkillTrial,
-            "baseline_evidence_id" | "trial_evidence_id" | "reviewer_member_id" | "outcome" | "summary"
-          >;
-          return json((await getMemberServices()).skills.recordTrial(skillTrialMatch[1]!, input), 201);
-        }
-
-        const skillTrialRunMatch = url.pathname.match(/^\/api\/skills\/commissions\/([^/]+)\/run-trial$/);
-        if (request.method === "POST" && skillTrialRunMatch) {
-          requireOperator(request, options.operatorToken);
-          const input = await request.json() as SkillTrialRunInput;
-          try {
-            return json((await getMemberServices()).skillTrials.start(skillTrialRunMatch[1]!, input), 202);
-          } catch (error) {
-            if (error instanceof SkillTrialInputError || error instanceof SkillTrialConflictError) throw error;
-            const reference = crypto.randomUUID().slice(0, 8);
-            console.error("Skill trial start failed", { reference, error });
-            return json({ error: "Unable to start Skill trial", reference }, 500);
-          }
-        }
-
-        const skillProposalMatch = url.pathname.match(/^\/api\/skills\/commissions\/([^/]+)\/propose-activation$/);
-        if (request.method === "POST" && skillProposalMatch) {
-          requireOperator(request, options.operatorToken);
-          return json((await getMemberServices()).skills.proposeActivation(skillProposalMatch[1]!));
-        }
-
-        const skillActivationMatch = url.pathname.match(/^\/api\/skills\/commissions\/([^/]+)\/activate$/);
-        if (request.method === "POST" && skillActivationMatch) {
-          requireOperator(request, options.operatorToken);
-          const input = await request.json() as { approved_by?: string };
-          return json((await getMemberServices()).skills.activate(skillActivationMatch[1]!, input.approved_by ?? "operator"));
-        }
-
-        const skillRollbackMatch = url.pathname.match(/^\/api\/skills\/commissions\/([^/]+)\/rollback$/);
-        if (request.method === "POST" && skillRollbackMatch) {
-          requireOperator(request, options.operatorToken);
-          const input = await request.json() as { reviewed_by?: string };
-          return json((await getMemberServices()).skills.rollback(skillRollbackMatch[1]!, input.reviewed_by ?? "operator"));
-        }
-
-        const skillCancelMatch = url.pathname.match(/^\/api\/skills\/commissions\/([^/]+)\/cancel$/);
-        if (request.method === "POST" && skillCancelMatch) {
-          requireOperator(request, options.operatorToken);
-          return json((await getMemberServices()).skills.cancel(skillCancelMatch[1]!));
-        }
-
-        const skillCommissionMatch = url.pathname.match(/^\/api\/skills\/commissions\/([^/]+)$/);
-        if (request.method === "GET" && skillCommissionMatch) {
-          requireOperator(request, options.operatorToken);
-          const commission = (await getMemberServices()).skills.get(skillCommissionMatch[1]!);
-          return commission ? json(commission) : json({ error: "Skill commission not found" }, 404);
-        }
-
         if (request.method === "GET" && url.pathname === "/api/service-tasks") {
           requireOperator(request, options.operatorToken);
           return json({ tasks: specialistTasks.list(Number(url.searchParams.get("limit") ?? 100)) });
@@ -910,142 +837,6 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
           return task ? json(task) : json({ error: "Specialist task not found" }, 404);
         }
 
-        if (request.method === "GET" && url.pathname === "/api/members/dossiers") {
-          return json({ members: await (await getMemberServices()).state.listDossiers() });
-        }
-
-        const memberMatch = url.pathname.match(/^\/api\/members\/([^/]+)$/);
-        if (request.method === "GET" && memberMatch) {
-          return json(await (await getMemberServices()).state.getDossier(memberMatch[1]!));
-        }
-
-        const memberMessagesMatch = url.pathname.match(/^\/api\/members\/([^/]+)\/messages$/);
-        if (request.method === "GET" && memberMessagesMatch) {
-          return json({ messages: await (await getMemberServices()).conversations.list(memberMessagesMatch[1]!) });
-        }
-
-        const evolutionProposalMatch = url.pathname.match(/^\/api\/members\/([^/]+)\/evolution\/proposals$/);
-        if (request.method === "POST" && evolutionProposalMatch) {
-          requireOperator(request, options.operatorToken);
-          return json(await (await getMemberServices()).evolution.propose(evolutionProposalMatch[1]!), 201);
-        }
-
-        const evolutionReviewMatch = url.pathname.match(/^\/api\/members\/([^/]+)\/evolution\/proposals\/([^/]+)\/review$/);
-        if (request.method === "POST" && evolutionReviewMatch) {
-          requireOperator(request, options.operatorToken);
-          const input = await request.json() as { approve?: boolean; reviewer_id?: string };
-          if (!input.reviewer_id) throw new Error("reviewer_id is required");
-          return json(await (await getMemberServices()).evolution.review(evolutionReviewMatch[1]!, evolutionReviewMatch[2]!, input.reviewer_id, Boolean(input.approve)));
-        }
-
-        const memberChatMatch = url.pathname.match(/^\/api\/members\/([^/]+)\/chat$/);
-        if (request.method === "POST" && memberChatMatch) {
-          requireOperator(request, options.operatorToken);
-          const input = await request.json() as { message?: string; ask_mentor?: boolean };
-          return json(await (await getMemberServices()).conversations.chat(
-            memberChatMatch[1]!, input.message ?? "", Boolean(input.ask_mentor),
-          ));
-        }
-
-        if (request.method === "GET" && url.pathname === "/api/intelligence") {
-          return json({ briefs: await (await getMemberServices()).intelligence.list() });
-        }
-
-        if (request.method === "GET" && url.pathname === "/api/intelligence/candidates") {
-          const intelligence = (await getMemberServices()).intelligence;
-          const [candidates, counts] = await Promise.all([
-            intelligence.listCandidates(), intelligence.candidateCounts(),
-          ]);
-          return json({
-            candidates,
-            counts,
-          });
-        }
-
-        if (request.method === "GET" && url.pathname === "/api/finance") {
-          return json({ briefs: await (await getMemberServices()).finance.list() });
-        }
-
-        if (request.method === "GET" && url.pathname === "/api/finance/candidates") {
-          const finance = (await getMemberServices()).finance;
-          const [candidates, counts] = await Promise.all([
-            finance.listCandidates(), finance.candidateCounts(),
-          ]);
-          return json({ candidates, counts });
-        }
-
-        if (request.method === "GET" && url.pathname === "/api/finance/sources") {
-          return json({ sources: await (await getMemberServices()).finance.sourceStatus() });
-        }
-
-        if (request.method === "GET" && url.pathname === "/api/content/works") {
-          requireOperator(request, options.operatorToken);
-          return json({ works: (await getMemberServices()).content.list(Number(url.searchParams.get("limit") ?? 100)) });
-        }
-
-        if (request.method === "POST" && url.pathname === "/api/content/works") {
-          requireOperator(request, options.operatorToken);
-          return json(await enqueueContentWork(await request.json() as CreateContentInput, "web"), 202);
-        }
-
-        if (request.method === "GET" && url.pathname === "/api/content/preferences") {
-          return json((await getMemberServices()).content.preferences());
-        }
-
-        if (request.method === "PUT" && url.pathname === "/api/content/preferences") {
-          requireOperator(request, options.operatorToken);
-          return json((await getMemberServices()).content.savePreferences(await request.json()));
-        }
-
-        const contentCopiedMatch = url.pathname.match(/^\/api\/content\/works\/([^/]+)\/copied$/);
-        if (request.method === "POST" && contentCopiedMatch) {
-          requireOperator(request, options.operatorToken);
-          return json(await (await getMemberServices()).content.markCopied(contentCopiedMatch[1]!));
-        }
-
-        const contentIllustrationRetryMatch = url.pathname.match(/^\/api\/content\/works\/([^/]+)\/illustration\/retry$/);
-        if (request.method === "POST" && contentIllustrationRetryMatch) {
-          requireOperator(request, options.operatorToken);
-          const content = (await getMemberServices()).content;
-          const work = content.get(contentIllustrationRetryMatch[1]!);
-          if (!work) return json({ error: "Content work not found" }, 404);
-          if (work.status !== "ready" || !work.body) return json({ error: "Only ready content can regenerate an illustration" }, 409);
-          void content.retryIllustration(work.id).catch((error) => {
-            console.error(`Illustration retry failed: ${error instanceof Error ? error.message : String(error)}`);
-          });
-          return json(work, 202);
-        }
-
-        const contentIllustrationMatch = url.pathname.match(/^\/api\/content\/works\/([^/]+)\/illustration$/);
-        if (request.method === "GET" && contentIllustrationMatch) {
-          requireOperator(request, options.operatorToken);
-          const illustration = await (await getMemberServices()).content.readIllustration(contentIllustrationMatch[1]!);
-          if (!illustration) return json({ error: "Content illustration not found" }, 404);
-          return new Response(Buffer.from(illustration.data), { headers: {
-            "content-type": illustration.mimeType,
-            "content-disposition": `inline; filename="${illustration.filename}"`,
-            "cache-control": "private, no-store",
-            "x-content-type-options": "nosniff",
-          } });
-        }
-
-        const contentWorkMatch = url.pathname.match(/^\/api\/content\/works\/([^/]+)$/);
-        if (request.method === "GET" && contentWorkMatch) {
-          requireOperator(request, options.operatorToken);
-          const work = (await getMemberServices()).content.get(contentWorkMatch[1]!);
-          return work ? json(work) : json({ error: "Content work not found" }, 404);
-        }
-
-        if (request.method === "GET" && url.pathname === "/api/intelligence/bark") {
-          requireOperator(request, options.operatorToken);
-          return json(await (await getMemberServices()).intelligence.barkStatus(url.searchParams.get("health") === "1"));
-        }
-
-        if (request.method === "GET" && url.pathname === "/api/finance/bark") {
-          requireOperator(request, options.operatorToken);
-          return json(await (await getMemberServices()).finance.barkStatus(url.searchParams.get("health") === "1"));
-        }
-
         if (request.method === "GET" && url.pathname === "/api/notifications/bark/targets") {
           requireOperator(request, options.operatorToken);
           return json(await barkManagement.managementStatus(url.searchParams.get("health") === "1"));
@@ -1055,7 +846,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
           requireOperator(request, options.operatorToken);
           try {
             return json(await barkManagement.upsertManagedTarget(
-              await request.json() as BarkTargetMutationInput, "create",
+              await readJson(request) as BarkTargetMutationInput, "create",
             ), 201);
           } catch (error) {
             if (error instanceof BarkTargetMutationError) throw new HttpError(error.status, error.message);
@@ -1072,7 +863,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
         if (request.method === "POST" && barkTargetTestMatch) {
           requireOperator(request, options.operatorToken);
           const targetId = decodeURIComponent(barkTargetTestMatch[1]!);
-          const input = await request.json().catch(() => ({})) as { idempotency_key?: string };
+          const input = await readOptionalJson(request) as { idempotency_key?: string };
           const idempotencyKey = input.idempotency_key?.trim() || `web-bark-test:${targetId}:${crypto.randomUUID()}`;
           try {
             const result = await new ActionJournal(options.dataDir).executeEffectOnce({
@@ -1096,7 +887,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
         const barkTargetMatch = url.pathname.match(/^\/api\/notifications\/bark\/targets\/([^/]+)$/);
         if (request.method === "PUT" && barkTargetMatch) {
           requireOperator(request, options.operatorToken);
-          const input = await request.json() as Omit<BarkTargetMutationInput, "id">;
+          const input = await readJson(request) as Omit<BarkTargetMutationInput, "id">;
           try {
             return json(await barkManagement.upsertManagedTarget(
               { ...input, id: decodeURIComponent(barkTargetMatch[1]!) }, "update",
@@ -1107,122 +898,9 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
           }
         }
 
-        if (request.method === "GET" && url.pathname === "/api/intelligence/telegram") {
-          requireOperator(request, options.operatorToken);
-          return json(await (await getMemberServices()).intelligence.telegramStatus(url.searchParams.get("health") === "1"));
-        }
-
-        if (request.method === "POST" && url.pathname === "/api/integrations/telegram/webhook") {
-          const intelligence = (await getMemberServices()).intelligence;
-          try {
-            await intelligence.verifyTelegramWebhook(
-              request.headers.get("x-telegram-bot-api-secret-token"),
-            );
-          } catch {
-            throw new HttpError(401, "Telegram webhook authorization failed");
-          }
-          const contentLength = Number(request.headers.get("content-length") ?? 0);
-          if (contentLength > 128_000) throw new HttpError(413, "Telegram update is too large");
-          const rawUpdate = await request.text();
-          if (Buffer.byteLength(rawUpdate) > 128_000) throw new HttpError(413, "Telegram update is too large");
-          const update = JSON.parse(rawUpdate) as { update_id?: number };
-          if (!Number.isSafeInteger(update.update_id)) throw new HttpError(400, "Telegram update_id is required");
-          return json(await intelligence.handleTelegramUpdate(update as Parameters<typeof intelligence.handleTelegramUpdate>[0]));
-        }
-
-        const candidateFeedbackMatch = url.pathname.match(/^\/api\/intelligence\/candidates\/([^/]+)\/feedback$/);
-        if (request.method === "POST" && candidateFeedbackMatch) {
-          requireOperator(request, options.operatorToken);
-          const input = await request.json() as { signal?: "valuable" | "not_valuable" | "duplicate" | "too_late" };
-          if (!input.signal || !["valuable", "not_valuable", "duplicate", "too_late"].includes(input.signal)) {
-            throw new Error("signal must be valuable, not_valuable, duplicate, or too_late");
-          }
-          return json(await (await getMemberServices()).intelligence.recordFeedback(candidateFeedbackMatch[1]!, input.signal));
-        }
-
-        const feedbackRedirectMatch = url.pathname.match(/^\/r\/([^/]+)$/);
-        if (request.method === "GET" && feedbackRedirectMatch) {
-          const result = await (await getMemberServices()).intelligence.openFeedback(decodeURIComponent(feedbackRedirectMatch[1]!));
-          if (!result) return json({ error: "Feedback link not found" }, 404);
-          return new Response(null, { status: 303, headers: { location: result.target_url, "cache-control": "no-store" } });
-        }
-
-        if (request.method === "GET" && url.pathname === "/api/intelligence/preferences") {
-          return json({
-            ...await new IntelligencePreferenceStore(options.dataDir).get(),
-            credentials: {
-              x_trends: await hasLocalSecret(options.dataDir, "x-bearer-token", "TOTEMORA_X_BEARER_TOKEN"),
-              weibo_hot: await hasLocalSecret(options.dataDir, "weibo-access-token", "TOTEMORA_WEIBO_ACCESS_TOKEN"),
-            },
-          });
-        }
-
-        if (request.method === "PUT" && url.pathname === "/api/intelligence/preferences") {
-          requireOperator(request, options.operatorToken);
-          return json(await new IntelligencePreferenceStore(options.dataDir).save(await request.json()));
-        }
-
-        if (request.method === "GET" && url.pathname === "/api/finance/preferences") {
-          return json(await new FinancePreferenceStore(options.dataDir).get());
-        }
-
-        if (request.method === "PUT" && url.pathname === "/api/finance/preferences") {
-          requireOperator(request, options.operatorToken);
-          return json(await new FinancePreferenceStore(options.dataDir).save(await request.json()));
-        }
-
         if (request.method === "GET" && url.pathname === "/api/actions") {
           requireOperator(request, options.operatorToken);
           return json({ actions: (await new ActionJournal(options.dataDir).list()).slice(-100).reverse() });
-        }
-
-        if (request.method === "POST" && url.pathname === "/api/intelligence/run") {
-          requireOperator(request, options.operatorToken);
-          const input = await request.json().catch(() => ({})) as { message_count?: number; idempotency_key?: string };
-          return json(await (await getMemberServices()).intelligence.run({
-            message_count: input.message_count,
-            idempotency_key: input.idempotency_key,
-            reason: "manual",
-          }), 201);
-        }
-
-        if (request.method === "POST" && url.pathname === "/api/finance/run") {
-          requireOperator(request, options.operatorToken);
-          const input = await request.json().catch(() => ({})) as {
-            message_count?: number; idempotency_key?: string; briefing_type?: FinanceBriefingType;
-          };
-          return json(await (await getMemberServices()).finance.run({
-            message_count: input.message_count,
-            idempotency_key: input.idempotency_key,
-            reason: "manual",
-            briefing_type: input.briefing_type,
-          }), 201);
-        }
-
-        if (request.method === "POST" && url.pathname === "/api/intelligence/tasks") {
-          requireOperator(request, options.operatorToken);
-          const input = await request.json().catch(() => ({})) as IntelligenceTaskInput;
-          return json(await enqueueIntelligenceTask({ ...input, domain: "ai" }), 202);
-        }
-
-        if (request.method === "POST" && url.pathname === "/api/finance/tasks") {
-          requireOperator(request, options.operatorToken);
-          const input = await request.json().catch(() => ({})) as IntelligenceTaskInput;
-          return json(await enqueueIntelligenceTask({ ...input, domain: "finance" }), 202);
-        }
-
-        const intelligenceTaskMatch = url.pathname.match(/^\/api\/intelligence\/tasks\/([^/]+)$/);
-        if (request.method === "GET" && intelligenceTaskMatch) {
-          requireOperator(request, options.operatorToken);
-          const task = intelligenceTasks.get(intelligenceTaskMatch[1]!);
-          return task ? json(task) : json({ error: "Intelligence task not found" }, 404);
-        }
-
-        const financeTaskMatch = url.pathname.match(/^\/api\/finance\/tasks\/([^/]+)$/);
-        if (request.method === "GET" && financeTaskMatch) {
-          requireOperator(request, options.operatorToken);
-          const task = intelligenceTasks.get(financeTaskMatch[1]!);
-          return task?.domain === "finance" ? json(task) : json({ error: "Finance task not found" }, 404);
         }
 
         if (request.method === "GET" && url.pathname === "/api/assets") {
@@ -1255,218 +933,28 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
           return json({ embers: [...embers.values()] });
         }
 
-        if (request.method === "GET" && url.pathname === "/api/settlement") {
-          return json(await settlement.get());
-        }
-
-        if (request.method === "POST" && url.pathname === "/api/workplaces") {
-          requireOperator(request, options.operatorToken);
-          const input = await request.json() as { name?: string; path?: string };
-          return json(await settlement.addWorkplace(input.name ?? "", input.path ?? ""), 201);
-        }
-
-        const policyMatch = url.pathname.match(/^\/api\/workplaces\/([^/]+)\/policy$/);
-        if (request.method === "PUT" && policyMatch) {
-          requireOperator(request, options.operatorToken);
-          const input = await request.json() as {
-            instructions?: string;
-            validation_commands?: string[];
-            allowed_commit_types?: string[];
-            forbidden_paths?: string[];
-            git_flow?: {
-              remote_provider: "none" | "github";
-              target_branch: string;
-              allow_issue: boolean;
-              allow_push: boolean;
-              allow_pull_request: boolean;
-              allow_merge: boolean;
-              allow_opencode_fix: boolean;
-            };
-          };
-          return json(await settlement.setWorkplacePolicy(policyMatch[1]!, {
-            instructions: input.instructions ?? "",
-            validation_commands: input.validation_commands ?? [],
-            allowed_commit_types: input.allowed_commit_types ?? [],
-            forbidden_paths: input.forbidden_paths ?? [],
-            git_flow: input.git_flow,
-          }));
-        }
-
-        if (request.method === "POST" && url.pathname === "/api/development/prepare") {
-          requireOperator(request, options.operatorToken);
-          const input = await request.json() as {
-            workplace_id?: string; goal?: string;
-            mode?: "commit" | "pull_request" | "merge"; issue_mode?: "auto" | "none";
-            trial_commission_id?: string;
-          };
-          if (!input.workplace_id || !input.goal?.trim()) throw new Error("workplace_id and goal are required");
-          return json(await (await getDevelopmentService()).prepare(input.workplace_id, input.goal.trim(), {
-            mode: input.mode, issue_mode: input.issue_mode, trial_commission_id: input.trial_commission_id,
-          }), 201);
-        }
-
-        if (request.method === "POST" && url.pathname === "/api/development/tasks") {
-          requireOperator(request, options.operatorToken);
-          const input = await request.json() as Partial<DevelopmentTaskInput>;
-          return json(await enqueueDevelopmentTask({
-            workplace_id: input.workplace_id ?? "",
-            goal: input.goal ?? "",
-            mode: input.mode,
-            issue_mode: input.issue_mode,
-            trial_commission_id: input.trial_commission_id,
-          }), 202);
-        }
-
-        if (request.method === "GET" && url.pathname === "/api/development/tasks") {
-          requireOperator(request, options.operatorToken);
-          return json({ tasks: [...developmentTasks.values()]
-            .sort((left, right) => right.created_at.localeCompare(left.created_at))
-            .slice(0, 50) });
-        }
-
-        const developmentTaskMatch = url.pathname.match(/^\/api\/development\/tasks\/([^/]+)$/);
-        if (request.method === "GET" && developmentTaskMatch) {
-          requireOperator(request, options.operatorToken);
-          const task = developmentTasks.get(developmentTaskMatch[1]!);
-          return task ? json(task) : json({ error: "Development task not found" }, 404);
-        }
-
-        if (request.method === "GET" && url.pathname === "/api/development/proposals") {
-          requireOperator(request, options.operatorToken);
-          return json({ proposals: await (await getDevelopmentService()).listProposals() });
-        }
-
-        if (request.method === "GET" && url.pathname === "/api/development/skill-proposals") {
-          requireOperator(request, options.operatorToken);
-          return json({ proposals: await (await getDevelopmentService()).listSkillProposals() });
-        }
-
-        const skillApprovalMatch = url.pathname.match(/^\/api\/development\/skill-proposals\/([^/]+)\/approve$/);
-        if (request.method === "POST" && skillApprovalMatch) {
-          requireOperator(request, options.operatorToken);
-          return json(await (await getDevelopmentService()).approveSkillProposal(skillApprovalMatch[1]!));
-        }
-
-        const developmentMatch = url.pathname.match(/^\/api\/development\/proposals\/([^/]+)$/);
-        if (request.method === "GET" && developmentMatch) {
-          requireOperator(request, options.operatorToken);
-          return json(await (await getDevelopmentService()).getProposal(developmentMatch[1]!));
-        }
-
-        const approveMatch = url.pathname.match(/^\/api\/development\/proposals\/([^/]+)\/approve$/);
-        if (request.method === "POST" && approveMatch) {
-          requireOperator(request, options.operatorToken);
-          const proposal = await (await getDevelopmentService()).approve(approveMatch[1]!);
-          syncDevelopmentSpecialistTask(proposal);
-          return json(proposal);
-        }
-
-        const advanceMatch = url.pathname.match(/^\/api\/development\/proposals\/([^/]+)\/advance$/);
-        if (request.method === "POST" && advanceMatch) {
-          requireOperator(request, options.operatorToken);
-          const input = await request.json() as { gate?: "local" | "remote" | "merge" };
-          const service = await getDevelopmentService();
-          if (input.gate === "local") {
-            const proposal = await service.approve(advanceMatch[1]!);
-            syncDevelopmentSpecialistTask(proposal); return json(proposal);
-          }
-          if (input.gate === "remote") {
-            const proposal = await service.publish(advanceMatch[1]!);
-            syncDevelopmentSpecialistTask(proposal); return json(proposal);
-          }
-          if (input.gate === "merge") {
-            const proposal = await service.merge(advanceMatch[1]!);
-            syncDevelopmentSpecialistTask(proposal); return json(proposal);
-          }
-          throw new Error("gate must be local, remote, or merge");
-        }
-
-        if (request.method === "POST" && url.pathname === "/api/missions") {
-          requireOperator(request, options.operatorToken);
-          const input = await request.json() as { title?: string; workplace_id?: string };
-          return json(await settlement.createMission(input.title ?? "", input.workplace_id), 201);
-        }
-
-        if (request.method === "POST" && url.pathname === "/api/intake/analyze") {
-          const input = await request.json() as RunInput;
-          return json(analyzeTaskIntent({
-            goal: input.goal ?? "",
-            has_workspace: Boolean(input.workplace_id || input.workspace?.trim()),
-            continuing: Boolean(input.mission_id),
-          }));
-        }
-
-        if (request.method === "POST" && url.pathname === "/api/runs") {
-          requireOperator(request, options.operatorToken);
-          return json(await enqueueRun((await request.json()) as RunInput), 202);
-        }
-
-        if (request.method === "GET" && url.pathname === "/api/runs") {
-          return json({ runs: await listPersistedRuns(options.dataDir) });
-        }
-
-        if (request.method === "GET" && url.pathname === "/api/jobs") {
-          return json({ jobs: [...jobs.values()]
-            .sort((left, right) => right.created_at.localeCompare(left.created_at))
-            .slice(0, 30)
-            .map((job) => ({
-              id: job.id, mission_id: job.mission_id, status: job.status,
-              phase: job.phase, message: job.message, created_at: job.created_at,
-              updated_at: job.updated_at, goal: job.run?.task.goal ?? jobInputs.get(job.id)?.goal,
-              error: job.error, failure: job.failure,
-            })) });
-        }
-
-        const cancelMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/cancel$/);
-        if (request.method === "POST" && cancelMatch) {
-          requireOperator(request, options.operatorToken);
-          const job = jobs.get(cancelMatch[1]!);
-          if (!job) return json({ error: "Run job not found" }, 404);
-          if (!["queued", "running"].includes(job.status)) {
-            return json({ error: `Run cannot be cancelled from status ${job.status}` }, 409);
-          }
-          controllers.get(job.id)?.abort();
-          job.message = "正在取消当前模型调用";
-          recordActivity(job, "cancelling", job.message);
-          await jobStore.save(job, jobInputs.get(job.id)!);
-          return json(job, 202);
-        }
-
-        const retryMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/retry$/);
-        if (request.method === "POST" && retryMatch) {
-          requireOperator(request, options.operatorToken);
-          const previous = jobs.get(retryMatch[1]!);
-          const input = jobInputs.get(retryMatch[1]!);
-          if (!previous || !input) return json({ error: "Run job not found or no longer retryable" }, 404);
-          if (previous.status !== "failed" || !previous.failure?.retryable) {
-            return json({ error: "Only retryable failed Runs can be retried" }, 409);
-          }
-          return json(await enqueueRun(structuredClone(input)), 202);
-        }
-
-        const match = url.pathname.match(/^\/api\/runs\/([^/]+)$/);
-        if (request.method === "GET" && match) {
-          const job = jobs.get(match[1]!);
-          return job ? json(job) : json({ error: "Run job not found" }, 404);
-        }
         return json({ error: "Not found" }, 404);
       } catch (error) {
-        return json(
-          { error: error instanceof Error ? error.message : String(error) },
-          error instanceof HttpError ? error.status
-            : error instanceof SkillCommissionConflictError || error instanceof SkillTrialConflictError ? 409
-              : error instanceof SkillTrialInputError ? 400 : 400,
-        );
+        const status = error instanceof HttpError ? error.status
+          : error instanceof SkillCommissionConflictError || error instanceof SkillTrialConflictError ? 409
+            : error instanceof SkillTrialInputError ? 400 : undefined;
+        if (status) return json({ error: error instanceof Error ? error.message : String(error) }, status);
+        const reference = crypto.randomUUID().slice(0, 8);
+        console.error(JSON.stringify({
+          event: "gateway_request_failed", reference, method: request.method, pathname: url.pathname,
+          error: error instanceof Error ? error.message : String(error),
+        }));
+        return json({ error: "Internal server error", reference }, 500);
       }
     },
   };
 }
 
 async function executeRun(
-  job: RunJob, input: RunInput, options: PlaygroundOptions, config: LocalConfigSet,
+  job: RunJob, input: RunRouteInput, options: PlaygroundOptions, config: LocalConfigSet,
   settlement: SettlementStore,
   controller: AbortController,
-  jobStore: JobStore<RunJob, RunInput>,
+  jobStore: JobStore<RunJob, RunRouteInput>,
 ): Promise<void> {
   try {
     job.status = "running";
@@ -1598,10 +1086,6 @@ async function loadMemberPerformance(dataDir: string): Promise<Record<string, Me
     } catch { /* Ignore malformed historical traces. */ }
   }
   return totals;
-}
-
-function json(value: unknown, status = 200): Response {
-  return Response.json(value, { status, headers: { "Cache-Control": "no-store" } });
 }
 
 function requireOperator(request: Request, configuredToken?: string): void {

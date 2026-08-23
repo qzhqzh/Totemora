@@ -31,14 +31,16 @@
         <div class="operator-dialog-actions"><button id="operator-logout" type="button" class="secondary hidden">退出登录</button><button id="operator-login-submit" type="submit">验证并登录</button></div>
       </form>
     </dialog>
-    <dialog id="create-skill-dialog" class="operator-dialog" aria-labelledby="create-skill-dialog-title">
+    <dialog id="create-skill-dialog" class="operator-dialog modal-large" aria-labelledby="create-skill-dialog-title">
       <form id="create-skill-form" method="dialog">
         <div class="operator-dialog-head"><h2 id="create-skill-dialog-title">新建 Skill</h2><button id="create-skill-dialog-close" type="button" class="secondary" aria-label="关闭新建窗口">关闭</button></div>
         <p>在仓库 <code>skills/&lt;skill-id&gt;/</code> 目录直接生成规范化 Skill 包（包含 <code>SKILL.md</code> 与 <code>skill.yaml</code>）。</p>
-        <label>Skill 唯一标识 (ID)<input id="new-skill-id" name="id" placeholder="例如：data-analyst 或 code-audit" pattern="^[a-z0-9][a-z0-9._-]{0,127}$" required></label>
-        <label>Skill 名称<input id="new-skill-name" name="name" placeholder="例如：数据分析专员" required></label>
+        <div class="dialog-grid-row">
+          <label>Skill 唯一标识 (ID)<input id="new-skill-id" name="id" placeholder="例如：data-analyst 或 code-audit" pattern="^[a-z0-9][a-z0-9._-]{0,127}$" required></label>
+          <label>Skill 名称<input id="new-skill-name" name="name" placeholder="例如：数据分析专员" required></label>
+        </div>
         <div class="skill-tag-group">
-          <label>标签 (Tags，支持选择或输入)</label>
+          <label>标签 (Tags，支持选择常用或自定义输入)</label>
           <div id="new-skill-tag-presets" class="skill-tag-presets"></div>
           <div class="skill-tag-input-row">
             <input id="new-skill-tag-input" placeholder="输入标签名，如 image / design / write">
@@ -47,7 +49,7 @@
           <div id="new-skill-selected-tags" class="skill-selected-tags"></div>
         </div>
         <label>简要描述<textarea id="new-skill-description" name="description" rows="2" placeholder="简述该 Skill 的职责、调用场景与预期能力" required></textarea></label>
-        <label>初始正文内容（Markdown，可选）<textarea id="new-skill-content" name="content" rows="3" placeholder="详细规则、执行步骤或提示词模板（可留空使用默认模版）"></textarea></label>
+        <label>初始正文内容（Markdown，可选）<textarea id="new-skill-content" name="content" class="dialog-code-textarea" rows="8" placeholder="详细规则、执行步骤或提示词模板（可留空使用默认模版）"></textarea></label>
         <div id="create-skill-status" class="operator-login-status" role="status" aria-live="polite">创建 Skill 需要已验证的操作员身份。</div>
         <div class="operator-dialog-actions">
           <button id="create-skill-cancel" type="button" class="secondary">取消</button>
@@ -55,14 +57,16 @@
         </div>
       </form>
     </dialog>
-    <dialog id="edit-skill-dialog" class="operator-dialog" aria-labelledby="edit-skill-dialog-title">
+    <dialog id="edit-skill-dialog" class="operator-dialog modal-large" aria-labelledby="edit-skill-dialog-title">
       <form id="edit-skill-form" method="dialog">
         <div class="operator-dialog-head"><h2 id="edit-skill-dialog-title">编辑 Skill</h2><button id="edit-skill-dialog-close" type="button" class="secondary" aria-label="关闭编辑窗口">关闭</button></div>
         <p>更新仓库 <code>skills/&lt;skill-id&gt;/</code> 下的 <code>SKILL.md</code> 与 <code>skill.yaml</code>。</p>
-        <label>Skill ID<input id="edit-skill-id" name="id" readonly disabled style="opacity:0.75;"></label>
-        <label>Skill 名称<input id="edit-skill-name" name="name" placeholder="例如：数据分析专员" required></label>
+        <div class="dialog-grid-row">
+          <label>Skill ID<input id="edit-skill-id" name="id" readonly disabled style="opacity:0.75;"></label>
+          <label>Skill 名称<input id="edit-skill-name" name="name" placeholder="例如：数据分析专员" required></label>
+        </div>
         <div class="skill-tag-group">
-          <label>标签 (Tags，支持选择或输入)</label>
+          <label>标签 (Tags，支持选择常用或自定义输入)</label>
           <div id="edit-skill-tag-presets" class="skill-tag-presets"></div>
           <div class="skill-tag-input-row">
             <input id="edit-skill-tag-input" placeholder="输入标签名，如 image / design / write">
@@ -71,11 +75,60 @@
           <div id="edit-skill-selected-tags" class="skill-selected-tags"></div>
         </div>
         <label>简要描述<textarea id="edit-skill-description" name="description" rows="2" placeholder="简述该 Skill 的职责、调用场景与预期能力" required></textarea></label>
-        <label>正文内容与规则（Markdown）<textarea id="edit-skill-content" name="content" rows="6" placeholder="SKILL.md 正文内容与规则定义"></textarea></label>
+        <label>正文内容与规则（Markdown）<textarea id="edit-skill-content" name="content" class="dialog-code-textarea" rows="10" placeholder="SKILL.md 正文内容与规则定义"></textarea></label>
         <div id="edit-skill-status" class="operator-login-status" role="status" aria-live="polite">保存修改需要已验证的操作员身份。</div>
         <div class="operator-dialog-actions">
           <button id="edit-skill-cancel" type="button" class="secondary">取消</button>
           <button id="edit-skill-submit" type="submit">保存修改</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="edit-prompt-dialog" class="operator-dialog modal-large" aria-labelledby="edit-prompt-dialog-title">
+      <form id="edit-prompt-form" method="dialog">
+        <div class="operator-dialog-head"><h2 id="edit-prompt-dialog-title">编辑提示词模版</h2><button id="edit-prompt-dialog-close" type="button" class="secondary" aria-label="关闭编辑窗口">关闭</button></div>
+        <p>修改提示词模版配置、变量槽位与正文内容。</p>
+        <div class="dialog-grid-row">
+          <label>模版 ID<input id="edit-prompt-id" name="id" readonly disabled style="opacity:0.75;"></label>
+          <label>模版名称<input id="edit-prompt-name" name="name" placeholder="例如：首领任务路由与选人决策" required></label>
+        </div>
+        <div class="dialog-grid-3">
+          <label>分类 (Category)
+            <select id="edit-prompt-category" name="category">
+              <option value="system">系统提示 (system)</option>
+              <option value="persona">角色人格 (persona)</option>
+              <option value="task">任务路由 (task)</option>
+            </select>
+          </label>
+          <label>适用角色 (Role)<input id="edit-prompt-role" name="role" placeholder="例如：chief / specialist / writer" required></label>
+          <label>适用模型 (Model)<input id="edit-prompt-model" name="model" placeholder="例如：deepseek/deepseek-v4-pro" required></label>
+        </div>
+        <label>简要概述<textarea id="edit-prompt-summary" name="summary" rows="2" placeholder="简述该提示词模版的目标与决策范围" required></textarea></label>
+        <label>插值槽位 (Variables，逗号分隔)<input id="edit-prompt-variables" name="variables" placeholder="例如：goal, workspace, budget, acceptance_criteria"></label>
+        <label>提示词正文<textarea id="edit-prompt-content" name="content" class="dialog-code-textarea" rows="10" placeholder="提示词的具体 Markdown / 纯文本内容与决策原则" required></textarea></label>
+        <div id="edit-prompt-status" class="operator-login-status" role="status" aria-live="polite"></div>
+        <div class="operator-dialog-actions">
+          <button id="edit-prompt-cancel" type="button" class="secondary">取消</button>
+          <button id="edit-prompt-submit" type="submit">保存修改</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="edit-workflow-dialog" class="operator-dialog modal-large" aria-labelledby="edit-workflow-dialog-title">
+      <form id="edit-workflow-form" method="dialog">
+        <div class="operator-dialog-head"><h2 id="edit-workflow-dialog-title">编辑工作流流水线</h2><button id="edit-workflow-dialog-close" type="button" class="secondary" aria-label="关闭编辑窗口">关闭</button></div>
+        <p>更新流水线名称、触发条件、概述以及协同流转阶段。</p>
+        <div class="dialog-grid-row">
+          <label>流水线 ID<input id="edit-workflow-id" name="id" readonly disabled style="opacity:0.75;"></label>
+          <label>工作流名称<input id="edit-workflow-name" name="name" placeholder="例如：Git 变更提交与安全 PR 流水线" required></label>
+        </div>
+        <label>触发条件<input id="edit-workflow-trigger" name="trigger" placeholder="例如：任务大厅发起或代码提交请求" required></label>
+        <label>简要概述<textarea id="edit-workflow-summary" name="summary" rows="2" placeholder="简要说明工作流的设计目的与流转机制" required></textarea></label>
+        <label>协同阶段定义 (JSON 或 每行“阶段名称 | 执行者 | 描述”)
+          <textarea id="edit-workflow-steps" name="steps" class="dialog-code-textarea" rows="8" placeholder='[&#10;  { "name": "阶段名称", "actor": "执行角色", "desc": "阶段详细描述" }&#10;]' required></textarea>
+        </label>
+        <div id="edit-workflow-status" class="operator-login-status" role="status" aria-live="polite"></div>
+        <div class="operator-dialog-actions">
+          <button id="edit-workflow-cancel" type="button" class="secondary">取消</button>
+          <button id="edit-workflow-submit" type="submit">保存修改</button>
         </div>
       </form>
     </dialog>

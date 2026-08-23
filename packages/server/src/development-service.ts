@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { readFile, stat } from "node:fs/promises";
 import { readdirSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 
 import type { AgentConfig, LocalConfigSet, ModelUsage, ProviderRegistry } from "@totemora/core";
 
@@ -13,6 +13,23 @@ import { StateDatabase } from "./state-database";
 import { MemberStateStore } from "./member-state-store";
 import { SkillCommissionService } from "./skill-commission-service";
 import { GIT_FLOW_SKILL_ID, GIT_FLOW_SKILL_VERSION } from "./git-flow-skill";
+import {
+  parseMemberJson,
+  type SpecialistOutput,
+  validateAcceptance,
+  validateChiefReport,
+  validatePrReview,
+  validateSpecialistOutput,
+} from "./development-contracts";
+import {
+  collectGitSnapshot,
+  countLines,
+  type ExternalCommandRunner,
+  git,
+  runExternalCommand,
+  runValidation,
+} from "./development-git-client";
+import { DevelopmentGitHubClient } from "./development-github-client";
 
 export interface DevelopmentProposal {
   id: string;
@@ -62,6 +79,7 @@ export interface DevelopmentProposal {
   };
   issue_number?: number;
   issue_url?: string;
+  issue_creation_unknown?: boolean;
   pr_number?: number;
   pr_url?: string;
   pr_review?: { outcome: "accepted" | "changes_requested"; rationale: string; issues: string[] };
@@ -73,40 +91,7 @@ export interface DevelopmentProposal {
   error?: string;
 }
 
-interface GitSnapshot {
-  hash: string;
-  files: string[];
-  status: string;
-  diff: string;
-  conventions: string;
-  branch: string;
-  branches: string;
-  unpushed: string;
-  stash: string;
-}
-
 const GIT_COMMIT_SPECIALIST_ID = "deepseek_git_steward";
-
-interface SpecialistOutput {
-  summary: string;
-  commit_message: string;
-  files: string[];
-  risk: string;
-  validation_commands: string[];
-  experience_used: string[];
-  skill_improvement?: string;
-  self_check: { outcome: "accepted" | "rejected"; rationale: string; issues: string[] };
-  remote_plan?: {
-    target_branch: string;
-    branch_name: string;
-    issue_title?: string;
-    issue_body?: string;
-    pr_title: string;
-    pr_body: string;
-  };
-}
-
-type ExternalCommandRunner = (cwd: string, command: string, args: string[]) => Promise<{ stdout: string; stderr: string }>;
 
 export class DevelopmentCommitService {
   private readonly proposalsDir: string;
@@ -116,6 +101,7 @@ export class DevelopmentCommitService {
   private readonly state: StateDatabase;
   private readonly memberState: MemberStateStore;
   private readonly skillCommissions: SkillCommissionService;
+  private readonly github: DevelopmentGitHubClient;
 
   constructor(
     private readonly config: LocalConfigSet,
@@ -123,7 +109,7 @@ export class DevelopmentCommitService {
     private readonly settlement: SettlementStore,
     dataDir: string,
     private readonly projectRoot: string,
-    private readonly externalCommand: ExternalCommandRunner = runExternalCommand,
+    externalCommand: ExternalCommandRunner = runExternalCommand,
     private readonly correctionTool = new OpenCodeCorrectionTool(),
   ) {
     this.proposalsDir = resolve(dataDir, "development", "proposals");
@@ -133,6 +119,7 @@ export class DevelopmentCommitService {
     this.state = StateDatabase.open(dataDir);
     this.memberState = new MemberStateStore(dataDir, config);
     this.skillCommissions = new SkillCommissionService(config, providers, dataDir);
+    this.github = new DevelopmentGitHubClient(externalCommand);
     this.importLegacyState();
   }
 
@@ -458,50 +445,67 @@ export class DevelopmentCommitService {
         throw new Error("HEAD changed after the approved local Commit");
       }
       if (proposal.issue_mode === "auto" && !proposal.issue_number) {
-        const issue = await this.externalCommand(workplace.path, "gh", [
-          "issue", "create", "--title", proposal.remote_plan.issue_title!,
-          "--body", proposal.remote_plan.issue_body!,
-        ]);
-        proposal.issue_url = lastNonEmptyLine(issue.stdout);
-        proposal.issue_number = parseGitHubNumber(proposal.issue_url, "issues");
-        recordActivity(proposal, "issue_created", `Issue #${proposal.issue_number} 已创建`);
+        const marker = `totemora-proposal-${proposal.id}`;
+        const existing = await this.github.findIssueByMarker(workplace.path, marker);
+        if (!existing && proposal.issue_creation_unknown) {
+          throw new Error("GitHub Issue creation outcome is unknown; verify the repository and retry reconciliation later");
+        }
+        let issue = existing;
+        if (!issue) {
+          try {
+            issue = await this.github.createIssue(
+              workplace.path, proposal.remote_plan.issue_title!,
+              `${proposal.remote_plan.issue_body!}\n\n<!-- ${marker} -->`,
+            );
+          } catch (error) {
+            proposal.issue_creation_unknown = true;
+            proposal.updated_at = new Date().toISOString();
+            recordActivity(proposal, "issue_creation_unknown", "GitHub Issue 创建结果未知，禁止自动重放");
+            await this.saveProposal(proposal);
+            throw error;
+          }
+        }
+        proposal.issue_url = issue.url;
+        proposal.issue_number = issue.number;
+        proposal.issue_creation_unknown = undefined;
+        recordActivity(
+          proposal,
+          existing ? "issue_reused" : "issue_created",
+          `Issue #${proposal.issue_number} 已${existing ? "调和复用" : "创建"}`,
+        );
         await this.saveProposal(proposal);
       }
-      const pushTransport = await this.pushBranch(workplace.path, branch);
+      const pushTransport = await this.github.pushBranch(workplace.path, branch);
       recordActivity(proposal, "pushed", `分支 ${branch} 已通过 ${pushTransport} 推送到 origin`);
       await this.saveProposal(proposal);
       if (!proposal.pr_number) {
         const closing = proposal.issue_number ? `\n\nCloses #${proposal.issue_number}` : "";
-        const openPullRequests = JSON.parse((await this.externalCommand(workplace.path, "gh", [
-          "pr", "list", "--head", branch, "--base", proposal.remote_plan.target_branch,
-          "--state", "open", "--limit", "1", "--json", "number,url",
-        ])).stdout) as Array<{ number: number; url: string }>;
-        const existing = openPullRequests[0];
+        const existing = await this.github.findOpenPullRequest(
+          workplace.path, branch, proposal.remote_plan.target_branch,
+        );
         if (existing) {
           proposal.pr_number = existing.number;
           proposal.pr_url = existing.url;
-          await this.externalCommand(workplace.path, "gh", [
-            "pr", "edit", String(existing.number), "--title", proposal.remote_plan.pr_title,
-            "--body", `${proposal.remote_plan.pr_body}${closing}`,
-          ]);
+          await this.github.editPullRequest(
+            workplace.path, existing.number, proposal.remote_plan.pr_title,
+            `${proposal.remote_plan.pr_body}${closing}`,
+          );
           recordActivity(proposal, "pr_reused", `PR #${proposal.pr_number} 已复用并更新说明`);
         } else {
-          const pullRequest = await this.externalCommand(workplace.path, "gh", [
-            "pr", "create", "--base", proposal.remote_plan.target_branch,
-            "--head", branch, "--title", proposal.remote_plan.pr_title,
-            "--body", `${proposal.remote_plan.pr_body}${closing}`,
-          ]);
-          proposal.pr_url = lastNonEmptyLine(pullRequest.stdout);
-          proposal.pr_number = parseGitHubNumber(proposal.pr_url, "pull");
+          const pullRequest = await this.github.createPullRequest(workplace.path, {
+            base: proposal.remote_plan.target_branch,
+            head: branch,
+            title: proposal.remote_plan.pr_title,
+            body: `${proposal.remote_plan.pr_body}${closing}`,
+          });
+          proposal.pr_url = pullRequest.url;
+          proposal.pr_number = pullRequest.number;
           recordActivity(proposal, "pr_created", `PR #${proposal.pr_number} 已创建`);
         }
         await this.saveProposal(proposal);
       }
-      const prDiff = await this.externalCommand(workplace.path, "gh", ["pr", "diff", String(proposal.pr_number)]);
-      const prFileData = JSON.parse((await this.externalCommand(workplace.path, "gh", [
-        "pr", "view", String(proposal.pr_number), "--json", "files",
-      ])).stdout) as { files?: Array<{ path: string }> };
-      const prFiles = (prFileData.files ?? []).map((file) => file.path);
+      const prDiff = await this.github.pullRequestDiff(workplace.path, proposal.pr_number);
+      const prFiles = await this.github.pullRequestFiles(workplace.path, proposal.pr_number);
       await this.assetRegistry.assertCanUse(specialist, "git-flow-engine", "review_pr");
       proposal.pr_review = await this.callJson(specialist, [
         "你是负责该流程的 Git 流程专员。代码由其他成员或用户编写；现在评审真实 PR Diff，检查目标、范围、风险和验证证据。",
@@ -509,7 +513,7 @@ export class DevelopmentCommitService {
         `Policy：${JSON.stringify(policy)}`,
         `本地验证：${JSON.stringify(proposal.validation_results)}`,
         `PR 完整文件清单：${JSON.stringify(prFiles)}`,
-        `PR Diff（最多 60000 字节；缺少某文件内容只代表预览截断，范围以完整文件清单为准）：\n${prDiff.stdout.slice(0, 60_000)}`,
+        `PR Diff（最多 60000 字节；缺少某文件内容只代表预览截断，范围以完整文件清单为准）：\n${prDiff.slice(0, 60_000)}`,
         '只输出严格 JSON，例如 {"outcome":"accepted","rationale":"...","issues":[]}，不要输出解释或 Markdown。',
       ].join("\n")) as DevelopmentProposal["pr_review"];
       validatePrReview(proposal.pr_review);
@@ -569,20 +573,16 @@ export class DevelopmentCommitService {
     try {
       const specialist = requireMember(this.config, proposal.specialist_member_id);
       await this.assetRegistry.assertCanUse(specialist, "git-flow-engine", "execute_merge");
-      const state = JSON.parse((await this.externalCommand(workplace.path, "gh", [
-        "pr", "view", String(proposal.pr_number), "--json", "state,isDraft,mergeStateStatus,url",
-      ])).stdout) as { state: string; isDraft: boolean; mergeStateStatus: string; url: string };
+      const state = await this.github.pullRequestState(workplace.path, proposal.pr_number);
       if (state.state !== "MERGED" && (state.isDraft || state.state !== "OPEN" || ["BLOCKED", "DIRTY"].includes(state.mergeStateStatus))) {
         throw new Error(`Pull Request is not mergeable: ${JSON.stringify(state)}`);
       }
       if (state.state !== "MERGED") {
-        await this.externalCommand(workplace.path, "gh", ["pr", "merge", String(proposal.pr_number), "--squash", "--delete-branch"]);
+        await this.github.mergePullRequest(workplace.path, proposal.pr_number);
       }
       await git(workplace.path, ["checkout", proposal.remote_plan.target_branch]);
-      const syncTransport = await this.syncTargetBranch(workplace.path, proposal.remote_plan.target_branch);
-      const merged = JSON.parse((await this.externalCommand(workplace.path, "gh", [
-        "pr", "view", String(proposal.pr_number), "--json", "state,mergedAt,mergeCommit,url",
-      ])).stdout) as { state: string; mergedAt?: string; mergeCommit?: { oid?: string }; url: string };
+      const syncTransport = await this.github.syncTargetBranch(workplace.path, proposal.remote_plan.target_branch);
+      const merged = await this.github.mergedPullRequest(workplace.path, proposal.pr_number);
       if (merged.state !== "MERGED") throw new Error("GitHub did not report the Pull Request as merged");
       const chief = requireMember(this.config, proposal.chief_member_id);
       proposal.chief_report = await this.callJson(chief, [
@@ -660,51 +660,11 @@ export class DevelopmentCommitService {
       maxTokens,
     });
     onUsage?.(response.usage);
-    return parseJson(response.content, member.id);
+    return parseMemberJson(response.content, member.id);
   }
 
   private async saveProposal(proposal: DevelopmentProposal): Promise<void> {
     this.state.putRecord("development_proposals", proposal.id, proposal, proposal.created_at, proposal.updated_at);
-  }
-
-  private async pushBranch(cwd: string, branch: string): Promise<"configured origin" | "GitHub HTTPS fallback"> {
-    try {
-      await git(cwd, ["push", "-u", "origin", branch]);
-      return "configured origin";
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (!/(port 22|Could not read from remote repository|ssh:)/i.test(message)) throw error;
-      const repositoryUrl = await this.githubRepositoryUrl(cwd, error);
-      await git(cwd, [
-        "-c", "credential.helper=!gh auth git-credential",
-        "push", `${repositoryUrl}.git`, branch,
-      ]);
-      return "GitHub HTTPS fallback";
-    }
-  }
-
-  private async syncTargetBranch(cwd: string, branch: string): Promise<"configured origin" | "GitHub HTTPS fallback"> {
-    try {
-      await git(cwd, ["pull", "--ff-only", "origin", branch]);
-      await git(cwd, ["fetch", "--prune", "origin"]);
-      return "configured origin";
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (!/(port 22|Could not read from remote repository|ssh:)/i.test(message)) throw error;
-      const repositoryUrl = await this.githubRepositoryUrl(cwd, error);
-      const authenticated = ["-c", "credential.helper=!gh auth git-credential"];
-      await git(cwd, [...authenticated, "pull", "--ff-only", `${repositoryUrl}.git`, branch]);
-      await git(cwd, [...authenticated, "fetch", "--prune", `${repositoryUrl}.git`]);
-      return "GitHub HTTPS fallback";
-    }
-  }
-
-  private async githubRepositoryUrl(cwd: string, cause: unknown): Promise<string> {
-    const repository = JSON.parse((await this.externalCommand(cwd, "gh", ["repo", "view", "--json", "url"])).stdout) as { url?: string };
-    if (!repository.url || !/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository.url)) {
-      throw new Error("GitHub HTTPS fallback could not resolve a safe repository URL", { cause });
-    }
-    return repository.url;
   }
 
   private async recordAssetUse(
@@ -821,147 +781,6 @@ function summarizeEvaluationUsage(
   };
 }
 
-async function collectGitSnapshot(root: string, policy: WorkplacePolicy): Promise<GitSnapshot> {
-  await git(root, ["rev-parse", "--show-toplevel"]);
-  for (const marker of ["MERGE_HEAD", "REBASE_HEAD", "CHERRY_PICK_HEAD"]) {
-    try { await stat(join(root, ".git", marker)); throw new Error(`Git operation in progress: ${marker}`); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-  }
-  const cached = await git(root, ["diff", "--cached", "--name-only"]);
-  if (cached.stdout.trim()) throw new Error("Development commit workflow requires no pre-staged changes");
-  const tracked = (await git(root, ["diff", "--name-only", "HEAD"])).stdout.trim().split("\n").filter(Boolean);
-  const untracked = (await git(root, ["ls-files", "--others", "--exclude-standard"])).stdout.trim().split("\n").filter(Boolean);
-  const files = [...new Set([...tracked, ...untracked])].sort();
-  if (!files.length) throw new Error("Git workplace has no changes to commit");
-  for (const file of files) {
-    assertSafePath(file, policy);
-    try {
-      const content = await readFile(join(root, file));
-      if (!content.includes(0)) assertNoSecretContent(file, content.toString("utf8"));
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    }
-  }
-  const status = (await git(root, ["status", "--short", "--untracked-files=all"])).stdout;
-  const branch = (await git(root, ["branch", "--show-current"])).stdout.trim();
-  if (!branch) throw new Error("Development commit workflow requires a named Git branch");
-  const branches = (await git(root, ["branch", "--all", "--no-color"])).stdout.trim();
-  const unpushed = (await gitOptional(root, ["log", "@{upstream}..HEAD", "--oneline"])).trim();
-  const stash = (await git(root, ["stash", "list"])).stdout.trim();
-  let diff = (await git(root, ["diff", "--no-ext-diff", "--unified=3", "HEAD", "--", ...tracked])).stdout;
-  for (const file of untracked) {
-    const content = await readBoundedText(join(root, file), 8_000);
-    diff += `\n--- /dev/null\n+++ b/${file}\n[untracked preview]\n${content}`;
-  }
-  diff = diff.slice(0, 60_000);
-  const conventions = await readConventionFiles(root);
-  const hash = createHash("sha256");
-  hash.update(status);
-  hash.update(JSON.stringify({ policy_version: policy.version, files, branch, branches, unpushed, stash }));
-  for (const file of files) {
-    try { hash.update(await readFile(join(root, file))); }
-    catch { hash.update("[deleted]"); }
-  }
-  return { hash: hash.digest("hex"), files, status, diff, conventions, branch, branches, unpushed, stash };
-}
-
-function assertNoSecretContent(file: string, content: string): void {
-  const patterns = [
-    /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
-    /\bsk-proj-[A-Za-z0-9_-]{16,}/,
-    /\bgh[pousr]_[A-Za-z0-9]{20,}/,
-    /\bxox[baprs]-[A-Za-z0-9-]{16,}/,
-    /\bAKIA[A-Z0-9]{16}\b/,
-  ];
-  if (patterns.some((pattern) => pattern.test(content))) {
-    throw new Error(`Secret-like content cannot be committed without manual handling: ${file}`);
-  }
-}
-
-function assertSafePath(file: string, policy: WorkplacePolicy): void {
-  const normalized = file.replaceAll("\\", "/");
-  const defaultForbidden = [".env", "*.pem", "*.key", "*credentials*", "*secret*", ".totemora/"];
-  const patterns = [...defaultForbidden, ...policy.forbidden_paths];
-  if (normalized.startsWith("/") || normalized.includes("../") || patterns.some((pattern) => pathMatches(normalized, pattern))) {
-    throw new Error(`Forbidden path cannot be committed: ${file}`);
-  }
-}
-
-function pathMatches(file: string, pattern: string): boolean {
-  const normalized = pattern.replaceAll("\\", "/").toLowerCase();
-  const candidate = file.toLowerCase();
-  if (normalized.includes("*")) {
-    const expression = normalized.split("*").map(escapeRegExp).join(".*");
-    return new RegExp(`^${expression}$`).test(candidate);
-  }
-  return candidate === normalized || candidate.startsWith(normalized.endsWith("/") ? normalized : `${normalized}/`) || basename(candidate) === normalized;
-}
-
-function validateSpecialistOutput(
-  output: SpecialistOutput,
-  snapshotFiles: string[],
-  policy: WorkplacePolicy,
-  availableExperienceIds: Set<string>,
-  mode: DevelopmentProposal["mode"],
-): void {
-  if (!output || !output.summary || !output.commit_message || !output.risk || !Array.isArray(output.files) || !Array.isArray(output.validation_commands) || !Array.isArray(output.experience_used)) {
-    throw new Error("Commit specialist returned an invalid proposal");
-  }
-  validateAcceptance(output.self_check, "Git Flow specialist self-check");
-  if (output.self_check.outcome !== "accepted") throw new Error("Git Flow specialist rejected its own plan");
-  if (mode !== "commit" && (!output.remote_plan?.target_branch || !output.remote_plan.branch_name || !output.remote_plan.pr_title || !output.remote_plan.pr_body)) {
-    throw new Error("Git Flow specialist returned an incomplete remote plan");
-  }
-  if (mode !== "commit" && output.remote_plan?.target_branch !== policy.git_flow?.target_branch) {
-    throw new Error("Git Flow specialist selected a target branch outside Workplace Policy");
-  }
-  if (output.remote_plan?.branch_name && !/^(feat|fix|test|chore|docs|refactor|codex)\/[a-z0-9._/-]+$/.test(output.remote_plan.branch_name)) {
-    throw new Error("Git Flow specialist selected an invalid working branch name");
-  }
-  if (output.skill_improvement !== undefined && typeof output.skill_improvement !== "string") {
-    throw new Error("Commit specialist returned an invalid Skill improvement");
-  }
-  if (!output.files.length || output.files.some((file) => !snapshotFiles.includes(file))) {
-    throw new Error("Commit specialist selected files outside the Git Snapshot");
-  }
-  if (output.validation_commands.some((command) => !policy.validation_commands.includes(command))) {
-    throw new Error("Commit specialist selected a validation command outside Workplace Policy");
-  }
-  if (output.experience_used.some((id) => !availableExperienceIds.has(id))) {
-    throw new Error("Commit specialist referenced an unknown experience");
-  }
-  const allowed = policy.allowed_commit_types.map(escapeRegExp).join("|");
-  if (!new RegExp(`^(${allowed})(\\([a-z0-9._/-]+\\))?: .{1,72}$`).test(output.commit_message)) {
-    throw new Error(`Commit message ${JSON.stringify(output.commit_message)} does not satisfy Policy; expected type(scope optional): subject with type in [${policy.allowed_commit_types.join(", ")}] and a 1-72 character subject`);
-  }
-  for (const file of output.files) assertSafePath(file, policy);
-}
-
-function validateAcceptance(
-  value: { outcome: "accepted" | "rejected"; rationale: string; issues: string[] } | undefined,
-  owner: string,
-): asserts value is { outcome: "accepted" | "rejected"; rationale: string; issues: string[] } {
-  if (!value || !["accepted", "rejected"].includes(value.outcome) || !value.rationale || !Array.isArray(value.issues)) {
-    throw new Error(`${owner} returned an invalid acceptance`);
-  }
-}
-
-function validatePrReview(
-  value: DevelopmentProposal["pr_review"],
-): asserts value is NonNullable<DevelopmentProposal["pr_review"]> {
-  if (!value || !["accepted", "changes_requested"].includes(value.outcome) || !value.rationale || !Array.isArray(value.issues)) {
-    throw new Error("Git Flow specialist returned an invalid PR review");
-  }
-}
-
-function validateChiefReport(
-  value: DevelopmentProposal["chief_report"],
-): asserts value is NonNullable<DevelopmentProposal["chief_report"]> {
-  if (!value || !value.summary || !["passed", "failed"].includes(value.acceptance) || !Array.isArray(value.evidence)) {
-    throw new Error("Chief returned an invalid final Git Flow report");
-  }
-}
-
 function requireRemotePolicy(policy: WorkplacePolicy) {
   if (!policy.git_flow || policy.git_flow.remote_provider !== "github") {
     throw new Error("Workplace Policy has not enabled GitHub remote operations");
@@ -971,134 +790,4 @@ function requireRemotePolicy(policy: WorkplacePolicy) {
 
 function recordActivity(proposal: DevelopmentProposal, phase: string, message: string): void {
   proposal.activities.push({ phase, message, at: new Date().toISOString() });
-}
-
-function lastNonEmptyLine(value: string): string {
-  const line = value.trim().split("\n").filter(Boolean).at(-1);
-  if (!line) throw new Error("GitHub CLI returned no resource URL");
-  return line;
-}
-
-function parseGitHubNumber(url: string, segment: "issues" | "pull"): number {
-  const match = url.match(new RegExp(`/${segment}/(\\d+)(?:$|[?#])`));
-  if (!match) throw new Error(`Cannot parse GitHub ${segment} number from ${url}`);
-  return Number(match[1]);
-}
-
-async function readConventionFiles(root: string): Promise<string> {
-  const candidates = ["AGENTS.md", "CONTRIBUTING.md", "docs/development.md", ".github/CONTRIBUTING.md"];
-  const parts: string[] = [];
-  for (const file of candidates) {
-    try { parts.push(`## ${file}\n${await readBoundedText(join(root, file), 12_000)}`); }
-    catch { /* Optional convention file. */ }
-  }
-  return parts.join("\n\n").slice(0, 30_000);
-}
-
-async function readBoundedText(path: string, maxBytes: number): Promise<string> {
-  const value = await readFile(path);
-  if (value.includes(0)) throw new Error(`Binary file requires manual review: ${path}`);
-  return value.subarray(0, maxBytes).toString("utf8");
-}
-
-async function git(cwd: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
-  const process = Bun.spawn(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe", env: safeEnvironment() });
-  const [exitCode, stdout, stderr] = await Promise.all([
-    process.exited,
-    new Response(process.stdout).text(),
-    new Response(process.stderr).text(),
-  ]);
-  if (exitCode !== 0) throw new Error(`git ${args[0]} failed: ${stderr.trim() || stdout.trim()}`);
-  return { stdout, stderr };
-}
-
-async function runExternalCommand(cwd: string, command: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
-  const process = Bun.spawn([command, ...args], { cwd, stdout: "pipe", stderr: "pipe", env: safeEnvironment() });
-  const [exitCode, stdout, stderr] = await Promise.all([
-    process.exited,
-    new Response(process.stdout).text(),
-    new Response(process.stderr).text(),
-  ]);
-  if (exitCode !== 0) throw new Error(`${command} ${args[0] ?? ""} failed: ${stderr.trim() || stdout.trim()}`);
-  return { stdout, stderr };
-}
-
-async function gitOptional(cwd: string, args: string[]): Promise<string> {
-  try { return (await git(cwd, args)).stdout; }
-  catch { return ""; }
-}
-
-async function runValidation(command: string, cwd: string) {
-  const process = Bun.spawn(["bash", "-lc", command], { cwd, stdout: "pipe", stderr: "pipe", env: safeEnvironment() });
-  const timeout = setTimeout(() => process.kill(), 10 * 60_000);
-  const [exitCode, stdout, stderr] = await Promise.all([
-    process.exited,
-    new Response(process.stdout).text(),
-    new Response(process.stderr).text(),
-  ]);
-  clearTimeout(timeout);
-  return { command, exit_code: exitCode, output: `${stdout}\n${stderr}`.trim().slice(-20_000) };
-}
-
-function safeEnvironment(): Record<string, string> {
-  return Object.fromEntries(
-    ["PATH", "HOME", "USER", "LANG", "LC_ALL", "TMPDIR", "SHELL"]
-      .map((key) => [key, process.env[key]])
-      .filter((entry): entry is [string, string] => Boolean(entry[1])),
-  );
-}
-
-function parseJson(content: string, memberId: string): unknown {
-  const stripped = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-  try { return JSON.parse(stripped); }
-  catch {
-    const fenced = content.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
-    if (fenced) {
-      try { return JSON.parse(fenced.trim()); } catch { /* Try balanced extraction. */ }
-    }
-    for (const candidate of balancedJsonObjects(content)) {
-      try { return JSON.parse(candidate); } catch { /* Keep scanning. */ }
-    }
-    const preview = content.replace(/\s+/g, " ").trim().slice(0, 300);
-    throw new Error(`Member ${memberId} returned invalid JSON for development workflow: ${preview || "empty response"}`);
-  }
-}
-
-function balancedJsonObjects(content: string): string[] {
-  const values: string[] = [];
-  let start = -1;
-  let depth = 0;
-  let quoted = false;
-  let escaped = false;
-  for (let index = 0; index < content.length; index += 1) {
-    const character = content[index]!;
-    if (start < 0) {
-      if (character === "{") { start = index; depth = 1; }
-      continue;
-    }
-    if (quoted) {
-      if (escaped) escaped = false;
-      else if (character === "\\") escaped = true;
-      else if (character === '"') quoted = false;
-      continue;
-    }
-    if (character === '"') quoted = true;
-    else if (character === "{") depth += 1;
-    else if (character === "}") {
-      depth -= 1;
-      if (depth === 0) {
-        values.push(content.slice(start, index + 1));
-        start = -1;
-      }
-    }
-  }
-  return values;
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function countLines(value: string): number {
-  return value.trim() ? value.trim().split("\n").length : 0;
 }

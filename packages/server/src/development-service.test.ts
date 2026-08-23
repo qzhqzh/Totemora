@@ -208,10 +208,27 @@ test("one durable workflow reaches Issue, reviewed PR, merge and Chief report", 
   });
   const provider = new DevelopmentProvider();
   let merged = false;
+  let issueCreateCalls = 0;
+  let createdIssueBody = "";
+  let hiddenIssueSearches = 1;
   const external = async (cwd: string, executable: string, args: string[]) => {
     expect(executable).toBe("gh");
     const operation = `${args[0]} ${args[1]}`;
-    if (operation === "issue create") return { stdout: "https://github.com/example/repo/issues/7\n", stderr: "" };
+    if (operation === "issue list") {
+      const visible = createdIssueBody && hiddenIssueSearches === 0;
+      if (createdIssueBody && hiddenIssueSearches > 0) hiddenIssueSearches -= 1;
+      return {
+        stdout: JSON.stringify(visible ? [{
+        number: 7, url: "https://github.com/example/repo/issues/7", body: createdIssueBody,
+      }] : []),
+        stderr: "",
+      };
+    }
+    if (operation === "issue create") {
+      issueCreateCalls += 1;
+      createdIssueBody = args[args.indexOf("--body") + 1]!;
+      throw new Error("connection closed after GitHub accepted the Issue");
+    }
     if (operation === "pr list") return { stdout: "[]", stderr: "" };
     if (operation === "pr create") return { stdout: "https://github.com/example/repo/pull/9\n", stderr: "" };
     if (operation === "pr diff") return { stdout: "diff --git a/src.ts b/src.ts\n+export const greeting = 'hello';\n", stderr: "" };
@@ -245,18 +262,33 @@ test("one durable workflow reaches Issue, reviewed PR, merge and Chief report", 
   });
   const committed = await service.approve(workflow.id);
   expect(committed.status).toBe("awaiting_remote_approval");
+  const uncertainPublish = await service.publish(workflow.id);
+  expect(uncertainPublish).toMatchObject({
+    status: "awaiting_remote_approval",
+    error: "connection closed after GitHub accepted the Issue",
+    issue_creation_unknown: true,
+  });
+  const hiddenPublish = await service.publish(workflow.id);
+  expect(hiddenPublish).toMatchObject({
+    status: "awaiting_remote_approval",
+    error: expect.stringContaining("outcome is unknown"),
+    issue_creation_unknown: true,
+  });
+  expect(issueCreateCalls).toBe(1);
   const published = await service.publish(workflow.id);
   expect(published).toMatchObject({
     status: "awaiting_merge_approval", issue_number: 7, pr_number: 9,
     pr_review: { outcome: "accepted" }, chief_acceptance: { outcome: "accepted" },
   });
+  expect(issueCreateCalls).toBe(1);
   const completed = await service.merge(workflow.id);
   expect(completed).toMatchObject({
     status: "completed", chief_report: { acceptance: "passed" },
   });
   expect((await command(root, ["branch", "--show-current"])).trim()).toBe("main");
   expect(completed.activities.map((item) => item.phase)).toEqual([
-    "assigned", "planned", "chief_accepted", "committed", "issue_created", "pushed",
+    "assigned", "planned", "chief_accepted", "committed", "issue_creation_unknown",
+    "remote_failed", "remote_failed", "issue_reused", "pushed",
     "pr_created", "merge_ready", "merged",
   ]);
   await rm(root, { recursive: true, force: true });

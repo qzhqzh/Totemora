@@ -120,6 +120,9 @@ test("registry rejects a symlinked root instead of scanning outside the project"
   await symlink(outside, join(root, "skills"));
   const service = new SkillRegistryService(root, join(root, "data"));
   await expect(service.list()).rejects.toThrow("real directory");
+  await expect(service.create({ id: "escaped-skill", name: "Escaped" }))
+    .rejects.toThrow("real directory");
+  expect(await Bun.file(join(outside, "escaped-skill", "SKILL.md")).exists()).toBe(false);
   await rm(root, { recursive: true, force: true });
   await rm(outside, { recursive: true, force: true });
 });
@@ -194,11 +197,11 @@ test("registry can create new Skill packages with tags directly in repository", 
   const preview = await service.readFile("image-designer", "SKILL.md");
   expect(preview.content).toContain("# 图像设计专员");
   expect(preview.content).toContain("tags:");
-  expect(preview.content).toContain("- image");
+  expect(preview.content).toContain('- "image"');
 
   const yamlPreview = await service.readFile("image-designer", "skill.yaml");
   expect(yamlPreview.content).toContain("tags:");
-  expect(yamlPreview.content).toContain("- design");
+  expect(yamlPreview.content).toContain('- "design"');
 
   const updated = await service.update("image-designer", {
     name: "高级图像设计专员",
@@ -215,10 +218,21 @@ test("registry can create new Skill packages with tags directly in repository", 
   expect(updatedPreview.content).toContain("# 高级图像设计专员");
   expect(updatedPreview.content).toContain("## 增强规则");
 
+  const guarded = await service.create({
+    id: "yaml-guarded",
+    name: "Injected\nstatus: active",
+    tags: ["safe\nstatus: active"],
+  });
+  expect(guarded.status).toBe("candidate");
+  const guardedYaml = (await service.readFile("yaml-guarded", "skill.yaml")).content;
+  expect(guardedYaml.match(/^status:/gm)).toHaveLength(1);
+  expect(guardedYaml).not.toContain("\nstatus: active");
+
   await expect(service.update("non-existent-skill", { name: "test" })).rejects.toThrow("Skill not found");
   await expect(service.update("../bad-skill", { name: "test" })).rejects.toThrow("Invalid Skill id");
 
   await service.delete("image-designer");
+  await service.delete("yaml-guarded");
   expect((await service.list({ refresh: true })).skills).toHaveLength(0);
   await expect(service.delete("image-designer")).rejects.toThrow("Skill not found");
   await expect(service.delete("../bad-skill")).rejects.toThrow("Invalid Skill id");
