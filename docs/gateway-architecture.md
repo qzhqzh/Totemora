@@ -2,7 +2,7 @@
 
 ## 目标
 
-Totemora 常驻服务器，成员按任务唤醒。Web、MCP、Telegram、Cron、Webhook、IDE 和专业服务 CLI 都是 Gateway Adapter，不拥有独立 Runtime、成员历史或 Skill 状态。通用 CLI Run 目前仍是本地直连 Runtime 的兼容路径。
+Totemora 常驻服务器，成员按任务唤醒。Web、MCP、Telegram、Cron、Webhook、IDE 和 CLI 都是 Gateway Adapter，不拥有独立 Runtime、成员历史或 Skill 状态。显式 `--offline` 是不进入持久 Gateway 状态的本地兼容路径。
 
 ```text
 Web / MCP / Telegram / Cron / Webhook / IDE / Gateway CLI
@@ -41,7 +41,7 @@ Web / MCP / Telegram / Cron / Webhook / IDE / Gateway CLI
 - Gateway：Bun HTTP 常驻服务，Web 静态资源与 JSON API 同源。
 - 状态：`.totemora/totemora.db` 使用 SQLite WAL，migration 由版本化文件顺序注册；不可变 Run 证据、Secrets、Operator Token 和静态资产目录保留为文件。
 - Web：任务大厅、证据台、成员营帐、火种、资产、AI / 财经双域情报台、内容工坊与治理审批；浏览器按领域 Feature 组织，不持有 Prompt/Workflow 或审批状态的第二真源。
-- CLI：配置、Provider 检查和通用 Run 仍本地直连；Gateway 管理和专业任务命令调用常驻 Gateway。
+- CLI：配置与 Provider 检查保持本地；通用 Run、Gateway 管理和专业任务命令调用常驻 Gateway。`--offline` 仅供兼容测试。
 - MCP：Streamable HTTP `/mcp` 与 stdio bridge，暴露结果导向的专业服务，不暴露任意 prompt 或 Shell。
 - Telegram/Bark：受控通知、命令与反馈通道，不创建第二份情报队列。
 - 通用 Run：只读 Workspace 分析。

@@ -4,15 +4,19 @@ import {
   FileRunStore,
   TribeRuntime,
   collectWorkspaceSnapshot,
-  type TaskReport,
   type ProviderRegistry,
   loadLocalConfig,
   validateLocalConfig,
 } from "@totemora/core";
 import { ConfiguredProviderRegistry } from "@totemora/providers";
-import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { runBenchmark } from "./benchmark";
+import { parseCliArguments } from "./cli-arguments";
+import { runDevelopmentGatewayCommand } from "./development-gateway-command";
+import { runGatewayTask } from "./gateway-run-command";
+import type { GatewayFetch } from "./gateway-request";
+import { readOperatorToken } from "./operator-token";
+import { writeTaskReport, writeUsage } from "./run-output";
 
 export interface CliStreams {
   stdout: WritableTextStream;
@@ -28,12 +32,8 @@ export interface CliDependencies {
     config: Awaited<ReturnType<typeof loadLocalConfig>>,
   ) => ProviderRegistry;
   fetch?: GatewayFetch;
+  wait?: (milliseconds: number) => Promise<void>;
 }
-
-type GatewayFetch = (
-  input: string | URL | Request,
-  init?: RequestInit,
-) => Promise<Response>;
 
 export async function runCli(
   args: string[],
@@ -41,21 +41,50 @@ export async function runCli(
   dependencies: CliDependencies = {},
 ): Promise<number> {
   try {
-    const parsed = parseArgs(args);
+    const parsed = parseCliArguments(args);
 
     if (parsed.help || parsed.command.length === 0) {
       writeHelp(streams.stdout);
       return 0;
     }
 
-    if (parsed.command[0] === "development") {
-      return runDevelopmentGatewayCommand(parsed, streams, dependencies.fetch ?? fetch);
+    const [resource, action] = parsed.command;
+
+    if (resource === "development") {
+      return runDevelopmentGatewayCommand(parsed, streams.stdout, dependencies.fetch ?? fetch);
+    }
+
+    if (resource === "run" && action !== "onboarding-exam" && !parsed.offline) {
+      const goal = parsed.command.slice(1).join(" ").trim();
+      if (!goal) throw new Error('Usage: totemora run "<goal>" [--workspace <path>]');
+      if (parsed.configDir) throw new Error("--config-dir is only valid for --offline Run commands");
+      const token = process.env.TOTEMORA_OPERATOR_TOKEN ?? readOperatorToken(parsed.dataDir);
+      if (!token) {
+        throw new Error("Gateway Run requires TOTEMORA_OPERATOR_TOKEN or <data-dir>/operator-token");
+      }
+      return runGatewayTask({
+        gatewayUrl: parsed.gatewayUrl,
+        operatorToken: token,
+        goal,
+        workspace: parsed.workspace ?? (!parsed.workplace && !parsed.mission ? process.cwd() : undefined),
+        workplaceId: parsed.workplace,
+        missionId: parsed.mission,
+        acceptance: parsed.acceptance.length > 0 ? parsed.acceptance : defaultAcceptanceCriteria(),
+        chief: parsed.chief,
+        maxFiles: parsed.maxFiles,
+        maxContextBytes: parsed.maxContextBytes,
+        maxOutputTokens: parsed.maxOutputTokens,
+        maxMembers: parsed.maxMembers,
+        maxTotalTokens: parsed.maxTotalTokens,
+      }, streams.stdout, dependencies.fetch ?? fetch, dependencies.wait);
+    }
+
+    if (resource === "run" && action === "onboarding-exam" && !parsed.offline) {
+      throw new Error("onboarding-exam is a local compatibility command; add --offline");
     }
 
     const config = await loadLocalConfig({ configDir: parsed.configDir });
     validateLocalConfig(config);
-
-    const [resource, action] = parsed.command;
 
     if (resource === "providers" && action === "list") {
       writeProviders(config, streams.stdout);
@@ -161,6 +190,8 @@ export async function runCli(
           budget: {
             max_context_bytes: parsed.maxContextBytes,
             max_output_tokens_per_call: parsed.maxOutputTokens,
+            max_members: parsed.maxMembers,
+            max_total_tokens: parsed.maxTotalTokens,
           },
         },
         parsed.chief,
@@ -239,237 +270,6 @@ async function doctorProviders(
   return hasFailure ? 1 : 0;
 }
 
-function parseArgs(args: string[]): {
-  command: string[];
-  configDir?: string;
-  dataDir?: string;
-  chief?: string;
-  workspace?: string;
-  acceptance: string[];
-  maxFiles?: number;
-  maxContextBytes?: number;
-  maxOutputTokens?: number;
-  gatewayUrl: string;
-  workplace?: string;
-  goal?: string;
-  suite?: string;
-  strongMember?: string;
-  cheapMember?: string;
-  pricingSnapshot?: string;
-  help: boolean;
-} {
-  const command: string[] = [];
-  let configDir: string | undefined;
-  let dataDir: string | undefined;
-  let chief: string | undefined;
-  let workspace: string | undefined;
-  const acceptance: string[] = [];
-  let maxFiles: number | undefined;
-  let maxContextBytes: number | undefined;
-  let maxOutputTokens: number | undefined;
-  let gatewayUrl = process.env.TOTEMORA_GATEWAY_URL ?? "http://127.0.0.1:4310";
-  let workplace: string | undefined;
-  let goal: string | undefined;
-  let suite: string | undefined;
-  let strongMember: string | undefined;
-  let cheapMember: string | undefined;
-  let pricingSnapshot: string | undefined;
-  let help = false;
-
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-
-    if (arg === "--help" || arg === "-h") {
-      help = true;
-      continue;
-    }
-
-    if (arg === "--config-dir") {
-      configDir = args[index + 1];
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--data-dir") {
-      dataDir = args[index + 1];
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--chief") {
-      chief = args[index + 1];
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--workspace") {
-      workspace = requireOptionValue(args, index, arg);
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--accept") {
-      acceptance.push(requireOptionValue(args, index, arg));
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--max-files") {
-      maxFiles = parsePositiveInteger(requireOptionValue(args, index, arg), arg);
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--max-context-bytes") {
-      maxContextBytes = parsePositiveInteger(
-        requireOptionValue(args, index, arg),
-        arg,
-      );
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--max-output-tokens") {
-      maxOutputTokens = parsePositiveInteger(
-        requireOptionValue(args, index, arg),
-        arg,
-      );
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--gateway-url") {
-      gatewayUrl = requireOptionValue(args, index, arg);
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--workplace") {
-      workplace = requireOptionValue(args, index, arg);
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--goal") {
-      goal = requireOptionValue(args, index, arg);
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--suite") {
-      suite = requireOptionValue(args, index, arg);
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--strong-member") {
-      strongMember = requireOptionValue(args, index, arg);
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--cheap-member") {
-      cheapMember = requireOptionValue(args, index, arg);
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--pricing-snapshot") {
-      pricingSnapshot = requireOptionValue(args, index, arg);
-      index += 1;
-      continue;
-    }
-
-    command.push(arg);
-  }
-
-  return {
-    command,
-    configDir,
-    dataDir,
-    chief,
-    workspace,
-    acceptance,
-    maxFiles,
-    maxContextBytes,
-    maxOutputTokens,
-    gatewayUrl,
-    workplace,
-    goal,
-    suite,
-    strongMember,
-    cheapMember,
-    pricingSnapshot,
-    help,
-  };
-}
-
-async function runDevelopmentGatewayCommand(
-  parsed: ReturnType<typeof parseArgs>,
-  streams: CliStreams,
-  request: GatewayFetch,
-): Promise<number> {
-  const action = parsed.command[1];
-  const token = process.env.TOTEMORA_OPERATOR_TOKEN ?? readOperatorToken(parsed.dataDir);
-  if (!token) throw new Error("TOTEMORA_OPERATOR_TOKEN is required for development commands");
-  let path: string;
-  let body: unknown;
-  if (action === "prepare") {
-    if (!parsed.workplace || !parsed.goal) {
-      throw new Error("Usage: totemora development prepare --workplace <id> --goal <text>");
-    }
-    path = "/api/development/prepare";
-    body = { workplace_id: parsed.workplace, goal: parsed.goal };
-  } else if (action === "approve") {
-    const proposalId = parsed.command[2];
-    if (!proposalId) throw new Error("Usage: totemora development approve <proposal_id>");
-    path = `/api/development/proposals/${encodeURIComponent(proposalId)}/approve`;
-  } else {
-    throw new Error("Usage: totemora development <prepare|approve>");
-  }
-  const response = await request(`${parsed.gatewayUrl.replace(/\/$/, "")}${path}`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const payload = await response.json() as {
-    id?: string; status?: string; summary?: string; commit_message?: string;
-    files?: string[]; review?: { outcome?: string }; commit_sha?: string; error?: string;
-  };
-  if (!response.ok) throw new Error(payload.error ?? `Gateway request failed (${response.status})`);
-  streams.stdout.write(`Proposal: ${payload.id}\nStatus: ${payload.status}\n`);
-  if (payload.summary) streams.stdout.write(`Summary: ${payload.summary}\n`);
-  if (payload.commit_message) streams.stdout.write(`Commit: ${payload.commit_message}\n`);
-  if (payload.files) streams.stdout.write(`Files: ${payload.files.join(", ")}\n`);
-  if (payload.review) streams.stdout.write(`Review: ${payload.review.outcome}\n`);
-  if (payload.commit_sha) streams.stdout.write(`SHA: ${payload.commit_sha}\n`);
-  return payload.status === "failed" ? 1 : 0;
-}
-
-function readOperatorToken(dataDir?: string): string | undefined {
-  try {
-    return readFileSync(resolve(dataDir ?? ".totemora", "operator-token"), "utf8").trim() || undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function requireOptionValue(args: string[], index: number, option: string): string {
-  const value = args[index + 1];
-  if (!value || value.startsWith("--")) {
-    throw new Error(`Missing value for ${option}`);
-  }
-  return value;
-}
-
-function parsePositiveInteger(value: string, option: string): number {
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(`${option} must be a positive integer`);
-  }
-  return parsed;
-}
-
 function writeProviders(
   config: Awaited<ReturnType<typeof loadLocalConfig>>,
   stdout: CliStreams["stdout"],
@@ -544,51 +344,6 @@ function writeExam(
   writeUsage(usage, stdout);
 }
 
-function writeTaskReport(
-  report: TaskReport | undefined,
-  runId: string,
-  outcome: string | undefined,
-  usage: { calls: number; total_tokens: number } | undefined,
-  stdout: CliStreams["stdout"],
-): void {
-  if (!report) {
-    throw new Error("Completed run has no task report");
-  }
-  stdout.write(`\n# ${report.title}\n\n${report.summary}\n\n`);
-  stdout.write("## Findings\n");
-  for (const finding of report.findings) {
-    stdout.write(`- ${finding.claim}\n`);
-    for (const evidence of finding.evidence) {
-      stdout.write(`  - Evidence: ${evidence}\n`);
-    }
-  }
-  stdout.write("\n## Recommendations\n");
-  if (report.recommendations.length === 0) {
-    stdout.write("- None\n");
-  }
-  for (const recommendation of report.recommendations) {
-    stdout.write(
-      `- [${recommendation.priority}] ${recommendation.action}: ${recommendation.reason}\n`,
-    );
-  }
-  stdout.write("\n## Acceptance\n");
-  for (const item of report.acceptance_review) {
-    stdout.write(`- [${item.status}] ${item.criterion}: ${item.evidence}\n`);
-  }
-  stdout.write(`\nRun: ${runId}\n`);
-  stdout.write(`Outcome: ${outcome ?? "unknown"}\n`);
-  writeUsage(usage, stdout);
-}
-
-function writeUsage(
-  usage: { calls: number; total_tokens: number } | undefined,
-  stdout: CliStreams["stdout"],
-): void {
-  if (usage) {
-    stdout.write(`Usage: ${usage.total_tokens} tokens across ${usage.calls} calls\n`);
-  }
-}
-
 function defaultAcceptanceCriteria(): string[] {
   return [
     "直接回答用户目标，不扩展到无关任务",
@@ -609,9 +364,10 @@ function writeHelp(stdout: CliStreams["stdout"]): void {
       '  totemora development prepare --workplace <id> --goal "<text>" [--gateway-url <url>]',
       "  totemora development approve <proposal_id> [--gateway-url <url>]",
       "  totemora benchmark run --suite <path> --strong-member <id> --cheap-member <id> [--chief <id>] [--pricing-snapshot <path>] [--data-dir <path>]",
-      "  totemora run onboarding-exam [--chief <member_id>] [--config-dir <path>] [--data-dir <path>]",
-      '  totemora run "<goal>" [--workspace <path>] [--accept <criterion>] [--chief <member_id>] [--config-dir <path>] [--data-dir <path>]',
-      "    Optional budgets: --max-files <n> --max-context-bytes <n> --max-output-tokens <n>",
+      "  totemora run onboarding-exam --offline [--chief <member_id>] [--config-dir <path>] [--data-dir <path>]",
+      '  totemora run "<goal>" [--workspace <path> | --workplace <id> | --mission <id>] [--gateway-url <url>] [--data-dir <path>]',
+      '  totemora run "<goal>" --offline [--workspace <path>] [--accept <criterion>] [--chief <member_id>] [--config-dir <path>] [--data-dir <path>]',
+      "    Optional budgets: --max-files <n> --max-context-bytes <n> --max-output-tokens <n> --max-members <n> --max-total-tokens <n>",
       "",
     ].join("\n"),
   );

@@ -96,6 +96,7 @@ test("runs the onboarding exam through the CLI and persists its trace", async ()
     [
       "run",
       "onboarding-exam",
+      "--offline",
       "--config-dir",
       "configs/example",
       "--data-dir",
@@ -133,6 +134,7 @@ test("runs a generic read-only workspace goal and prints an evidence report", as
     [
       "run",
       "分析这个 demo 项目的结构",
+      "--offline",
       "--workspace",
       workspace,
       "--accept",
@@ -168,6 +170,81 @@ test("runs a generic read-only workspace goal and prints an evidence report", as
   expect(persisted.schema_version).toBe(2);
   expect(persisted.task_analysis.features).toContain("workspace_evidence");
   expect(persisted.plan.assignments[0].assignment_reason).toBeTruthy();
+});
+
+test("runs generic goals through the persistent Gateway by default", async () => {
+  const output = createOutput();
+  const previous = process.env.TOTEMORA_OPERATOR_TOKEN;
+  process.env.TOTEMORA_OPERATOR_TOKEN = "test-operator";
+  const requests: Array<{ path: string; method: string; body?: Record<string, unknown> }> = [];
+  let polls = 0;
+  try {
+    const exitCode = await runCli([
+      "run", "分析 Gateway 项目", "--workspace", "/registered/demo",
+      "--accept", "引用真实文件", "--max-members", "2", "--max-total-tokens", "12000",
+    ], output, {
+      wait: async () => {},
+      fetch: async (input, init) => {
+        const url = new URL(String(input));
+        requests.push({
+          path: url.pathname,
+          method: init?.method ?? "GET",
+          body: init?.body ? JSON.parse(String(init.body)) : undefined,
+        });
+        expect(new Headers(init?.headers).get("authorization")).toBe("Bearer test-operator");
+        if (init?.method === "POST") {
+          return Response.json({
+            id: "run-1", status: "queued", phase: "queued", message: "正在排队",
+          }, { status: 202 });
+        }
+        polls += 1;
+        if (polls === 1) {
+          return Response.json({
+            id: "run-1", status: "running", phase: "executing", message: "成员正在执行",
+          });
+        }
+        return Response.json({
+          id: "run-1", status: "completed", phase: "completed", message: "任务已完成",
+          run: {
+            review_outcome: "accepted", usage: { calls: 3, total_tokens: 42 },
+            final_report: {
+              title: "Gateway 项目分析", summary: "分析完成。",
+              findings: [{ claim: "存在单一 Gateway", evidence: ["packages/server/src/index.ts"] }],
+              recommendations: [],
+              acceptance_review: [{ criterion: "引用真实文件", status: "passed", evidence: "已引用入口" }],
+            },
+          },
+        });
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(requests[0]).toMatchObject({
+      path: "/api/runs", method: "POST",
+      body: {
+        goal: "分析 Gateway 项目", workspace: "/registered/demo",
+        acceptance: ["引用真实文件"], max_members: 2, max_total_tokens: 12_000,
+      },
+    });
+    expect(requests.slice(1).map((item) => item.path)).toEqual(["/api/runs/run-1", "/api/runs/run-1"]);
+    expect(output.stdoutText()).toContain("Gateway Run: run-1");
+    expect(output.stdoutText()).toContain("[executing] 成员正在执行");
+    expect(output.stdoutText()).toContain("# Gateway 项目分析");
+    expect(output.stdoutText()).toContain("Usage: 42 tokens across 3 calls");
+  } finally {
+    if (previous === undefined) delete process.env.TOTEMORA_OPERATOR_TOKEN;
+    else process.env.TOTEMORA_OPERATOR_TOKEN = previous;
+  }
+});
+
+test("keeps local Runtime access behind the explicit offline flag", async () => {
+  const output = createOutput();
+  const exitCode = await runCli(
+    ["run", "onboarding-exam", "--config-dir", "configs/example"],
+    output,
+  );
+  expect(exitCode).toBe(1);
+  expect(output.stderrText()).toContain("add --offline");
 });
 
 test("returns non-zero with clear output for invalid config", async () => {
