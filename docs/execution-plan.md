@@ -17,7 +17,7 @@
 ## 架构治理基线（2026-08-23）
 
 - Gateway 已建立有界 JSON 读取、运行时输入 schema、明确 4xx 语义与脱敏 500 回执；新 route 不得直接使用 `request.json()` 或把未知异常原文返回客户端。
-- Ability Template、Skill Registry、Skill Commission、Member、Content、Intelligence、Finance、Development、Run/Job/Intake 与 Workplace/Settlement 路由已从 `server/app.ts` 提取；后续按变更继续迁移通知和运维入口，App factory 只保留 composition 与尚未迁移的兼容入口。
+- Ability Template、Skill Registry、Skill Commission、Member、Content、Intelligence、Finance、Development、Run/Job/Intake、Workplace/Settlement、通知与运维路由已从 `server/app.ts` 提取；Development、Intelligence/Finance 和 Content 的后台恢复、排队与专业任务同步由独立 Application Runner 持有。
 - SQLite migration 已按版本拆入 `packages/server/src/migrations/` 并由单一注册器顺序执行；版本 1–8 的重复执行和历史数据迁移由测试固定。
 - Core Runtime 已分离 Prompt、输出解析/校验和派工证据策略；Git Flow 服务已分离本地 Git/进程边界、GitHub remote client 与模型输出契约，`gh` 返回值在 Adapter 边界完成运行时校验；Development、Intelligence/Finance 的任务与门禁、偏好和 Telegram Update 同样在 HTTP 边界校验。
 - 仍需治理的首要热点是 `server/app.ts`、`development-service.ts` 以及各 600 行以上领域服务；采取按变更触发的局部提取，不做一次性目录搬迁。
@@ -74,7 +74,7 @@
 
 范围：服务注册、任务租约、进度事件、取消、幂等外部副作用、能力/资产断言、验收、经验信用和 MCP 发现。专业状态机仍由各领域拥有。
 
-进展：`finance.watch` 已复用 SpecialistTask、成员绑定、资产断言、候选派发、反馈和经历信用；三个周期值守已由同一 `RecurringServiceRunner` 管理，单服务失败和重叠运行互相隔离。下一步把 App 中重复的任务路由收敛为注册式工厂，并把 runner 内存状态暴露到受保护运维视图。
+进展：`finance.watch` 已复用 SpecialistTask、成员绑定、资产断言、候选派发、反馈和经历信用；三个周期值守由同一 `RecurringServiceRunner` 管理，状态持久化并暴露到受保护运维视图，单服务失败和重叠运行互相隔离。Development、Intelligence/Finance 和 Content 的应用任务生命周期已从 App factory 提取；只有新增第五类专业服务时才评估注册式工厂，避免为当前四类服务过度抽象。
 
 验证：观潮的来源故障不影响 AI 情报；两域候选和反馈互不串扰；同一候选对多个 Bark 目标按目标幂等；Gateway 重启后任务和来源健康可恢复。
 
