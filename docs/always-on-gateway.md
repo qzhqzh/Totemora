@@ -50,7 +50,9 @@ journalctl --user -u totemora-gateway -n 100 --no-pager
 
 Bark 继续由 `compose.bark.yaml` 的 `restart: unless-stopped` 管理，两者不共享进程
 生命周期。Gateway 重启时，已完成外部动作依靠幂等日志避免重复执行；当前正在运行的
-模型任务会转为可安全重试的失败，后续版本再引入阶段级 checkpoint 恢复。
+模型任务会转为可安全重试的失败。常驻调度器的累计运行、重叠跳过、失败和最近时间
+写入 SQLite；若重启时某个 Tick 仍标记运行中，会显式记为一次中断失败。后续版本再
+引入模型任务的阶段级 checkpoint 恢复。
 
 ## 开发热重载边界
 

@@ -72,7 +72,7 @@ Web / MCP / Telegram / Cron / Gateway CLI
      └─ Provider adapters / governed assets
 ```
 
-Web、MCP、Telegram、Bark、Cron 与专业服务 CLI 共享同一个常驻 Gateway，不拥有第二套 Runtime。通用 CLI Run 仍是本地兼容路径，在迁移完成前不会共享 Gateway SQLite。Gateway 默认只监听 loopback；局域网访问必须显式配置 host。
+Web、MCP、Telegram、Bark、Cron 与 CLI Run 共享同一个常驻 Gateway，不拥有第二套 Runtime。显式 `--offline` 只用于本地兼容和测试，不写入 Gateway SQLite。Gateway 默认只监听 loopback；局域网访问必须显式配置 host。
 
 ## Member portrait and recurring work
 

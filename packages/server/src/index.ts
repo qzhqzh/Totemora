@@ -3,6 +3,7 @@ import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { createTotemoraMcpHttpHandler } from "@totemora/mcp";
 import { createPlaygroundApp } from "./app";
 import { RecurringServiceRunner } from "./recurring-service-runner";
+import { RecurringServiceStateRepository } from "./recurring-service-state-repository";
 import { resolveWebAsset } from "./web-assets";
 
 const root = resolve(import.meta.dir, "../../..");
@@ -44,7 +45,7 @@ scheduler = new RecurringServiceRunner([
   { id: "intelligence.watch", interval_ms: 60_000, run: app.runScheduledIntelligence },
   { id: "finance.watch", interval_ms: 60_000, run: app.runScheduledFinance },
   { id: "content.studio", interval_ms: 60_000, run: app.runScheduledContent },
-]);
+], new RecurringServiceStateRepository(dataDir));
 scheduler.start();
 
 console.log(`Totemora Web Playground: http://${server.hostname}:${server.port}`);

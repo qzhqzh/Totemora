@@ -15,12 +15,20 @@ export interface RecurringServiceState {
   last_error?: string;
 }
 
+export interface RecurringServiceStatePersistence {
+  load(id: string): RecurringServiceState | undefined;
+  save(state: RecurringServiceState): void;
+}
+
 export class RecurringServiceRunner {
   private readonly definitions = new Map<string, RecurringServiceDefinition>();
   private readonly states = new Map<string, RecurringServiceState>();
   private readonly timers = new Map<string, ReturnType<typeof setInterval>>();
 
-  constructor(definitions: RecurringServiceDefinition[]) {
+  constructor(
+    definitions: RecurringServiceDefinition[],
+    private readonly persistence?: RecurringServiceStatePersistence,
+  ) {
     for (const definition of definitions) {
       if (!definition.id.trim() || this.definitions.has(definition.id)) {
         throw new Error(`Duplicate or empty recurring service id: ${definition.id}`);
@@ -29,9 +37,18 @@ export class RecurringServiceRunner {
         throw new Error(`Recurring service ${definition.id} interval must be at least 1000ms`);
       }
       this.definitions.set(definition.id, definition);
-      this.states.set(definition.id, {
-        id: definition.id, running: false, runs: 0, skipped_overlaps: 0, failures: 0,
-      });
+      const prior = persistence?.load(definition.id);
+      const state: RecurringServiceState = prior
+        ? { ...prior, id: definition.id }
+        : { id: definition.id, running: false, runs: 0, skipped_overlaps: 0, failures: 0 };
+      if (state.running) {
+        state.running = false;
+        state.failures += 1;
+        state.last_error = "Gateway restarted while the recurring service was running";
+        state.last_finished_at = new Date().toISOString();
+      }
+      this.states.set(definition.id, state);
+      this.persist(state);
     }
   }
 
@@ -59,12 +76,14 @@ export class RecurringServiceRunner {
     if (!definition || !state) throw new Error(`Recurring service not found: ${id}`);
     if (state.running) {
       state.skipped_overlaps += 1;
+      this.persist(state);
       return "skipped_overlap";
     }
     state.running = true;
     state.runs += 1;
     state.last_started_at = new Date().toISOString();
     state.last_error = undefined;
+    this.persist(state);
     try {
       await definition.run();
       return "completed";
@@ -79,10 +98,15 @@ export class RecurringServiceRunner {
     } finally {
       state.running = false;
       state.last_finished_at = new Date().toISOString();
+      this.persist(state);
     }
   }
 
   status(): RecurringServiceState[] {
     return [...this.states.values()].map((state) => ({ ...state }));
+  }
+
+  private persist(state: RecurringServiceState): void {
+    this.persistence?.save(state);
   }
 }

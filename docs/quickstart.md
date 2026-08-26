@@ -4,7 +4,8 @@ Totemora 提供 Web Playground 和 CLI，所有命令从仓库根目录执行。
 
 外部 AI 也可以通过 MCP 调用同一个常驻 Gateway。完整配置见 [mcp-gateway.md](mcp-gateway.md)。
 
-注意：当前通用 `totemora run` 是本地直连 Runtime 的兼容路径；Web、MCP 与专业服务共享常驻 Gateway。
+通用 `totemora run` 默认调用常驻 Gateway，与 Web、MCP、Cron 和专业服务共享 SQLite、
+Mission、Run 与成员证据。只有离线测试和 `onboarding-exam` 使用显式 `--offline` 本地兼容路径。
 
 ## 启动 Web Playground
 
@@ -120,6 +121,7 @@ bun run totemora providers doctor --config-dir configs/example
 
 ```bash
 bun run totemora run onboarding-exam \
+  --offline \
   --config-dir configs/example \
   --data-dir .totemora
 ```
@@ -130,6 +132,7 @@ bun run totemora run onboarding-exam \
 
 ```bash
 bun run totemora run onboarding-exam \
+  --offline \
   --chief deepseek_reasoner \
   --config-dir configs/example \
   --data-dir .totemora
@@ -151,6 +154,10 @@ bun run totemora run onboarding-exam \
 bun run demo:tribe
 ```
 
+该命令要求 Gateway 已启动、当前仓库已登记为工作地，并能从 `.totemora/operator-token`
+或 `TOTEMORA_OPERATOR_TOKEN` 读取操作员凭据。CLI 创建持久 Run 后轮询同一个 Gateway，
+因此可以在 Web 中查看同一 Mission、阶段和证据。
+
 等价的完整命令是：
 
 ```bash
@@ -160,8 +167,15 @@ bun run totemora run \
   --accept "逐条比较 README 业务规则与当前实现" \
   --accept "每个关键结论引用真实文件路径" \
   --accept "给出按优先级排序的改进建议" \
-  --config-dir configs/example \
   --data-dir .totemora
+```
+
+远程 Gateway 使用 `--gateway-url <url>`；也可以用 `--workplace <id>` 选择已登记工作地，
+或用 `--mission <id>` 继续已有 Mission。仅在不启动 Gateway 的本地兼容测试中添加：
+
+```bash
+bun run totemora run "分析当前项目" --offline \
+  --workspace . --config-dir configs/example --data-dir .totemora
 ```
 
 当前通用任务只支持只读分析。Workspace 收集器会排除 `.env`、凭据文件、`.git`、`node_modules`、构建目录和历史 Run，并限制文件数、单文件大小和总上下文。
@@ -174,4 +188,6 @@ bun run totemora run \
 --max-files <n>
 --max-context-bytes <n>
 --max-output-tokens <n>
+--max-members <n>
+--max-total-tokens <n>
 ```
