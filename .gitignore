@@ -35,6 +35,8 @@ bun-debug.log*
 *.jpg
 *.webp
 *.gif
+docs/diagrams/*.visual-check.html
+docs/diagrams/*.visual-check.json
 
 # Test recording artifacts
 .playwright-mcp/

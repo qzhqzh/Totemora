@@ -19,7 +19,7 @@
 | Member、Ember、Skill、Asset、Service 如何组成 | [Architecture v2](architecture-v2.md) | Canonical |
 | Gateway、Adapter 和持久状态如何分工 | [Gateway architecture](gateway-architecture.md) | Canonical |
 | 当前已完成什么、下一步是什么 | [Execution plan](execution-plan.md) | Canonical |
-| 当前部署与组件关系如何可视化 | [Interactive architecture diagram](diagrams/totemora-architecture.html) | Canonical |
+| 当前部署与组件关系如何可视化 | [Interactive architecture diagram](diagrams/totemora-architecture.html)、[版本与交付规则](diagrams/README.md) | Canonical |
 | 如何安装、启动和运行任务 | [Quickstart](quickstart.md) | Current |
 | 为什么做出某个架构选择 | [ADR index](adr/README.md) | Decision |
 | 如何复现某个旧版本的验收 | [Historical release checks](#历史版本验收快照) | Historical |
@@ -58,6 +58,7 @@ Totemora 是一个预算约束下的异构智能部落，不是通用聊天产�
 - [Telegram bot](telegram-bot.md)
 - [AI HOT source](aihot-source.md)
 - [Benchmark](benchmark.md)
+- [Stability drills](stability-drills.md)
 
 ## 历史版本验收快照
 

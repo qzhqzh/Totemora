@@ -1,0 +1,10 @@
+service: invoice-api
+request_timeout_ms: 2000
+provider_retries: 1
+worker_concurrency: 4
+database:
+  mode: primary
+  transaction: required
+notification:
+  channel: bark
+  failure_policy: isolate

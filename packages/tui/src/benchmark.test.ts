@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import {
   loadLocalConfig,
@@ -11,7 +11,25 @@ import {
   type ProviderRegistry,
 } from "@totemora/core";
 
-import { runBenchmark } from "./benchmark";
+import { loadBenchmarkSuite, runBenchmark } from "./benchmark";
+
+test("cross-domain proof suite keeps twelve tasks and resolvable evidence workspaces", async () => {
+  const loaded = await loadBenchmarkSuite("benchmarks/cross-domain-proof-v1.json");
+  expect(loaded.suite.tasks).toHaveLength(12);
+  expect(new Set(loaded.suite.tasks.map((task) => task.workspace))).toEqual(new Set([
+    "../examples/demo-project",
+    "../examples/operations-incident",
+    "../examples/finance-evidence",
+    "../examples/editorial-review",
+    "../examples/agent-governance",
+  ]));
+  for (const task of loaded.suite.tasks) {
+    const workspace = resolve(dirname(loaded.path), task.workspace);
+    for (const evidence of task.expected_evidence) {
+      expect((await readFile(resolve(workspace, evidence), "utf8")).length).toBeGreaterThan(0);
+    }
+  }
+});
 
 test("benchmark compares strong, cheap, and tribe strategies on the same task", async () => {
   const root = await mkdtemp(join(tmpdir(), "totemora-benchmark-"));

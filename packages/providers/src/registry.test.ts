@@ -31,6 +31,28 @@ test("loads Anthropic-compatible credentials from a Claude settings file", async
   }
 });
 
+test("isolates an unavailable optional provider until that provider is requested", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "totemora-settings-isolation-"));
+  const settingsFile = join(dir, "settings.json");
+  await writeFile(settingsFile, JSON.stringify({
+    env: { ANTHROPIC_AUTH_TOKEN: "local-token", ANTHROPIC_BASE_URL: "https://example.test/anthropic" },
+  }));
+  try {
+    const config = createConfig(settingsFile);
+    config.providers.providers.cpa = {
+      type: "openai_compatible",
+      base_url: "http://127.0.0.1:31000/v1",
+      settings_file: join(dir, "missing-cpa.yaml"),
+    };
+    const registry = new ConfiguredProviderRegistry(config, {});
+    expect(registry.get("xiaomi")).toBeDefined();
+    expect(() => registry.get("cpa")).toThrow("Failed to read provider settings file");
+    expect(registry.get("xiaomi")).toBeDefined();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 function createConfig(settingsFile: string): LocalConfigSet {
   return {
     providers: {

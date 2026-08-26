@@ -1,0 +1,9 @@
+id: publish-summary
+version: 1
+risk: external_side_effects
+instructions:
+  - Summarize accepted evidence for the requested channel.
+requested_assets:
+  - external-publisher
+granted_assets: []
+activation_status: draft
