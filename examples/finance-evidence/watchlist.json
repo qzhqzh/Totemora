@@ -1,0 +1,6 @@
+{
+  "market": "CN",
+  "symbols": [
+    { "symbol": "ACME", "name": "ACME Manufacturing", "priority": "high" }
+  ]
+}

@@ -42,6 +42,14 @@ bun run totemora benchmark run \
   --data-dir .totemora
 ```
 
+跨领域 E5 套件固定了 12 个只读任务，覆盖代码审计、运维恢复、财经证据、内容审校和 Agent 治理五类 Workspace：
+
+```bash
+bun run benchmark:e5
+```
+
+该脚本统一使用 `1600` Token 输出上限，仍会为三种策略发起多次真实模型调用。运行会把 `examples/` 中对应的固定样本发送给配置的外部 Provider 并产生费用，因此必须由 Operator 明确确认数据外发范围、可用 Provider 和预算后执行。仓库只提交可复现的 suite 与 fixture，不提交凭据，也不把未经授权的本地运行结果伪装成产品结论。
+
 结果写入 `.totemora/benchmarks/` 的 JSON 与 Markdown 文件，并自动出现在 Web“部落证据台”的“部落收益实验”中。汇总包含结构通过率、总 Token、强模型火种 Token、时延和失败数。火种按 `provider + model` 归类，而不是按成员名字；同一火种塑造出的不同成员会计入同一类消耗。
 
 价格只能通过显式、带日期和来源的快照提供：
@@ -63,4 +71,8 @@ v1 scorer 是确定性的：检查每条验收标准是否逐字出现在 `accep
 保留。Provider 未返回 usage 时，结果标记 `partial` 或 `unknown`，此时数值 `0` 不能
 解释为零消耗。
 
-当前 `core-proof-v1` 已有 10 个固定只读任务，但共享一个小型业务样本，因此能验证评测机制、证据纪律和初步策略差异，不能证明跨领域泛化。下一步应增加不同真实工作地与代码变更类隔离测试 scorer；模型评分只能作为补充，不能替代确定性验收。
+`core-proof-v1` 的 10 个任务共享一个小型业务样本；`cross-domain-proof-v1` 把覆盖扩展到 5 个固定 Workspace 和 12 个任务，并由测试确认所有声明的证据路径都可解析。二者仍只能验证评测机制、证据纪律和策略差异；只有在相同 Provider、价格快照和时间窗口下完成真实运行并复核结果后，才能讨论跨领域收益。模型评分只能作为补充，不能替代确定性验收。
+
+Provider Registry 按需解析单个 Provider 的连接配置：一个未配置的可选 Provider 不再阻塞其他健康 Provider，但被实际选择时仍会明确失败。运行基准前仍应先执行 `bun run totemora providers doctor --config-dir configs/example`，不能把部分 Provider 就绪解释为全部可用。
+
+与模型质量基准配套的离线故障演练见 [Stability drills](stability-drills.md)。

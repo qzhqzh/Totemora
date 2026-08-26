@@ -1,0 +1,16 @@
+{
+  "id": "git-task-17",
+  "service_id": "git.flow",
+  "operation": "pull_request",
+  "status": "waiting_approval",
+  "current_stage": "remote_gate",
+  "revision": 4,
+  "member_id": "git-steward",
+  "idempotency_key": "git-task-17",
+  "events": [
+    { "seq": 1, "type": "created", "stage": "routing" },
+    { "seq": 2, "type": "running", "stage": "inspect" },
+    { "seq": 3, "type": "waiting_approval", "stage": "local_gate" },
+    { "seq": 4, "type": "waiting_approval", "stage": "remote_gate" }
+  ]
+}

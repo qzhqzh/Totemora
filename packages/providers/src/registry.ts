@@ -15,35 +15,28 @@ import { OpenAIResponsesProvider } from "./openai-responses";
 
 export class ConfiguredProviderRegistry implements ProviderRegistry {
   private readonly providers = new Map<string, AgentProvider>();
+  private readonly definitions: LocalConfigSet["providers"]["providers"];
 
-  constructor(config: LocalConfigSet, env: NodeJS.ProcessEnv = process.env) {
-    for (const [id, provider] of Object.entries(config.providers.providers)) {
-      const { baseUrl, apiKey } = resolveProviderConnection(id, provider, env);
-      if (!baseUrl) {
-        throw new Error(`Missing base URL for provider: ${id}`);
-      }
-      const options = { id, baseUrl, apiKey };
-      if (provider.type === "openai_compatible") {
-        this.providers.set(id, new OpenAICompatibleProvider(options));
-        continue;
-      }
-      if (provider.type === "openai_responses") {
-        this.providers.set(id, new OpenAIResponsesProvider(options));
-        continue;
-      }
-      if (provider.type === "anthropic_compatible") {
-        this.providers.set(id, new AnthropicCompatibleProvider(options));
-        continue;
-      }
-      throw new Error(`Unsupported provider type: ${provider.type}`);
-    }
+  constructor(config: LocalConfigSet, private readonly env: NodeJS.ProcessEnv = process.env) {
+    this.definitions = config.providers.providers;
   }
 
   get(providerId: string): AgentProvider {
-    const provider = this.providers.get(providerId);
-    if (!provider) {
-      throw new Error(`Unknown provider: ${providerId}`);
-    }
+    const existing = this.providers.get(providerId);
+    if (existing) return existing;
+    const definition = this.definitions[providerId];
+    if (!definition) throw new Error(`Unknown provider: ${providerId}`);
+    const { baseUrl, apiKey } = resolveProviderConnection(providerId, definition, this.env);
+    const options = { id: providerId, baseUrl, apiKey };
+    const provider = definition.type === "openai_compatible"
+      ? new OpenAICompatibleProvider(options)
+      : definition.type === "openai_responses"
+        ? new OpenAIResponsesProvider(options)
+        : definition.type === "anthropic_compatible"
+          ? new AnthropicCompatibleProvider(options)
+          : undefined;
+    if (!provider) throw new Error(`Unsupported provider type: ${definition.type}`);
+    this.providers.set(providerId, provider);
     return provider;
   }
 }

@@ -1,0 +1,7 @@
+2026-08-20T09:00:00Z invoice-api ready database=healthy worker=healthy
+2026-08-20T09:14:02Z provider request failed status=504 request=inv-204 idempotency=invoice:204
+2026-08-20T09:14:04Z provider retry failed status=504 request=inv-204 idempotency=invoice:204
+2026-08-20T09:14:05Z invoice transaction not_started request=inv-204
+2026-08-20T09:15:11Z bark push failed status=503 invoice=inv-199
+2026-08-20T09:15:12Z bark circuit open target=ops-mobile failures=3
+2026-08-20T09:16:00Z invoice-api ready database=healthy worker=healthy
