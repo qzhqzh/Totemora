@@ -63,6 +63,8 @@ Totemora 的目标交互不是上传 Skill 文件。用户应通过部落对话�
 
 当前首个完整试用垂直是 `git-flow-release` v4，内部 ID、目录和流程正文均与用户维护的 Codex Skill 一致。打开 `/skills`，选择 Skill 后可浏览完整目录；输入 Operator Token 后点击文本文件可只读预览 `SKILL.md`、配置、脚本和参考资料。疑似 Secret、二进制、软链和超限文件不会返回正文。SQLite 启动迁移会把旧 `git-change-management` 治理记录原子迁入新 ID。
 
+从旧 JSON 状态版本升级时，不要直接删除或移动单个数据库文件；按 [JSON 到 SQLite 升级指南](storage-migration.md) 停止写入、备份完整数据目录、迁移并验证。
+
 当能力案卷进入“试用中”，在“让部落完成对照试炼”里选择已登记的 Git 工作地、试炼目标和独立 Reviewer。系统让同一名 Git 专员先形成无新 Skill 基线，再加载案卷固定 digest 形成试用计划；Reviewer 比较两份结果，Chief 门禁随后登记 Evidence ID、Token、耗时和结论。这个动作只形成 Git 计划，不会提交、Push 或 Merge。至少三次独立通过才能提议正式装备，批准与回滚仍需显式点击；原手工登记两份专业任务证据的方式保留在“高级”区域。完整边界见 [Skill 对话治理](skill-governance.md)。
 
 可通过环境变量覆盖启动参数：

@@ -38,6 +38,9 @@ bun-debug.log*
 
 # Test recording artifacts
 .playwright-mcp/
+test-results/
+playwright-report/
+blob-report/
 
 # Local opencode launcher
 01-start.sh

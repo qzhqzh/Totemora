@@ -4,6 +4,8 @@ Totemora 是一个受预算和证据约束的异构多 Agent 组织系统。它�
 
 项目采用 `TUI-first + Web Observatory`：CLI/TUI 是开发者控制入口，Web 承载观测、案卷和显式审批，MCP 向外部 Agent 暴露受治理的专业服务。
 
+[查看交互式架构图](https://qzhqzh.github.io/Totemora/) · [仓库内当前版本](docs/diagrams/totemora-architecture.html)
+
 ## Quickstart
 
 ```bash
@@ -19,6 +21,7 @@ bun run start:web
 - [领域架构](docs/architecture-v2.md)
 - [Gateway 架构](docs/gateway-architecture.md)
 - [当前推进计划](docs/execution-plan.md)
+- [JSON 到 SQLite 升级指南](docs/storage-migration.md)
 - [架构决策记录](docs/adr/README.md)
 - [仓库工程与多 Agent 协作规范](AGENTS.md)
 
