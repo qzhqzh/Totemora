@@ -14,15 +14,14 @@ curl http://127.0.0.1:18080/ping
 HTTPS 反向代理或 Tailscale 访问；仅在可信局域网临时注册时，才设置
 `TOTEMORA_BARK_BIND=<服务器局域网 IP>` 后重启容器。
 
-当前服务器的正式手机入口是 `https://bark.qzhqzh.com`，由宿主机统一 Nginx
-反向代理到 `127.0.0.1:18080`。站点配置源文件位于
-`ops/nginx/bark.qzhqzh.com.conf`；Bark 容器本身不直接暴露公网端口。
+生产部署应使用管理员控制的 HTTPS 域名，由宿主机统一 Nginx 反向代理到
+`127.0.0.1:18080`。仓库模板位于 `ops/nginx/bark.example.conf`；安装前必须将
+`bark.example.com` 替换为实际域名。Bark 容器本身不直接暴露公网端口。
 
 ## 2. 让 Bark App 注册设备
 
-在 Bark App 中添加上述可从手机访问的服务地址。当前正式地址是
-`https://bark.qzhqzh.com`。注册成功后，优先通过 Web 的“双域情报台 → 通知设备”
-接入：
+在 Bark App 中添加管理员确认、可从手机访问的 HTTPS 服务地址。注册成功后，优先
+通过 Web 的“双域情报台 → 通知设备”接入：
 
 1. 打开 Totemora Web，在页头输入 `.totemora/operator-token` 的内容。
 2. 在“通知设备”填写稳定的设备 ID、名称和 Bark 返回的 device key。
