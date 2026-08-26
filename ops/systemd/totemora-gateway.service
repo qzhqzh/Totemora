@@ -1,18 +1,19 @@
 [Unit]
-Description=Totemora persistent tribe Gateway (development watch mode)
+Description=Totemora persistent tribe Gateway
 Wants=network-online.target
 After=network-online.target
 
 [Service]
 Type=simple
 WorkingDirectory=%h/star/app/Totemora
-Environment=TOTEMORA_HOST=0.0.0.0
+Environment=TOTEMORA_HOST=127.0.0.1
 Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/bin:/usr/bin
 EnvironmentFile=-%h/.config/totemora/gateway.env
-ExecStart=/usr/bin/env bun run dev:web
+ExecStart=/usr/bin/env bun run start:web
 Restart=always
 RestartSec=5
 TimeoutStopSec=45
+UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
 

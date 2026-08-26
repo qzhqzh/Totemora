@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { StateDatabase } from "./state-database";
+import { readBoundedResponseText } from "./integrations/bounded-response";
 
 export type TelegramFeedbackSignal = "valuable" | "not_valuable" | "duplicate" | "too_late";
 
@@ -267,7 +268,7 @@ export class TelegramBotService {
       throw new TelegramDeliveryError(`Telegram request failed: ${safeMessage(error, config.token)}`, true, undefined, undefined, true);
     }
     let raw: string;
-    try { raw = (await response.text()).slice(0, 4_000); }
+    try { raw = await readBoundedResponseText(response, 4_000, "Telegram response exceeded 4000 bytes"); }
     catch (error) {
       throw new TelegramDeliveryError(
         `Telegram response body failed (${response.status}): ${safeMessage(error, config.token)}`,

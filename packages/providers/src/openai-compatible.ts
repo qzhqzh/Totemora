@@ -4,6 +4,8 @@ import type {
   ModelResponse,
 } from "@totemora/core";
 
+import { MODEL_RESPONSE_LIMIT_BYTES, readBoundedResponseText } from "./bounded-response";
+
 export interface OpenAICompatibleProviderOptions {
   id: string;
   baseUrl: string;
@@ -56,7 +58,11 @@ export class OpenAICompatibleProvider implements AgentProvider {
       },
     );
 
-    const rawText = await response.text();
+    const rawText = await readBoundedResponseText(
+      response,
+      MODEL_RESPONSE_LIMIT_BYTES,
+      `Provider ${this.options.id} response exceeds 4 MiB`,
+    );
     if (!response.ok) {
       throw new Error(
         `Provider ${this.options.id} request failed (${response.status}): ${summarizeError(rawText)}`,

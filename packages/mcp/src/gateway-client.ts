@@ -1,3 +1,5 @@
+import { readGatewayResponseText } from "./bounded-response";
+
 export interface TotemoraGatewayClientOptions {
   gatewayUrl: string;
   operatorToken: string;
@@ -210,7 +212,15 @@ export class TotemoraGatewayClient {
         ...init.headers,
       },
     });
-    const payload = await response.json() as { error?: string };
+    const raw = await readGatewayResponseText(response);
+    let payload: { error?: string };
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("invalid payload");
+      payload = parsed as { error?: string };
+    } catch {
+      throw new Error(`Totemora Gateway returned invalid JSON (${response.status})`);
+    }
     if (!response.ok) {
       throw new Error(payload.error ?? `Totemora Gateway request failed (${response.status})`);
     }

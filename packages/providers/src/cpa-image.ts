@@ -1,6 +1,7 @@
 import type { ModelUsage } from "@totemora/core";
 
 import type { FetchLike, OpenAICompatibleProviderOptions } from "./openai-compatible";
+import { readBoundedResponseText } from "./bounded-response";
 
 export interface ImageReference {
   mimeType: "image/jpeg" | "image/png" | "image/webp";
@@ -80,7 +81,11 @@ export class CpaImageProvider {
           headers: { authorization: `Bearer ${this.options.apiKey}`, "content-type": "application/json" },
           body,
         });
-        const raw = await readBoundedText(response, MAX_RESPONSE_BYTES);
+        const raw = await readBoundedResponseText(
+          response,
+          MAX_RESPONSE_BYTES,
+          "CPA image response exceeds 24 MiB",
+        );
         if (!response.ok) {
           lastError = `CPA image request failed (${response.status}): ${raw.replace(/\s+/g, " ").slice(0, 500) || "empty response"}`;
           if ((response.status === 429 || response.status >= 500) && attempt < 2) {
@@ -173,28 +178,4 @@ function assertSecureEndpoint(value: string): void {
   if (endpoint.protocol !== "https:" && !(endpoint.protocol === "http:" && loopback)) {
     throw new Error("CPA image provider requires HTTPS unless the endpoint is loopback");
   }
-}
-
-async function readBoundedText(response: Response, limit: number): Promise<string> {
-  const declared = Number(response.headers.get("content-length") ?? 0);
-  if (Number.isFinite(declared) && declared > limit) throw new Error("CPA image response exceeds 24 MiB");
-  if (!response.body) return "";
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      if (total > limit) {
-        await reader.cancel();
-        throw new Error("CPA image response exceeds 24 MiB");
-      }
-      chunks.push(value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  return new TextDecoder().decode(Buffer.concat(chunks, total));
 }
