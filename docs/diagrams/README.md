@@ -12,8 +12,8 @@
 
 | 产物 | SHA-256 |
 | --- | --- |
-| Archify JSON | `0e4c8d028ef89208867dfc0359890348c0a517e03b31d2781d3e68d9d1e710aa` |
-| Standalone HTML | `3f27f8a09c800145fccf09a62832a4cdeff993c597817108488874876720c329` |
+| Archify JSON | `15cd4aeda910a01244fb47f21b62ebe25c058aff22b0b5a72e58ded83441edbf` |
+| Standalone HTML | `f771740c337179ecb7e96196cab2b3c317865980c4df250403eab8d08666a9de` |
 
 交付验证为 showcase `9/9`、`0 errors`、`0 warnings`。视觉检查覆盖 1440×900、1600×1000、1920×1080、2048×1320，并人工检查最小/最大尺寸的明暗主题；本轮视觉修正次数为 `1`。截图、contact sheet 和 JSON receipt 是本地 QA 产物，由 `.gitignore` 排除，不是运行时或 Pages 依赖。
 
