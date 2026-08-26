@@ -73,6 +73,6 @@ v1 scorer 是确定性的：检查每条验收标准是否逐字出现在 `accep
 
 `core-proof-v1` 的 10 个任务共享一个小型业务样本；`cross-domain-proof-v1` 把覆盖扩展到 5 个固定 Workspace 和 12 个任务，并由测试确认所有声明的证据路径都可解析。二者仍只能验证评测机制、证据纪律和策略差异；只有在相同 Provider、价格快照和时间窗口下完成真实运行并复核结果后，才能讨论跨领域收益。模型评分只能作为补充，不能替代确定性验收。
 
-Provider Registry 按需解析单个 Provider 的连接配置：一个未配置的可选 Provider 不再阻塞其他健康 Provider，但被实际选择时仍会明确失败。运行基准前仍应先执行 `bun run totemora providers doctor --config-dir configs/example`，不能把部分 Provider 就绪解释为全部可用。
+Provider Registry 按需解析单个 Provider 的连接配置，CPA 插图连接也只在真正请求配图时初始化：一个未配置的可选 Provider 不再阻塞其他健康 Provider 或无配图任务，但被实际选择时仍会明确失败。运行基准前仍应先执行 `bun run totemora providers doctor --config-dir configs/example`，不能把部分 Provider 就绪解释为全部可用。
 
 与模型质量基准配套的离线故障演练见 [Stability drills](stability-drills.md)。
