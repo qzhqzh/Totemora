@@ -6,6 +6,27 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { StateDatabase } from "./state-database";
+import { runStateMigrations } from "./migrations";
+
+test("state migrations register every version and remain idempotent", () => {
+  const db = new Database(":memory:", { create: true, strict: true });
+  try {
+    runStateMigrations(db);
+    runStateMigrations(db);
+    expect(db.query("SELECT version,name FROM schema_migrations ORDER BY version").all()).toEqual([
+      { version: 1, name: "initial durable tribe state" },
+      { version: 2, name: "domain-aware intelligence candidates" },
+      { version: 3, name: "conversational skill commissions" },
+      { version: 4, name: "skill commission optimistic concurrency" },
+      { version: 5, name: "skill trial active run reservation" },
+      { version: 6, name: "skill trial lease fencing" },
+      { version: 7, name: "rename git flow Skill canonical id" },
+      { version: 8, name: "constrain skill trial outcomes" },
+    ]);
+  } finally {
+    db.close();
+  }
+});
 
 test("legacy JSON import is idempotent and refuses silent post-cutover changes", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "totemora-state-migration-"));

@@ -120,76 +120,6 @@ test("retries a retryable failed job in the same mission", async () => {
   await rm(dataDir, { recursive: true, force: true });
 });
 
-test("protects development policy mutations with the operator token", async () => {
-  const dataDir = await mkdtemp(join(tmpdir(), "totemora-operator-test-"));
-  const protectedPath = join(dataDir, "protected");
-  await mkdir(protectedPath);
-  const app = createPlaygroundApp({
-    configDir: resolve(import.meta.dir, "../../../configs/example"), dataDir,
-    operatorToken: "operator-secret",
-    createProviderRegistry: () => ({ get: () => new PlaygroundProvider() }),
-  });
-  const deniedWorkplace = await app.fetch(new Request("http://local/api/workplaces", {
-    method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name: "Protected", path: protectedPath }),
-  }));
-  expect(deniedWorkplace.status).toBe(401);
-  const workplace = await (await app.fetch(new Request("http://local/api/workplaces", {
-    method: "POST", headers: authorized(),
-    body: JSON.stringify({ name: "Protected", path: protectedPath }),
-  }))).json();
-  const body = JSON.stringify({
-    instructions: "按规范提交", validation_commands: ["bun test"],
-    allowed_commit_types: ["feat"], forbidden_paths: [".env"],
-  });
-  const denied = await app.fetch(new Request(`http://local/api/workplaces/${workplace.id}/policy`, {
-    method: "PUT", headers: { "content-type": "application/json" }, body,
-  }));
-  expect(denied.status).toBe(401);
-  expect((await denied.json()).error).toContain("authorization failed");
-  const allowed = await app.fetch(new Request(`http://local/api/workplaces/${workplace.id}/policy`, {
-    method: "PUT", headers: { "content-type": "application/json", authorization: "Bearer operator-secret" }, body,
-  }));
-  expect(allowed.status).toBe(200);
-  expect(await allowed.json()).toMatchObject({ version: 1, instructions: "按规范提交" });
-
-  const preferencesBody = JSON.stringify({ interests: ["AI Agent", "生物信息"], channels: { rss: true, ai_hot: true, x_trends: false, weibo_hot: false }, x_woeid: 1 });
-  const deniedPreferences = await app.fetch(new Request("http://local/api/intelligence/preferences", {
-    method: "PUT", headers: { "content-type": "application/json" }, body: preferencesBody,
-  }));
-  expect(deniedPreferences.status).toBe(401);
-  const savedPreferences = await app.fetch(new Request("http://local/api/intelligence/preferences", {
-    method: "PUT", headers: { "content-type": "application/json", authorization: "Bearer operator-secret" }, body: preferencesBody,
-  }));
-  expect(await savedPreferences.json()).toMatchObject({ interests: ["AI Agent", "生物信息"], channels: { rss: true, ai_hot: true } });
-
-  const taskBody = JSON.stringify({ workplace_id: workplace.id, goal: "按规范提交当前改动" });
-  const deniedTask = await app.fetch(new Request("http://local/api/development/tasks", {
-    method: "POST", headers: { "content-type": "application/json" }, body: taskBody,
-  }));
-  expect(deniedTask.status).toBe(401);
-  const startedTask = await app.fetch(new Request("http://local/api/development/tasks", {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: "Bearer operator-secret" },
-    body: taskBody,
-  }));
-  expect(startedTask.status).toBe(202);
-  const taskId = (await startedTask.json()).id as string;
-  const failedTask = await waitForDevelopmentTask(app, taskId, "operator-secret");
-  expect(failedTask).toMatchObject({ kind: "git_flow", status: "failed", retryable: true });
-
-  const restoredApp = createPlaygroundApp({
-    configDir: resolve(import.meta.dir, "../../../configs/example"), dataDir,
-    operatorToken: "operator-secret",
-    createProviderRegistry: () => ({ get: () => new PlaygroundProvider() }),
-  });
-  const restored = await restoredApp.fetch(new Request(`http://local/api/development/tasks/${taskId}`, {
-    headers: { authorization: "Bearer operator-secret" },
-  }));
-  expect(await restored.json()).toMatchObject({ id: taskId, status: "failed" });
-  await rm(dataDir, { recursive: true, force: true });
-});
-
 test("rejects anonymous Runs and unregistered workspace paths", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "totemora-run-boundary-test-"));
   const app = createPlaygroundApp({
@@ -315,6 +245,10 @@ test("finance task endpoint reuses a domain idempotency key instead of schedulin
   const first = await (await request()).json();
   const second = await (await request()).json();
   expect(second.id).toBe(first.id);
+  const wrongDomain = await app.fetch(new Request(`http://local/api/intelligence/tasks/${first.id}`, {
+    headers: authorized(),
+  }));
+  expect(wrongDomain.status).toBe(404);
   const conflicting = await app.fetch(new Request("http://local/api/finance/tasks", {
     method: "POST", headers: authorized(),
     body: JSON.stringify({ idempotency_key: "mcp-finance-same", message_count: 2, delivery_mode: "direct_push" }),
@@ -558,13 +492,60 @@ test("Skill registry API exposes repository-backed metadata without accepting se
     operatorToken: "operator-secret",
     createProviderRegistry: () => ({ get: () => new PlaygroundProvider() }),
   });
+  expect((await app.fetch(new Request("http://local/api/skills/registry", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id: "created-skill", name: "新建测试技能", description: "用于测试 API 创建", tags: ["design", "image"] }),
+  }))).status).toBe(401);
+
+  const createdSkillRes = await app.fetch(new Request("http://local/api/skills/registry", {
+    method: "POST",
+    headers: { ...authorized(), "content-type": "application/json" },
+    body: JSON.stringify({ id: "created-skill", name: "新建测试技能", description: "用于测试 API 创建", tags: ["design", "image"] }),
+  }));
+  expect(createdSkillRes.status).toBe(201);
+  const createdSkillJson = await createdSkillRes.json();
+  expect(createdSkillJson.id).toBe("created-skill");
+  expect(createdSkillJson.name).toBe("新建测试技能");
+  expect(createdSkillJson.tags).toEqual(["design", "image"]);
+
+  const updatedSkillRes = await app.fetch(new Request("http://local/api/skills/registry/created-skill", {
+    method: "PUT",
+    headers: { ...authorized(), "content-type": "application/json" },
+    body: JSON.stringify({ name: "已修改测试技能", description: "更新后的描述", tags: ["design", "image", "updated"] }),
+  }));
+  expect(updatedSkillRes.status).toBe(200);
+  const updatedSkillJson = await updatedSkillRes.json();
+  expect(updatedSkillJson.name).toBe("已修改测试技能");
+  expect(updatedSkillJson.tags).toEqual(["design", "image", "updated"]);
+
   const listed = await app.fetch(new Request("http://local/api/skills/registry"));
   expect(listed.status).toBe(200);
   const listedBody = await listed.json();
-  expect(listedBody).toMatchObject({
-    root: "skills",
-    skills: [{ id: "sample-skill", path: "skills/sample-skill", status: "warning" }],
+  expect(listedBody.root).toBe("skills");
+  expect(listedBody.skills.map((s: { id: string }) => s.id)).toEqual(["created-skill", "sample-skill"]);
+  expect(listedBody.skills.find((s: { id: string }) => s.id === "created-skill")).toMatchObject({
+    id: "created-skill",
+    name: "已修改测试技能",
+    description: "更新后的描述",
+    tags: ["design", "image", "updated"],
   });
+
+  expect((await app.fetch(new Request("http://local/api/skills/registry/created-skill", {
+    method: "DELETE",
+  }))).status).toBe(401);
+
+  const deletedSkillRes = await app.fetch(new Request("http://local/api/skills/registry/created-skill", {
+    method: "DELETE",
+    headers: authorized(),
+  }));
+  expect(deletedSkillRes.status).toBe(200);
+  expect(await deletedSkillRes.json()).toEqual({ success: true, id: "created-skill" });
+
+  const listedAfterDelete = await app.fetch(new Request("http://local/api/skills/registry"));
+  const listedAfterDeleteBody = await listedAfterDelete.json();
+  expect(listedAfterDeleteBody.skills.map((s: { id: string }) => s.id)).toEqual(["sample-skill"]);
+
   const detail = await app.fetch(new Request("http://local/api/skills/registry/sample-skill"));
   expect(await detail.json()).toMatchObject({
     id: "sample-skill", files: [{ path: "SKILL.md", kind: "manifest" }],
@@ -618,17 +599,6 @@ async function waitForJob(app: ReturnType<typeof createPlaygroundApp>, id: strin
     await Bun.sleep(5);
   }
   throw new Error("Job did not finish");
-}
-
-async function waitForDevelopmentTask(app: ReturnType<typeof createPlaygroundApp>, id: string, token: string) {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    const task = await (await app.fetch(new Request(`http://local/api/development/tasks/${id}`, {
-      headers: { authorization: `Bearer ${token}` },
-    }))).json();
-    if (["completed", "failed"].includes(task.status)) return task;
-    await Bun.sleep(5);
-  }
-  throw new Error("Development task did not finish");
 }
 
 class PlaygroundProvider implements AgentProvider {

@@ -1,0 +1,240 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Totemora 系统架构",
+    "output": "totemora-architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/qzhqzh/Totemora",
+      "revision": "ba3fa3e73c386384ee2fbaa58579a833acbd18f9"
+    },
+    "viewBox": [1680, 900],
+    "legend": {
+      "mode": "auto",
+      "entries": {
+        "frontend": { "label": "交互入口" },
+        "backend": { "label": "应用与运行时" },
+        "database": { "label": "持久状态与证据" },
+        "cloud": { "label": "模型服务" },
+        "security": { "label": "受治理入口" },
+        "external": { "label": "外部参与方或集成" }
+      }
+    },
+    "views": [
+      {
+        "id": "main-path",
+        "label": "主执行链",
+        "focus": ["operator", "web", "gateway", "services", "core", "providers", "modelApis"],
+        "note": "从人机入口沿统一网关进入应用服务、核心运行时与模型适配器。"
+      },
+      {
+        "id": "adapter-boundary",
+        "label": "适配器边界",
+        "focus": ["web", "tui", "mcp", "gateway", "core"],
+        "note": "入口只负责协议与交互适配；运行规则和状态真相保留在核心层。"
+      },
+      {
+        "id": "state-effects",
+        "label": "状态与副作用",
+        "focus": ["services", "core", "integrations", "sqlite", "evidence"],
+        "note": "应用服务协调持久状态与外部副作用，核心运行时产出可追溯证据。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "operator",
+      "type": "external",
+      "label": "开发者 / 外部 Agent",
+      "sublabel": "人机操作与自动化调用",
+      "pos": [30, 350],
+      "size": [170, 72]
+    },
+    {
+      "id": "web",
+      "type": "frontend",
+      "label": "Web Observatory",
+      "sublabel": "浏览器操作与运行观测",
+      "sources": [
+        { "path": "packages/web/src/app.js", "label": "Web adapter" }
+      ],
+      "pos": [250, 350],
+      "size": [170, 72]
+    },
+    {
+      "id": "tui",
+      "type": "frontend",
+      "label": "CLI / TUI",
+      "sublabel": "终端交互入口",
+      "sources": [
+        { "path": "packages/tui/src/commands.ts", "label": "CLI commands" }
+      ],
+      "pos": [250, 160],
+      "size": [170, 72]
+    },
+    {
+      "id": "mcp",
+      "type": "security",
+      "label": "MCP Adapter",
+      "sublabel": "工具协议适配",
+      "sources": [
+        { "path": "packages/mcp/src/server.ts", "label": "MCP tools" }
+      ],
+      "pos": [250, 540],
+      "size": [170, 72]
+    },
+    {
+      "id": "gateway",
+      "type": "backend",
+      "label": "Bun Gateway",
+      "sublabel": "统一 HTTP 与操作入口",
+      "sources": [
+        { "path": "packages/server/src/index.ts", "label": "进程入口" },
+        { "path": "packages/server/src/app.ts", "label": "Gateway app" }
+      ],
+      "pos": [500, 350],
+      "size": [175, 72]
+    },
+    {
+      "id": "services",
+      "type": "backend",
+      "label": "Application Services",
+      "sublabel": "任务编排与专职服务",
+      "sources": [
+        { "path": "packages/server/src/specialist-service.ts", "label": "专业服务骨架" },
+        { "path": "packages/server/src/development-service.ts", "label": "Git Flow 服务" },
+        { "path": "packages/server/src/intelligence-service.ts", "label": "情报服务" }
+      ],
+      "pos": [755, 350],
+      "size": [185, 72]
+    },
+    {
+      "id": "core",
+      "type": "backend",
+      "label": "Core Runtime",
+      "sublabel": "规则、运行状态与事件",
+      "sources": [
+        { "path": "packages/core/src/runtime/task-analyzer.ts", "label": "任务分类" },
+        { "path": "packages/core/src/runtime/tribe-runtime.ts", "label": "部落运行时" }
+      ],
+      "pos": [1020, 350],
+      "size": [180, 72]
+    },
+    {
+      "id": "providers",
+      "type": "backend",
+      "label": "Provider Adapters",
+      "sublabel": "模型与图像能力适配",
+      "sources": [
+        { "path": "packages/providers/src/registry.ts", "label": "Provider registry" }
+      ],
+      "pos": [1280, 350],
+      "size": [180, 72]
+    },
+    {
+      "id": "modelApis",
+      "type": "cloud",
+      "label": "模型与图像 API",
+      "sublabel": "外部推理服务",
+      "pos": [1500, 350],
+      "size": [150, 72]
+    },
+    {
+      "id": "integrations",
+      "type": "external",
+      "label": "受治理外部集成",
+      "sublabel": "GitHub / Bark / Telegram / Feeds",
+      "sources": [
+        { "path": "packages/server/src/bark-notification-service.ts", "label": "Bark" },
+        { "path": "packages/server/src/telegram-bot-service.ts", "label": "Telegram" }
+      ],
+      "pos": [755, 650],
+      "size": [210, 76]
+    },
+    {
+      "id": "sqlite",
+      "type": "database",
+      "label": "SQLite WAL",
+      "sublabel": "配置、任务与运行状态",
+      "sources": [
+        { "path": "packages/server/src/state-database.ts", "label": "状态数据库" }
+      ],
+      "pos": [1020, 650],
+      "size": [180, 76]
+    },
+    {
+      "id": "evidence",
+      "type": "database",
+      "label": "Run Trace / Static Assets",
+      "sublabel": "不可变运行证据与静态资源",
+      "sources": [
+        { "path": "packages/core/src/runtime/file-run-store.ts", "label": "运行证据存储" }
+      ],
+      "pos": [1280, 650],
+      "size": [205, 76]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Totemora 本地进程与仓库边界",
+      "wraps": ["web", "tui", "mcp", "gateway", "services", "core", "providers", "sqlite", "evidence"],
+      "pad": 26
+    },
+    {
+      "kind": "region",
+      "label": "适配层：不拥有第二套运行时或状态真相",
+      "wraps": ["web", "tui", "mcp", "gateway"],
+      "pad": 14
+    },
+    {
+      "kind": "security-group",
+      "label": "Operator Token / Policy / Idempotency",
+      "wraps": ["gateway", "integrations"],
+      "pad": 16
+    }
+  ],
+  "connections": [
+    { "id": "operator-web", "from": "operator", "to": "web", "label": "浏览器交互", "variant": "emphasis", "labelAt": [290, 450] },
+    { "id": "web-gateway", "from": "web", "to": "gateway", "label": "HTTP API", "variant": "emphasis", "labelAt": [520, 450] },
+    { "id": "gateway-services", "from": "gateway", "to": "services", "label": "命令与查询", "variant": "emphasis" },
+    { "id": "services-core", "from": "services", "to": "core", "label": "运行编排", "variant": "emphasis", "labelAt": [1060, 450] },
+    { "id": "core-providers", "from": "core", "to": "providers", "label": "能力调用", "variant": "emphasis" },
+    { "id": "providers-models", "from": "providers", "to": "modelApis", "label": "推理请求", "variant": "emphasis", "labelAt": [1480, 436] },
+    { "id": "operator-tui", "from": "operator", "to": "tui", "label": "终端交互" },
+    { "id": "tui-gateway", "from": "tui", "to": "gateway", "label": "Gateway 模式" },
+    { "id": "operator-mcp", "from": "operator", "to": "mcp", "label": "工具调用" },
+    { "id": "mcp-gateway", "from": "mcp", "to": "gateway", "label": "MCP → HTTP" },
+    { "id": "tui-core-compat", "from": "tui", "to": "core", "label": "直接模式兼容", "variant": "dashed" },
+    { "id": "services-integrations", "from": "services", "to": "integrations", "label": "受控副作用", "variant": "security", "fromSide": "bottom", "toSide": "top" },
+    { "id": "services-sqlite", "from": "services", "to": "sqlite", "label": "事务状态" },
+    { "id": "core-evidence", "from": "core", "to": "evidence", "label": "追加证据", "variant": "dashed" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "依赖方向",
+      "items": [
+        "入口 → Gateway → Application Services → Core Runtime",
+        "Core 通过 Provider Adapter 使用外部模型能力"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "状态与证据",
+      "items": [
+        "SQLite 保存可变业务状态",
+        "Run Trace 保存不可变执行证据"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "扩展原则",
+      "items": [
+        "新增入口复用 Gateway 与 Core，不复制运行逻辑",
+        "新增模型或外部集成通过边界适配器接入"
+      ]
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, open, opendir, realpath } from "node:fs/promises";
+import { lstat, mkdir, open, opendir, realpath, rm, writeFile } from "node:fs/promises";
 import { basename, extname, isAbsolute, relative, resolve, sep } from "node:path";
 
 import { StateDatabase } from "./state-database";
@@ -173,6 +173,164 @@ export class SkillRegistryService {
   async get(id: string): Promise<SkillRegistryEntry | undefined> {
     if (!SAFE_SKILL_ID.test(id)) throw new Error("Invalid Skill id");
     return (await this.list()).skills.find((skill) => skill.id === id);
+  }
+
+  async create(input: { id: string; name?: string; description?: string; content?: string; tags?: string[] }): Promise<SkillRegistryEntry> {
+    const id = input.id?.trim();
+    if (!id || !SAFE_SKILL_ID.test(id)) throw new Error("Invalid Skill id");
+    const name = metadataText(input.name || id, "Skill name", 120);
+    const description = metadataText(input.description || `Skill package for ${name}`, "Skill description", 1_000);
+    const customContent = input.content?.trim();
+    const tags = Array.isArray(input.tags)
+      ? normalizedTags(input.tags)
+      : [];
+
+    const root = await this.ensureWritableRoot();
+    const targetDir = resolve(root, id);
+    assertInside(root, targetDir);
+    try {
+      await mkdir(targetDir);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error("Skill already exists");
+      throw error;
+    }
+
+    const skillMarkdown = [
+      "---",
+      `name: ${yamlQuoted(id)}`,
+      `description: ${yamlQuoted(description)}`,
+      ...(tags.length ? ["tags:", ...tags.map((tag) => `  - ${yamlQuoted(tag)}`)] : []),
+      "---",
+      "",
+      `# ${name}`,
+      "",
+      customContent || `> ${description}\n\n## 核心规则\n\n- 明确定义输入与输出边界\n- 遵循确定性验证与安全规范\n`,
+      "",
+    ].join("\n");
+
+    const skillYaml = [
+      "schema_version: 1",
+      `id: ${yamlQuoted(id)}`,
+      `name: ${yamlQuoted(name)}`,
+      "version: 1",
+      "status: candidate",
+      ...(tags.length ? ["tags:", ...tags.map((tag) => `  - ${yamlQuoted(tag)}`)] : []),
+      "source:",
+      `  kind: ${yamlQuoted("local")}`,
+      `  reference: ${yamlQuoted("user-created")}`,
+      "",
+    ].join("\n");
+
+    await writeFile(resolve(targetDir, "SKILL.md"), skillMarkdown, "utf8");
+    await writeFile(resolve(targetDir, "skill.yaml"), skillYaml, "utf8");
+
+    this.cache = undefined;
+    const created = await this.get(id);
+    if (!created) throw new Error("Failed to initialize created Skill package");
+    return created;
+  }
+
+  async update(id: string, input: { name?: string; description?: string; content?: string; tags?: string[] }): Promise<SkillRegistryEntry> {
+    if (!SAFE_SKILL_ID.test(id)) throw new Error("Invalid Skill id");
+    const skill = await this.get(id);
+    if (!skill) throw new Error("Skill not found");
+
+    const packageDirectory = await this.resolveWritablePackage(skill.path);
+
+    const name = metadataText(input.name || skill.name, "Skill name", 120);
+    const description = metadataText(input.description || skill.description, "Skill description", 1_000);
+    const tags = Array.isArray(input.tags)
+      ? normalizedTags(input.tags)
+      : skill.tags;
+
+    let markdownBody: string;
+    if (input.content !== undefined) {
+      markdownBody = input.content.trim();
+    } else {
+      const existingFile = skill.files.find((f) => f.path === "SKILL.md");
+      if (existingFile) {
+        const fullContent = (await this.readFile(id, "SKILL.md")).content;
+        const bodyMatch = fullContent.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?([\s\S]*)$/);
+        markdownBody = (bodyMatch ? bodyMatch[1] : fullContent).trim();
+      } else {
+        markdownBody = `> ${description}\n\n## 核心规则\n\n- 明确定义输入与输出边界\n- 遵循确定性验证与安全规范\n`;
+      }
+    }
+
+    const skillMarkdown = [
+      "---",
+      `name: ${yamlQuoted(id)}`,
+      `description: ${yamlQuoted(description)}`,
+      ...(tags.length ? ["tags:", ...tags.map((tag) => `  - ${yamlQuoted(tag)}`)] : []),
+      "---",
+      "",
+      markdownBody.startsWith("# ") ? markdownBody : `# ${name}\n\n${markdownBody}`,
+      "",
+    ].join("\n");
+
+    const skillYaml = [
+      "schema_version: 1",
+      `id: ${yamlQuoted(id)}`,
+      `name: ${yamlQuoted(name)}`,
+      ...(skill.version ? [`version: ${skill.version}`] : ["version: 1"]),
+      `status: ${skill.status}`,
+      ...(tags.length ? ["tags:", ...tags.map((tag) => `  - ${yamlQuoted(tag)}`)] : []),
+      ...(skill.source.provenance_kind || skill.source.reference ? [
+        "source:",
+        ...(skill.source.provenance_kind
+          ? [`  kind: ${yamlQuoted(skill.source.provenance_kind)}`]
+          : [`  kind: ${yamlQuoted("local")}`]),
+        ...(skill.source.reference ? [`  reference: ${yamlQuoted(skill.source.reference)}`] : []),
+      ] : [
+        "source:",
+        `  kind: ${yamlQuoted("local")}`,
+        `  reference: ${yamlQuoted("user-governed")}`,
+      ]),
+      "",
+    ].join("\n");
+
+    await writeFile(resolve(packageDirectory, "SKILL.md"), skillMarkdown, "utf8");
+    await writeFile(resolve(packageDirectory, "skill.yaml"), skillYaml, "utf8");
+
+    this.cache = undefined;
+    const updated = await this.get(id);
+    if (!updated) throw new Error("Failed to reload updated Skill package");
+    return updated;
+  }
+
+  private async ensureWritableRoot(): Promise<string> {
+    await mkdir(this.root, { recursive: true });
+    const details = await lstat(this.root);
+    if (details.isSymbolicLink() || !details.isDirectory()) {
+      throw new Error("Skill registry root must be a real directory");
+    }
+    const [projectRoot, root] = await Promise.all([realpath(this.projectRoot), realpath(this.root)]);
+    assertInside(projectRoot, root);
+    return root;
+  }
+
+  private async resolveWritablePackage(relativePath: string): Promise<string> {
+    const root = await this.ensureWritableRoot();
+    const candidate = resolve(this.projectRoot, relativePath);
+    assertInside(this.root, candidate);
+    const canonical = await realpath(candidate);
+    const expected = resolve(root, relative(this.root, candidate));
+    assertInside(root, canonical);
+    if (canonical !== expected || !(await lstat(canonical)).isDirectory()) {
+      throw new Error("Skill package must be a real directory inside the registry root");
+    }
+    return canonical;
+  }
+
+  async delete(id: string): Promise<void> {
+    if (!SAFE_SKILL_ID.test(id)) throw new Error("Invalid Skill id");
+    const skill = await this.get(id);
+    if (!skill) throw new Error("Skill not found");
+
+    const packageDirectory = await this.resolveWritablePackage(skill.path);
+
+    await rm(packageDirectory, { recursive: true, force: true });
+    this.cache = undefined;
   }
 
   async readFile(id: string, filePath: string): Promise<{
@@ -523,6 +681,26 @@ function yamlScalar(value: string): string {
     catch { return trimmed.slice(1, -1); }
   }
   return trimmed.replace(/\s+#.*$/, "").trim();
+}
+
+function yamlQuoted(value: string): string {
+  return JSON.stringify(value);
+}
+
+function metadataText(value: string, label: string, maximum: number): string {
+  const normalized = String(value).trim().replace(/\s+/gu, " ");
+  if (!normalized || normalized.length > maximum || /[\u0000-\u001F\u007F]/.test(normalized)) {
+    throw new Error(`${label} must contain at most ${maximum} safe characters`);
+  }
+  return normalized;
+}
+
+function normalizedTags(values: string[]): string[] {
+  if (values.length > 50) throw new Error("Skill tags must contain at most 50 values");
+  return [...new Set(values
+    .map((value) => String(value).trim())
+    .filter(Boolean)
+    .map((value) => metadataText(value, "Skill tag", 64).toLowerCase()))];
 }
 
 async function validateReferences(source: string, directory: string, issues: SkillValidationIssue[]): Promise<void> {

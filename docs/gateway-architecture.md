@@ -39,14 +39,15 @@ Web / MCP / Telegram / Cron / Webhook / IDE / Gateway CLI
 ## 当前实现边界
 
 - Gateway：Bun HTTP 常驻服务，Web 静态资源与 JSON API 同源。
-- 状态：`.totemora/totemora.db` 使用 SQLite WAL；不可变 Run 证据、Secrets、Operator Token 和静态资产目录保留为文件。
-- Web：任务大厅、证据台、成员营帐、火种、资产、AI / 财经双域情报台、内容工坊与治理审批。
+- 状态：`.totemora/totemora.db` 使用 SQLite WAL，migration 由版本化文件顺序注册；不可变 Run 证据、Secrets、Operator Token 和静态资产目录保留为文件。
+- Web：任务大厅、证据台、成员营帐、火种、资产、AI / 财经双域情报台、内容工坊与治理审批；浏览器按领域 Feature 组织，不持有 Prompt/Workflow 或审批状态的第二真源。
 - CLI：配置、Provider 检查和通用 Run 仍本地直连；Gateway 管理和专业任务命令调用常驻 Gateway。
 - MCP：Streamable HTTP `/mcp` 与 stdio bridge，暴露结果导向的专业服务，不暴露任意 prompt 或 Shell。
 - Telegram/Bark：受控通知、命令与反馈通道，不创建第二份情报队列。
 - 通用 Run：只读 Workspace 分析。
 - 受控副作用：Git Flow 可处理已有改动的 Commit、Issue、Push、PR、Review 和 Merge；情报通知与内容生成使用各自资产、幂等和发布门禁。
 - 认证：所有状态变更、模型调用、取消、重试、外部动作和治理批准使用 Operator Token 或通道 allowlist。
+- HTTP 边界：Ability、Skill、Member、Content、Intelligence、Finance、Development、Run/Job/Intake 与 Workplace/Settlement 已拥有独立 route/schema；外部 JSON 按路由设置字节上限并做运行时校验，预期冲突使用明确 4xx，未知内部错误只返回可追踪 reference。
 
 ## 专业服务与资产
 

@@ -15,13 +15,17 @@ header { padding:44px 24px 28px; display:flex; justify-content:space-between; al
 .operator-auth-state { color:var(--amber); font-size:10px; font-weight:400; letter-spacing:.08em; }
 .operator-login.authenticated { border-color:var(--green); }
 .operator-login.authenticated .operator-auth-state { color:var(--green); }
-.operator-dialog { width:min(480px,calc(100vw - 32px)); padding:0; border:1px solid var(--line); background:var(--paper); color:var(--ink); }
-.operator-dialog::backdrop { background:rgba(5,7,5,.78); }
-.operator-dialog form { display:grid; gap:20px; padding:24px; }
-.operator-dialog-head { display:flex; align-items:center; justify-content:space-between; gap:16px; }
-.operator-dialog-head h2 { margin:0; font:600 24px/1.3 Georgia,serif; }
-.operator-dialog-head button { min-height:44px; padding:8px 12px; }
-.operator-dialog p,.operator-login-status { margin:0; color:var(--muted); }
+.operator-dialog { width:min(480px,calc(100vw - 32px)); padding:0; border:1px solid var(--line); background:var(--paper); color:var(--ink); border-radius:6px; box-shadow:0 12px 40px rgba(0,0,0,.6); }
+.operator-dialog.modal-large { width:min(880px,calc(100vw - 32px)); max-height:calc(100vh - 40px); overflow-y:auto; }
+.operator-dialog::backdrop { background:rgba(5,7,5,.82); backdrop-filter:blur(2px); }
+.operator-dialog form { display:grid; gap:18px; padding:24px 28px; }
+.operator-dialog-head { display:flex; align-items:center; justify-content:space-between; gap:16px; border-bottom:1px solid var(--line); padding-bottom:12px; margin-bottom:-4px; }
+.operator-dialog-head h2 { margin:0; font:600 22px/1.3 Georgia,serif; }
+.operator-dialog-head button { min-height:36px; padding:6px 12px; }
+.operator-dialog p,.operator-login-status { margin:0; color:var(--muted); font-size:12px; }
+.dialog-grid-row { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px; }
+.dialog-grid-3 { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; }
+.dialog-code-textarea { font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace !important; font-size:13px !important; line-height:1.6 !important; min-height:260px !important; background:#0a0c0a !important; border-color:#383f36 !important; tab-size:2; white-space:pre; }
 .operator-token-help { border:1px solid var(--line); padding:12px; }
 .operator-token-help summary { color:var(--ink); cursor:pointer; }
 .operator-token-help p { margin-top:8px; font-size:11px; }
@@ -131,6 +135,29 @@ main { padding:24px; display:grid; grid-template-columns:1fr 1.3fr; gap:20px; }
 .skill-registry-controls span { max-width:34ch; color:var(--green); font-size:11px; }
 .skill-registry-controls span.error { color:#e87968; }
 .skill-registry-controls button { min-height:44px; white-space:nowrap; }
+.ability-type-tabs { display:flex; gap:8px; margin-top:20px; border-bottom:1px solid var(--line); padding-bottom:12px; }
+.ability-tab-btn { display:inline-flex; align-items:center; gap:8px; padding:8px 16px; border:1px solid var(--line); background:#111411; color:var(--muted); font-size:13px; cursor:pointer; border-radius:4px; transition:all .15s ease; }
+.ability-tab-btn:hover { background:#171b17; color:var(--ink); border-color:rgba(224,175,104,.4); }
+.ability-tab-btn.active { background:#1b1812; color:var(--amber); border-color:var(--amber); font-weight:600; box-shadow:inset 0 0 0 1px var(--amber); }
+.ability-tab-btn .tab-badge { font-size:10px; opacity:.75; letter-spacing:.5px; text-transform:uppercase; padding:1px 5px; border-radius:2px; background:rgba(255,255,255,.06); }
+.ability-tab-btn.active .tab-badge { background:rgba(224,175,104,.2); color:var(--amber); opacity:1; }
+.ability-tab-content.hidden { display:none; }
+.prompt-workbench,.workflow-workbench { display:grid; grid-template-columns:minmax(260px,.75fr) minmax(0,1.25fr); margin-top:20px; border:1px solid var(--line); background:#111411; }
+.prompt-index,.workflow-index { min-width:0; border-right:1px solid var(--line); }
+.prompt-index-head,.workflow-index-head { display:flex; justify-content:space-between; align-items:center; padding:16px; border-bottom:1px solid var(--line); }
+.prompt-index-head h3,.workflow-index-head h3 { margin:0; font:600 18px/1.4 Georgia,serif; }
+.prompt-count-badge { font-size:11px; color:var(--muted); padding:2px 8px; border:1px solid var(--line); border-radius:3px; }
+.prompt-list,.workflow-list { display:grid; }
+.prompt-item,.workflow-item { display:grid; width:100%; padding:16px; border:0; border-bottom:1px solid var(--line); background:transparent; color:var(--ink); text-align:left; cursor:pointer; gap:6px; }
+.prompt-item:last-child,.workflow-item:last-child { border-bottom:0; }
+.prompt-item:hover,.workflow-item:hover { background:#171b17; }
+.prompt-item[aria-pressed="true"],.workflow-item[aria-pressed="true"] { background:#1b1812; box-shadow:inset 0 0 0 1px var(--amber); }
+.prompt-item strong,.workflow-item strong { font:600 15px/1.4 Georgia,serif; }
+.prompt-item small,.workflow-item small { color:var(--muted); font-size:11px; }
+.prompt-detail,.workflow-detail { min-width:0; padding:24px; }
+.pipeline-steps { display:grid; gap:12px; margin-top:16px; }
+.pipeline-step { display:flex; gap:12px; align-items:flex-start; padding:12px; background:#171b17; border:1px solid var(--line); border-radius:4px; }
+.pipeline-step-num { display:grid; place-items:center; width:24px; height:24px; border-radius:50%; background:var(--amber); color:#000; font-weight:bold; font-size:11px; flex-shrink:0; }
 .skill-registry-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); margin-top:20px; border:1px solid var(--line); background:#111411; }
 .skill-registry-summary div { min-width:0; padding:16px; border-right:1px solid var(--line); }
 .skill-registry-summary div:last-child { border-right:0; }
@@ -141,7 +168,26 @@ main { padding:24px; display:grid; grid-template-columns:1fr 1.3fr; gap:20px; }
 .skill-registry-index { min-width:0; border-right:1px solid var(--line); }
 .skill-registry-index-head { display:flex; justify-content:space-between; gap:12px; align-items:center; padding:16px; border-bottom:1px solid var(--line); }
 .skill-registry-index-head h3 { margin:0; font:600 18px/1.4 Georgia,serif; }
+.skill-registry-index-actions { display:flex; align-items:center; gap:8px; }
+.skill-mini-create { min-height:28px !important; padding:2px 10px !important; font-size:11px !important; }
 .skill-registry-index-head span { color:var(--muted); font-size:11px; }
+.skill-tag-filter-bar { display:flex; flex-wrap:wrap; gap:6px; padding:10px 16px; border-bottom:1px solid var(--line); background:#0c0f0c; }
+.skill-tag-filter-pill { padding:3px 8px; border:1px solid var(--line); background:transparent; color:var(--muted); font-size:11px; cursor:pointer; border-radius:3px; }
+.skill-tag-filter-pill:hover { background:#171b17; color:var(--ink); }
+.skill-tag-filter-pill.active { background:var(--amber); color:#000; font-weight:600; border-color:var(--amber); }
+.skill-tag-list { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }
+.skill-tag-badge { display:inline-block; padding:1px 6px; border:1px solid rgba(224,175,104,.35); background:rgba(224,175,104,.1); color:var(--amber); font-size:10px; border-radius:2px; letter-spacing:0; }
+.skill-tag-group { display:grid; gap:8px; }
+.skill-tag-presets { display:flex; flex-wrap:wrap; gap:6px; }
+.skill-tag-preset-btn { padding:2px 8px; border:1px solid var(--line); background:transparent; color:var(--muted); font-size:11px; cursor:pointer; }
+.skill-tag-preset-btn:hover { color:var(--ink); border-color:var(--amber); }
+.skill-tag-preset-btn.selected { background:rgba(224,175,104,.2); color:var(--amber); border-color:var(--amber); font-weight:600; }
+.skill-tag-input-row { display:flex; gap:8px; }
+.skill-tag-input-row input { flex:1; min-height:36px; }
+.skill-selected-tags { display:flex; flex-wrap:wrap; gap:6px; min-height:24px; }
+.skill-tag-chip { display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border:1px solid var(--amber); background:rgba(224,175,104,.15); color:var(--amber); font-size:11px; border-radius:3px; }
+.skill-tag-chip button { padding:0 2px; border:0; background:transparent; color:var(--amber); font-size:13px; line-height:1; cursor:pointer; }
+.skill-tag-chip button:hover { color:#e87968; }
 .skill-registry-list { display:grid; }
 .skill-registry-item { display:grid; width:100%; min-height:88px; grid-template-columns:minmax(0,1fr) auto; gap:12px; padding:16px; border:0; border-bottom:1px solid var(--line); background:transparent; color:var(--ink); text-align:left; }
 .skill-registry-item:last-child { border-bottom:0; }
@@ -212,6 +258,10 @@ main { padding:24px; display:grid; grid-template-columns:1fr 1.3fr; gap:20px; }
 .skill-governance-evidence strong { margin-top:4px; }
 .skill-governance-evidence small { margin-top:4px; color:var(--muted); letter-spacing:0; overflow-wrap:anywhere; }
 .skill-detail-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:20px; }
+.skill-detail-head>.skill-detail-actions { align-items:center; margin-top:0; }
+.destructive { color:#e87968; border-color:rgba(232,121,104,.4); }
+.muted { color:var(--muted); }
+.workflow-trigger { color:var(--amber); }
 .skill-detail-actions a { display:inline-flex; min-height:44px; align-items:center; padding:8px 16px; border:1px solid var(--line); color:var(--ink); text-decoration:none; }
 .skill-detail-actions a:hover { border-color:var(--amber); }
 .route-skills main>section:not(.skill-registry-panel):not(.skill-panel) { display:none; }
@@ -462,3 +512,4 @@ pre { max-height:420px; overflow:auto; background:#0c0e0c; padding:14px; font-si
 @media(max-width:760px){.proposal-evidence{grid-template-columns:1fr}.proposal-evidence button{width:100%}}
 @media(max-width:760px){.skill-package-browser{grid-template-columns:1fr}.skill-file-tree{border-right:0;border-bottom:1px solid var(--line)}}
 @media(max-width:760px){.header-actions{width:100%;justify-items:stretch}.operator-login{width:100%}.operator-dialog-actions{display:grid}.operator-dialog-actions button{width:100%}}
+@media(max-width:760px){.ability-type-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}.ability-tab-btn{justify-content:center;padding:10px 6px;font-size:0}.ability-tab-btn .tab-badge{font-size:10px}.prompt-workbench,.workflow-workbench{grid-template-columns:1fr}.prompt-index,.workflow-index{border-right:0;border-bottom:1px solid var(--line)}.prompt-detail,.workflow-detail{padding:16px}.skill-detail-head>.skill-detail-actions{display:grid}.skill-detail-head>.skill-detail-actions button{width:100%}}

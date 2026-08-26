@@ -120,6 +120,9 @@ test("registry rejects a symlinked root instead of scanning outside the project"
   await symlink(outside, join(root, "skills"));
   const service = new SkillRegistryService(root, join(root, "data"));
   await expect(service.list()).rejects.toThrow("real directory");
+  await expect(service.create({ id: "escaped-skill", name: "Escaped" }))
+    .rejects.toThrow("real directory");
+  expect(await Bun.file(join(outside, "escaped-skill", "SKILL.md")).exists()).toBe(false);
   await rm(root, { recursive: true, force: true });
   await rm(outside, { recursive: true, force: true });
 });
@@ -170,5 +173,69 @@ test("registry bounds skipped entries and Doctor issues", async () => {
   expect(skill.validation.issues.map((issue) => issue.code)).toEqual(expect.arrayContaining([
     "symbolic_link", "issue_limit", "too_many_entries",
   ]));
+  await rm(root, { recursive: true, force: true });
+});
+
+test("registry can create new Skill packages with tags directly in repository", async () => {
+  const root = await mkdtemp(join(tmpdir(), "totemora-skill-create-tags-"));
+  const dataDir = join(root, "data");
+  const service = new SkillRegistryService(root, dataDir);
+
+  const created = await service.create({
+    id: "image-designer",
+    name: "图像设计专员",
+    description: "根据提示词生成和优化设计配图",
+    content: "## 设计规则\n\n风格统一且提供线稿验收",
+    tags: ["Image", "Design", "Art"],
+  });
+
+  expect(created.id).toBe("image-designer");
+  expect(created.name).toBe("图像设计专员");
+  expect(created.tags).toEqual(["image", "design", "art"]);
+  expect(created.files.map((file: { path: string }) => file.path)).toEqual(expect.arrayContaining(["SKILL.md", "skill.yaml"]));
+
+  const preview = await service.readFile("image-designer", "SKILL.md");
+  expect(preview.content).toContain("# 图像设计专员");
+  expect(preview.content).toContain("tags:");
+  expect(preview.content).toContain('- "image"');
+
+  const yamlPreview = await service.readFile("image-designer", "skill.yaml");
+  expect(yamlPreview.content).toContain("tags:");
+  expect(yamlPreview.content).toContain('- "design"');
+
+  const updated = await service.update("image-designer", {
+    name: "高级图像设计专员",
+    description: "具备线稿、上色与审校能力",
+    tags: ["image", "design", "illustration", "pro"],
+    content: "## 增强规则\n\n必须进行三次风格自检",
+  });
+
+  expect(updated.name).toBe("高级图像设计专员");
+  expect(updated.description).toBe("具备线稿、上色与审校能力");
+  expect(updated.tags).toEqual(["image", "design", "illustration", "pro"]);
+
+  const updatedPreview = await service.readFile("image-designer", "SKILL.md");
+  expect(updatedPreview.content).toContain("# 高级图像设计专员");
+  expect(updatedPreview.content).toContain("## 增强规则");
+
+  const guarded = await service.create({
+    id: "yaml-guarded",
+    name: "Injected\nstatus: active",
+    tags: ["safe\nstatus: active"],
+  });
+  expect(guarded.status).toBe("candidate");
+  const guardedYaml = (await service.readFile("yaml-guarded", "skill.yaml")).content;
+  expect(guardedYaml.match(/^status:/gm)).toHaveLength(1);
+  expect(guardedYaml).not.toContain("\nstatus: active");
+
+  await expect(service.update("non-existent-skill", { name: "test" })).rejects.toThrow("Skill not found");
+  await expect(service.update("../bad-skill", { name: "test" })).rejects.toThrow("Invalid Skill id");
+
+  await service.delete("image-designer");
+  await service.delete("yaml-guarded");
+  expect((await service.list({ refresh: true })).skills).toHaveLength(0);
+  await expect(service.delete("image-designer")).rejects.toThrow("Skill not found");
+  await expect(service.delete("../bad-skill")).rejects.toThrow("Invalid Skill id");
+
   await rm(root, { recursive: true, force: true });
 });

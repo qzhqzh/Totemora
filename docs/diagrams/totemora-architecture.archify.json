@@ -1,0 +1,320 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Totemora 项目架构",
+    "output": "totemora-architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/qzhqzh/Totemora",
+      "revision": "ba3fa3e73c386384ee2fbaa58579a833acbd18f9"
+    },
+    "viewBox": [2100, 860],
+    "views": [
+      {
+        "id": "primary-path",
+        "label": "主要运行链路",
+        "focus": ["operator", "web", "gateway", "services", "core", "providers", "model_apis"],
+        "note": "从 Web 观测与审批入口，沿 Gateway、领域服务和 Core Runtime 到受控模型调用。"
+      },
+      {
+        "id": "adapter-boundary",
+        "label": "Adapter 边界",
+        "focus": ["operator", "web", "tui", "mcp", "gateway", "core"],
+        "note": "Web、MCP 和 Gateway commands 共用 Gateway；TUI 仍保留直接本地 Runtime 的兼容入口。"
+      },
+      {
+        "id": "state-and-effects",
+        "label": "状态与副作用",
+        "focus": ["gateway", "services", "integrations", "sqlite", "core", "evidence"],
+        "note": "可变业务状态进入 SQLite；Run trace 保持不可变；外部动作由授权、幂等与审计门禁控制。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "operator",
+      "type": "external",
+      "label": "开发者 / 外部 Agent",
+      "sublabel": "任务、观察、审批与委托",
+      "pos": [40, 340],
+      "size": [170, 72]
+    },
+    {
+      "id": "web",
+      "type": "frontend",
+      "label": "Web Observatory",
+      "sublabel": "观测 · 案卷 · 显式审批",
+      "tag": "HTTP client",
+      "sources": [
+        { "path": "packages/web/src/app.js", "label": "Web adapter" }
+      ],
+      "pos": [300, 342],
+      "size": [180, 72]
+    },
+    {
+      "id": "tui",
+      "type": "frontend",
+      "label": "CLI / TUI",
+      "sublabel": "开发者控制入口",
+      "tag": "Gateway + local compatibility",
+      "sources": [
+        { "path": "packages/tui/src/commands.ts", "label": "CLI commands" }
+      ],
+      "pos": [300, 140],
+      "size": [180, 72]
+    },
+    {
+      "id": "mcp",
+      "type": "frontend",
+      "label": "MCP Adapter",
+      "sublabel": "外部 Agent 专业服务入口",
+      "tag": "Streamable HTTP / stdio",
+      "sources": [
+        { "path": "packages/mcp/src/server.ts", "label": "MCP tools" }
+      ],
+      "pos": [300, 540],
+      "size": [180, 72]
+    },
+    {
+      "id": "gateway",
+      "type": "backend",
+      "label": "Bun Gateway",
+      "sublabel": "HTTP 路由 · composition · scheduler",
+      "tag": "packages/server",
+      "sources": [
+        { "path": "packages/server/src/index.ts", "label": "进程入口" },
+        { "path": "packages/server/src/app.ts", "label": "Gateway app" }
+      ],
+      "pos": [600, 340],
+      "size": [190, 76]
+    },
+    {
+      "id": "services",
+      "type": "backend",
+      "label": "Application / Specialist Services",
+      "sublabel": "Run · Skill · Intelligence · Finance · Content",
+      "tag": "用例、状态机与验收",
+      "sources": [
+        { "path": "packages/server/src/specialist-service.ts", "label": "专业服务骨架" },
+        { "path": "packages/server/src/development-service.ts", "label": "Git Flow 服务" },
+        { "path": "packages/server/src/intelligence-service.ts", "label": "情报服务" }
+      ],
+      "pos": [920, 340],
+      "size": [230, 82]
+    },
+    {
+      "id": "core",
+      "type": "backend",
+      "label": "Core Runtime",
+      "sublabel": "Task Analyzer · Staffing · Tribe Runtime · Review",
+      "tag": "@totemora/core",
+      "sources": [
+        { "path": "packages/core/src/runtime/task-analyzer.ts", "label": "任务分类" },
+        { "path": "packages/core/src/runtime/tribe-runtime.ts", "label": "部落运行时" }
+      ],
+      "pos": [1290, 340],
+      "size": [190, 76]
+    },
+    {
+      "id": "providers",
+      "type": "backend",
+      "label": "Provider Adapters",
+      "sublabel": "OpenAI · Anthropic · CPA Image",
+      "tag": "@totemora/providers",
+      "sources": [
+        { "path": "packages/providers/src/registry.ts", "label": "Provider registry" }
+      ],
+      "pos": [1570, 340],
+      "size": [180, 72]
+    },
+    {
+      "id": "model_apis",
+      "type": "external",
+      "label": "模型与图像 API",
+      "sublabel": "外部推理与生成能力",
+      "pos": [1840, 340],
+      "size": [170, 72]
+    },
+    {
+      "id": "integrations",
+      "type": "external",
+      "label": "受治理外部集成",
+      "sublabel": "GitHub · Bark · Telegram · Feeds",
+      "tag": "授权 · 幂等 · 审计",
+      "sources": [
+        { "path": "packages/server/src/bark-notification-service.ts", "label": "Bark" },
+        { "path": "packages/server/src/telegram-bot-service.ts", "label": "Telegram" }
+      ],
+      "pos": [690, 650],
+      "size": [200, 76]
+    },
+    {
+      "id": "sqlite",
+      "type": "database",
+      "label": "SQLite WAL",
+      "sublabel": "可变业务状态单一真源",
+      "tag": ".totemora/totemora.db",
+      "sources": [
+        { "path": "packages/server/src/state-database.ts", "label": "状态数据库" }
+      ],
+      "pos": [945, 650],
+      "size": [180, 76]
+    },
+    {
+      "id": "evidence",
+      "type": "database",
+      "label": "Run Trace / Static Assets",
+      "sublabel": "不可变证据与仓库文件",
+      "tag": ".totemora/runs + repository",
+      "pos": [1285, 650],
+      "size": [200, 76]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Adapter 层：不拥有第二套 Runtime 或状态真源",
+      "wraps": ["web", "tui", "mcp"],
+      "pad": 24
+    },
+    {
+      "kind": "region",
+      "label": "Totemora 本地进程与仓库边界",
+      "wraps": ["gateway", "services", "core", "providers", "sqlite", "evidence"],
+      "pad": 28
+    },
+    {
+      "kind": "security-group",
+      "label": "Operator Token · Policy · Idempotency Gates",
+      "wraps": ["gateway", "services", "integrations"],
+      "pad": 20
+    }
+  ],
+  "connections": [
+    {
+      "id": "operator_web",
+      "from": "operator",
+      "to": "web",
+      "variant": "emphasis"
+    },
+    {
+      "id": "operator_tui",
+      "from": "operator",
+      "to": "tui"
+    },
+    {
+      "id": "operator_mcp",
+      "from": "operator",
+      "to": "mcp"
+    },
+    {
+      "id": "web_gateway",
+      "from": "web",
+      "to": "gateway",
+      "label": "HTTP / JSON",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left",
+      "route": "straight",
+      "labelAt": [580, 320]
+    },
+    {
+      "id": "tui_gateway",
+      "from": "tui",
+      "to": "gateway",
+      "label": "Gateway commands"
+    },
+    {
+      "id": "mcp_gateway",
+      "from": "mcp",
+      "to": "gateway",
+      "label": "HTTP specialist API"
+    },
+    {
+      "id": "tui_core_compat",
+      "from": "tui",
+      "to": "core",
+      "label": "本地 Runtime 兼容入口",
+      "variant": "dashed"
+    },
+    {
+      "id": "gateway_services",
+      "from": "gateway",
+      "to": "services",
+      "label": "认证 · 校验 · 用例调用",
+      "variant": "security"
+    },
+    {
+      "id": "services_core",
+      "from": "services",
+      "to": "core",
+      "label": "派工 · 预算 · 验收",
+      "variant": "emphasis",
+      "labelAt": [1220, 436]
+    },
+    {
+      "id": "core_providers",
+      "from": "core",
+      "to": "providers",
+      "label": "Provider 契约"
+    },
+    {
+      "id": "providers_models",
+      "from": "providers",
+      "to": "model_apis",
+      "label": "受限模型调用"
+    },
+    {
+      "id": "services_integrations",
+      "from": "services",
+      "to": "integrations",
+      "label": "幂等副作用 / 受控采集",
+      "variant": "security"
+    },
+    {
+      "id": "services_sqlite",
+      "from": "services",
+      "to": "sqlite",
+      "label": "事务状态",
+      "labelAt": [1035, 436]
+    },
+    {
+      "id": "core_evidence",
+      "from": "core",
+      "to": "evidence",
+      "label": "不可变 Run trace",
+      "variant": "dashed",
+      "labelAt": [1385, 430]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "依赖方向",
+      "items": [
+        "Adapter → Gateway / Core；Adapter 不复制领域 Runtime",
+        "Server 组合 Application、Domain、Repository 与 Integration",
+        "Core 不反向依赖 Server、Web 或外部通道"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "状态与证据",
+      "items": [
+        "SQLite 保存可变业务状态与恢复信息",
+        "Run trace、Skill 文件和静态资产保持独立证据边界",
+        "Secret 与完整设备 key 不进入普通响应或日志"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "扩展原则",
+      "items": [
+        "新能力优先成为具名领域服务，而不是继续扩大 Server App",
+        "Web 保持薄 bootstrap，并按领域 Feature 拆分",
+        "外部动作必须经过权限、幂等、审计和显式门禁"
+      ]
+    }
+  ]
+}

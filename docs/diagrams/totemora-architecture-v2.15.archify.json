@@ -1,0 +1,244 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Totemora 运行与部署架构",
+    "output": "totemora-architecture-v2.15.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/qzhqzh/Totemora",
+      "revision": "ba3fa3e73c386384ee2fbaa58579a833acbd18f9"
+    },
+    "viewBox": [1960, 980],
+    "legend": {
+      "mode": "auto",
+      "entries": {
+        "backend": { "label": "本地运行组件" },
+        "database": { "label": "持久状态与证据" },
+        "cloud": { "label": "外部模型服务" },
+        "security": { "label": "公开代理入口" },
+        "external": { "label": "调用方与外部集成" }
+      }
+    },
+    "views": [
+      {
+        "id": "request-path",
+        "label": "主请求链",
+        "focus": ["clients", "gateway", "services", "core", "providers", "modelApis"],
+        "note": "浏览器、MCP Host 或 CLI 通过 Bun Gateway 进入服务编排和核心运行时。"
+      },
+      {
+        "id": "runtime-state",
+        "label": "调度与状态",
+        "focus": ["scheduler", "services", "sqlite", "core", "runEvidence"],
+        "note": "同一 Gateway 进程内的定时调度触发服务，状态与运行证据分别持久化。"
+      },
+      {
+        "id": "external-effects",
+        "label": "外部副作用",
+        "focus": ["services", "integrations", "bark", "nginx"],
+        "note": "受治理服务调用外部集成；Bark 由独立容器和 Nginx 代理承载。"
+      },
+      {
+        "id": "deployment-ownership",
+        "label": "部署归属",
+        "focus": ["gateway", "services", "core", "providers", "scheduler", "sqlite", "runEvidence", "nginx", "bark"],
+        "note": "Gateway 主机与 Bark 通知部署相互独立，外部模型和业务 API 不属于本地边界。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "clients",
+      "type": "external",
+      "label": "浏览器 / MCP Host / CLI",
+      "sublabel": "人机操作与自动化调用",
+      "pos": [20, 400],
+      "size": [180, 76]
+    },
+    {
+      "id": "gateway",
+      "type": "backend",
+      "label": "Bun Gateway",
+      "sublabel": "静态 Web、/api、/mcp",
+      "tag": "systemd · :4310",
+      "sources": [
+        { "path": "packages/server/src/index.ts", "label": "统一进程入口" },
+        { "path": "ops/systemd/totemora-gateway.service", "label": "systemd 部署" },
+        { "path": "package.json", "label": "Bun 启动命令" }
+      ],
+      "pos": [330, 400],
+      "size": [200, 76]
+    },
+    {
+      "id": "services",
+      "type": "backend",
+      "label": "Application Services",
+      "sublabel": "专职服务与任务编排",
+      "sources": [
+        { "path": "packages/server/src/specialist-service.ts", "label": "专业服务内核" },
+        { "path": "packages/server/src/intelligence-service.ts", "label": "情报服务" },
+        { "path": "packages/server/src/content-studio-service.ts", "label": "内容服务" }
+      ],
+      "pos": [650, 400],
+      "size": [200, 76]
+    },
+    {
+      "id": "core",
+      "type": "backend",
+      "label": "Core Runtime",
+      "sublabel": "任务分析、部落运行与事件",
+      "sources": [
+        { "path": "packages/core/src/runtime/task-analyzer.ts", "label": "任务分析" },
+        { "path": "packages/core/src/runtime/tribe-runtime.ts", "label": "部落运行时" }
+      ],
+      "pos": [960, 400],
+      "size": [190, 76]
+    },
+    {
+      "id": "providers",
+      "type": "backend",
+      "label": "Provider Adapters",
+      "sublabel": "模型协议与凭据解析",
+      "sources": [
+        { "path": "packages/providers/src/registry.ts", "label": "Provider registry" }
+      ],
+      "pos": [1250, 400],
+      "size": [200, 76]
+    },
+    {
+      "id": "modelApis",
+      "type": "cloud",
+      "label": "模型与图像 API",
+      "sublabel": "外部推理服务",
+      "pos": [1540, 400],
+      "size": [190, 76]
+    },
+    {
+      "id": "scheduler",
+      "type": "backend",
+      "label": "Recurring Scheduler",
+      "sublabel": "60 秒周期任务",
+      "sources": [
+        { "path": "packages/server/src/recurring-service-runner.ts", "label": "周期调度器" }
+      ],
+      "pos": [650, 150],
+      "size": [200, 76]
+    },
+    {
+      "id": "sqlite",
+      "type": "database",
+      "label": "SQLite WAL",
+      "sublabel": "业务状态与任务状态",
+      "sources": [
+        { "path": "packages/server/src/state-database.ts", "label": "状态数据库" }
+      ],
+      "pos": [650, 650],
+      "size": [200, 78]
+    },
+    {
+      "id": "runEvidence",
+      "type": "database",
+      "label": "Run JSON Evidence",
+      "sublabel": ".totemora/runs/*.json",
+      "sources": [
+        { "path": "packages/core/src/runtime/file-run-store.ts", "label": "运行证据存储" }
+      ],
+      "pos": [960, 650],
+      "size": [190, 78]
+    },
+    {
+      "id": "integrations",
+      "type": "external",
+      "label": "GitHub / Telegram / Feeds",
+      "sublabel": "受治理业务集成",
+      "sources": [
+        { "path": "packages/server/src/development-service.ts", "label": "Git 工作流" },
+        { "path": "packages/server/src/telegram-bot-service.ts", "label": "Telegram" },
+        { "path": "packages/server/src/intelligence-service.ts", "label": "情报来源" }
+      ],
+      "pos": [1530, 120],
+      "size": [220, 78]
+    },
+    {
+      "id": "nginx",
+      "type": "security",
+      "label": "Nginx HTTPS Edge",
+      "sublabel": "公开域名反向代理",
+      "sources": [
+        { "path": "ops/nginx/bark.qzhqzh.com.conf", "label": "Nginx 代理配置" }
+      ],
+      "pos": [1680, 650],
+      "size": [170, 76]
+    },
+    {
+      "id": "bark",
+      "type": "backend",
+      "label": "Bark Server",
+      "sublabel": "独立容器与 bind mount",
+      "tag": "Docker Compose · :18080",
+      "sources": [
+        { "path": "compose.bark.yaml", "label": "Bark 容器部署" },
+        { "path": "packages/server/src/bark-notification-service.ts", "label": "通知调用方" }
+      ],
+      "pos": [1670, 820],
+      "size": [190, 78]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Gateway 主机：systemd 用户服务与本地数据目录",
+      "wraps": ["gateway", "services", "core", "providers", "scheduler", "sqlite", "runEvidence"]
+    },
+    {
+      "kind": "region",
+      "label": "Bun Gateway 单进程",
+      "wraps": ["gateway", "services", "core", "providers", "scheduler"]
+    },
+    {
+      "kind": "region",
+      "label": "Bark 通知部署：独立 Nginx 与 Docker Compose",
+      "wraps": ["nginx", "bark"]
+    }
+  ],
+  "connections": [
+    { "id": "clients-gateway", "from": "clients", "to": "gateway", "label": "HTTP / MCP / CLI", "variant": "emphasis" },
+    { "id": "gateway-services", "from": "gateway", "to": "services", "label": "命令与查询", "variant": "emphasis" },
+    { "id": "services-core", "from": "services", "to": "core", "label": "运行编排", "variant": "emphasis" },
+    { "id": "core-providers", "from": "core", "to": "providers", "label": "能力调用", "variant": "emphasis" },
+    { "id": "providers-models", "from": "providers", "to": "modelApis", "label": "推理请求", "variant": "emphasis" },
+    { "id": "scheduler-services", "from": "scheduler", "to": "services", "label": "周期触发", "labelDy": 24 },
+    { "id": "services-sqlite", "from": "services", "to": "sqlite", "label": "事务状态", "labelDy": 24 },
+    { "id": "core-evidence", "from": "core", "to": "runEvidence", "label": "追加证据", "variant": "dashed", "labelDy": 24 },
+    { "id": "services-integrations", "from": "services", "to": "integrations", "label": "受控副作用", "variant": "security" },
+    { "id": "services-bark", "from": "services", "to": "bark", "label": "Bark 推送 HTTP", "variant": "security" },
+    { "id": "nginx-bark", "from": "nginx", "to": "bark", "label": "proxy_pass :18080", "variant": "security", "labelDy": 24 }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "单进程入口",
+      "items": [
+        "Bun.serve 同时承载 Web 静态资源、/api 与 /mcp",
+        "systemd 以开发 watch 模式保持 Gateway 常驻"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "状态边界",
+      "items": [
+        "SQLite WAL 保存可变业务状态",
+        "Run JSON 保存可审计的执行证据"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "部署归属",
+      "items": [
+        "模型与业务 API 位于 Totemora 主机边界之外",
+        "Bark 容器与 Nginx 是独立通知部署，不属于 Gateway 进程"
+      ]
+    }
+  ]
+}
