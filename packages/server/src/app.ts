@@ -40,9 +40,7 @@ import {
   type CreateContentInput,
 } from "./content-studio-service";
 import { CpaIllustrationService } from "./cpa-illustration-service";
-import {
-  BarkNotificationService, BarkTargetMutationError, type BarkTargetMutationInput,
-} from "./bark-notification-service";
+import { BarkNotificationService } from "./bark-notification-service";
 import { EvidenceObservatory } from "./evidence-observatory";
 import { SkillCommissionConflictError, SkillCommissionService } from "./skill-commission-service";
 import { SkillRegistryService } from "./skill-registry-service";
@@ -57,11 +55,13 @@ import { handleDevelopmentRoutes } from "./http/development-routes";
 import { handleFinanceRoutes } from "./http/finance-routes";
 import { handleIntelligenceRoutes } from "./http/intelligence-routes";
 import { handleMemberRoutes } from "./http/member-routes";
+import { handleNotificationRoutes } from "./http/notification-routes";
+import { handleOperationsRoutes } from "./http/operations-routes";
 import { handleRunRoutes } from "./http/run-routes";
 import { handleSkillCommissionRoutes } from "./http/skill-commission-routes";
 import { handleSkillRegistryRoutes } from "./http/skill-registry-routes";
 import { handleWorkplaceRoutes } from "./http/workplace-routes";
-import { HttpError, json, readJson, readOptionalJson } from "./http/http-boundary";
+import { HttpError, json } from "./http/http-boundary";
 import type { RunRouteInput } from "./http/run-input-schema";
 
 export interface PlaygroundOptions {
@@ -151,6 +151,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
   const intelligenceTaskStore = new JobStore<IntelligenceTask, IntelligenceTaskInput>(options.dataDir, "intelligence-tasks");
   const specialistTasks = new SpecialistTaskRepository(options.dataDir);
   const barkManagement = new BarkNotificationService(options.dataDir, options.fetchImpl ?? fetch);
+  const actionJournal = new ActionJournal(options.dataDir);
   const abilityTemplates = new AbilityTemplateStore(options.dataDir);
   const intelligencePreferences = new IntelligencePreferenceStore(options.dataDir);
   const financePreferences = new FinancePreferenceStore(options.dataDir);
@@ -601,6 +602,27 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
     return enqueueRun(structuredClone(input));
   };
 
+  const testNotificationTarget = async (targetId: string, requestedKey?: string) => {
+    const idempotencyKey = requestedKey ?? `web-bark-test:${targetId}:${crypto.randomUUID()}`;
+    try {
+      const result = await actionJournal.executeEffectOnce({
+        idempotency_key: idempotencyKey, asset_id: "internal-bark", member_id: "operator",
+        action: "test_notification", request: { target_id: targetId },
+      }, async () => {
+        const receipt = await barkManagement.pushTo(targetId, {
+          id: `test-${crypto.randomUUID()}`, title: "Totemora 设备测试",
+          body: "这台设备已接入部落通知控制面。AI / 财经领域路由将按设备配置生效。",
+        });
+        return `Bark target ${targetId} accepted test with status ${receipt.status}`;
+      });
+      await barkManagement.recordTestAudit(targetId, true, result.record.evidence ?? "accepted");
+      return { accepted: true as const, replayed: result.replayed };
+    } catch (error) {
+      await barkManagement.recordTestAudit(targetId, false, error instanceof Error ? error.message : String(error));
+      throw error;
+    }
+  };
+
   return {
     jobs,
     async runScheduledIntelligence() {
@@ -750,6 +772,22 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
         });
         if (runResponse) return runResponse;
 
+        const notificationResponse = await handleNotificationRoutes(request, url, {
+          management: barkManagement,
+          testTarget: testNotificationTarget,
+          requireOperator: (candidate) => requireOperator(candidate, options.operatorToken),
+        });
+        if (notificationResponse) return notificationResponse;
+
+        const operationsResponse = await handleOperationsRoutes(request, url, {
+          recurringServiceStatus: () => options.recurringServiceStatus?.() ?? [],
+          listTasks: (limit) => specialistTasks.list(limit),
+          getTask: (id) => specialistTasks.get(id),
+          listActions: () => actionJournal.list(),
+          requireOperator: (candidate) => requireOperator(candidate, options.operatorToken),
+        });
+        if (operationsResponse) return operationsResponse;
+
         if (request.method === "GET" && url.pathname === "/api/tribe") {
           const config = await getConfig();
           return json({
@@ -806,11 +844,6 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
           });
         }
 
-        if (request.method === "GET" && url.pathname === "/api/operator/session") {
-          requireOperator(request, options.operatorToken);
-          return json({ authenticated: true });
-        }
-
         if (request.method === "GET" && url.pathname === "/api/services") {
           await ensureServiceBindings();
           return json({ services: SPECIALIST_SERVICES, bindings: specialistTasks.bindings() });
@@ -818,89 +851,6 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
 
         if (request.method === "GET" && url.pathname === "/api/evidence/overview") {
           return json(await new EvidenceObservatory(options.dataDir, await getConfig()).overview());
-        }
-
-        if (request.method === "GET" && url.pathname === "/api/operations/recurring-services") {
-          requireOperator(request, options.operatorToken);
-          return json({ services: options.recurringServiceStatus?.() ?? [] });
-        }
-
-        if (request.method === "GET" && url.pathname === "/api/service-tasks") {
-          requireOperator(request, options.operatorToken);
-          return json({ tasks: specialistTasks.list(Number(url.searchParams.get("limit") ?? 100)) });
-        }
-
-        const specialistTaskMatch = url.pathname.match(/^\/api\/service-tasks\/([^/]+)$/);
-        if (request.method === "GET" && specialistTaskMatch) {
-          requireOperator(request, options.operatorToken);
-          const task = specialistTasks.get(specialistTaskMatch[1]!);
-          return task ? json(task) : json({ error: "Specialist task not found" }, 404);
-        }
-
-        if (request.method === "GET" && url.pathname === "/api/notifications/bark/targets") {
-          requireOperator(request, options.operatorToken);
-          return json(await barkManagement.managementStatus(url.searchParams.get("health") === "1"));
-        }
-
-        if (request.method === "POST" && url.pathname === "/api/notifications/bark/targets") {
-          requireOperator(request, options.operatorToken);
-          try {
-            return json(await barkManagement.upsertManagedTarget(
-              await readJson(request) as BarkTargetMutationInput, "create",
-            ), 201);
-          } catch (error) {
-            if (error instanceof BarkTargetMutationError) throw new HttpError(error.status, error.message);
-            throw error;
-          }
-        }
-
-        if (request.method === "GET" && url.pathname === "/api/notifications/bark/audit") {
-          requireOperator(request, options.operatorToken);
-          return json({ events: await barkManagement.listManagementAudit() });
-        }
-
-        const barkTargetTestMatch = url.pathname.match(/^\/api\/notifications\/bark\/targets\/([^/]+)\/test$/);
-        if (request.method === "POST" && barkTargetTestMatch) {
-          requireOperator(request, options.operatorToken);
-          const targetId = decodeURIComponent(barkTargetTestMatch[1]!);
-          const input = await readOptionalJson(request) as { idempotency_key?: string };
-          const idempotencyKey = input.idempotency_key?.trim() || `web-bark-test:${targetId}:${crypto.randomUUID()}`;
-          try {
-            const result = await new ActionJournal(options.dataDir).executeEffectOnce({
-              idempotency_key: idempotencyKey, asset_id: "internal-bark", member_id: "operator",
-              action: "test_notification", request: { target_id: targetId },
-            }, async () => {
-              const receipt = await barkManagement.pushTo(targetId, {
-                id: `test-${crypto.randomUUID()}`, title: "Totemora 设备测试",
-                body: "这台设备已接入部落通知控制面。AI / 财经领域路由将按设备配置生效。",
-              });
-              return `Bark target ${targetId} accepted test with status ${receipt.status}`;
-            });
-            await barkManagement.recordTestAudit(targetId, true, result.record.evidence ?? "accepted");
-            return json({ target_id: targetId, accepted: true, replayed: result.replayed });
-          } catch (error) {
-            await barkManagement.recordTestAudit(targetId, false, error instanceof Error ? error.message : String(error));
-            throw error;
-          }
-        }
-
-        const barkTargetMatch = url.pathname.match(/^\/api\/notifications\/bark\/targets\/([^/]+)$/);
-        if (request.method === "PUT" && barkTargetMatch) {
-          requireOperator(request, options.operatorToken);
-          const input = await readJson(request) as Omit<BarkTargetMutationInput, "id">;
-          try {
-            return json(await barkManagement.upsertManagedTarget(
-              { ...input, id: decodeURIComponent(barkTargetMatch[1]!) }, "update",
-            ));
-          } catch (error) {
-            if (error instanceof BarkTargetMutationError) throw new HttpError(error.status, error.message);
-            throw error;
-          }
-        }
-
-        if (request.method === "GET" && url.pathname === "/api/actions") {
-          requireOperator(request, options.operatorToken);
-          return json({ actions: (await new ActionJournal(options.dataDir).list()).slice(-100).reverse() });
         }
 
         if (request.method === "GET" && url.pathname === "/api/assets") {

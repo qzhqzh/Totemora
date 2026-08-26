@@ -11,6 +11,7 @@ import { IntelligenceDispatcher } from "./intelligence-dispatcher";
 import { IntelligencePreferenceStore } from "./intelligence-preference-store";
 import { MemberStateStore } from "./member-state-store";
 import { StateDatabase } from "./state-database";
+import { readBoundedResponseText } from "./integrations/bounded-response";
 import { SpecialistTaskRepository } from "./specialist-service";
 import {
   parseTelegramFeedback,
@@ -667,16 +668,12 @@ async function fetchWithLimit(fetchImpl: typeof fetch, url: URL, limit: number):
     headers: { "user-agent": "Totemora-Intelligence/1.0" }, signal: AbortSignal.timeout(20_000), redirect: "error",
   });
   if (!response.ok) throw new Error(`News source failed (${response.status}): ${url.hostname}`);
-  const contentLength = Number(response.headers.get("content-length") ?? 0);
-  if (contentLength > limit) throw new Error(`News source exceeded ${limit} bytes`);
-  const text = await response.text();
-  if (text.length > limit) throw new Error(`News source exceeded ${limit} bytes`);
-  return text;
+  return readBoundedResponseText(response, limit, `News source exceeded ${limit} bytes`);
 }
 
 async function fetchJson(fetchImpl: typeof fetch, url: URL, headers: Record<string, string>, label: string): Promise<unknown> {
   const response = await fetchImpl(url, { headers: { "user-agent": "Totemora-Intelligence/1.0", ...headers }, signal: AbortSignal.timeout(20_000), redirect: "error" });
-  const text = (await response.text()).slice(0, 3_000_000);
+  const text = await readBoundedResponseText(response, 3_000_000, `${label} source exceeded 3000000 bytes`);
   if (!response.ok) throw new Error(`${label} source failed (${response.status})`);
   try { return JSON.parse(text); }
   catch { throw new Error(`${label} source returned invalid JSON`); }

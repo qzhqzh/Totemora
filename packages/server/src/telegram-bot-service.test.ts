@@ -101,6 +101,26 @@ test("Telegram success without a receipt becomes uncertain and is not replayed",
   await rm(dataDir, { recursive: true, force: true });
 });
 
+test("Telegram rejects a chunked response above its byte budget", async () => {
+  const dataDir = await telegramDataDir("totemora-telegram-response-limit-");
+  let cancelled = false;
+  const service = new TelegramBotService(dataDir, (async () => new Response(
+    new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new Uint8Array(1_000));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    }),
+  )) as unknown as typeof fetch);
+
+  await expect(service.sendText("-100123", "test"))
+    .rejects.toThrow("Telegram response exceeded 4000 bytes");
+  expect(cancelled).toBe(true);
+  await rm(dataDir, { recursive: true, force: true });
+});
+
 async function telegramDataDir(prefix: string): Promise<string> {
   const dataDir = await mkdtemp(join(tmpdir(), prefix));
   const secrets = join(dataDir, "secrets");

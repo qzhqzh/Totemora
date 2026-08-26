@@ -1,4 +1,5 @@
 import { StateDatabase } from "./state-database";
+import { readBoundedResponseText } from "./integrations/bounded-response";
 import type { EvidenceTier } from "./intelligence-candidate-store";
 import type { FinanceMarket, FinancePreferences } from "./finance-preference-store";
 
@@ -541,27 +542,7 @@ function isPrivateHostname(hostname: string): boolean {
 }
 
 async function readResponseWithLimit(response: Response, limit: number, hostname: string): Promise<string> {
-  if (!response.body) return "";
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  while (true) {
-    const chunk = await reader.read();
-    if (chunk.done) break;
-    total += chunk.value.byteLength;
-    if (total > limit) {
-      await reader.cancel();
-      throw new Error(`${hostname} source exceeded ${limit} bytes`);
-    }
-    chunks.push(chunk.value);
-  }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder().decode(bytes);
+  return readBoundedResponseText(response, limit, `${hostname} source exceeded ${limit} bytes`);
 }
 
 function availabilityMessage(source: FinanceSourceDefinition): string {
