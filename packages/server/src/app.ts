@@ -29,7 +29,6 @@ import { MemberEvolutionService } from "./member-evolution-service";
 import { IntelligenceService } from "./intelligence-service";
 import { IntelligencePreferenceStore } from "./intelligence-preference-store";
 import { FinanceIntelligenceService } from "./finance-intelligence-service";
-import type { FinanceBriefingType } from "./finance-market-snapshot-service";
 import { FinancePreferenceStore } from "./finance-preference-store";
 import { ActionJournal } from "./action-journal";
 import { SPECIALIST_SERVICES, SpecialistTaskRepository } from "./specialist-service";
@@ -37,7 +36,6 @@ import { MemberProfileStore } from "./member-profile-store";
 import {
   ContentStudioService,
   type ContentIllustrationGenerator,
-  type CreateContentInput,
 } from "./content-studio-service";
 import { CpaIllustrationService } from "./cpa-illustration-service";
 import { BarkNotificationService } from "./bark-notification-service";
@@ -63,6 +61,12 @@ import { handleSkillRegistryRoutes } from "./http/skill-registry-routes";
 import { handleWorkplaceRoutes } from "./http/workplace-routes";
 import { HttpError, json } from "./http/http-boundary";
 import type { RunRouteInput } from "./http/run-input-schema";
+import { ContentTaskRunner } from "./application/content-task-runner";
+import { DevelopmentTaskRunner } from "./application/development-task-runner";
+import {
+  IntelligenceTaskConflictError,
+  IntelligenceTaskRunner,
+} from "./application/intelligence-task-runner";
 
 export interface PlaygroundOptions {
   configDir: string;
@@ -90,65 +94,12 @@ interface RunJob {
   failure?: FailureAttribution;
 }
 
-interface DevelopmentTask {
-  id: string;
-  kind: "git_flow";
-  status: "queued" | "running" | "completed" | "failed";
-  created_at: string;
-  updated_at: string;
-  workplace_id: string;
-  goal: string;
-  mode: "commit" | "pull_request" | "merge";
-  issue_mode: "auto" | "none";
-  proposal_id?: string;
-  result?: Awaited<ReturnType<DevelopmentCommitService["prepare"]>>;
-  error?: string;
-  retryable?: boolean;
-}
-
-interface DevelopmentTaskInput {
-  workplace_id: string;
-  goal: string;
-  mode?: "commit" | "pull_request" | "merge";
-  issue_mode?: "auto" | "none";
-  trial_commission_id?: string;
-}
-
-interface IntelligenceTask {
-  id: string;
-  kind: "intelligence_brief" | "finance_brief";
-  domain: "ai" | "finance";
-  status: "queued" | "running" | "completed" | "failed";
-  created_at: string;
-  updated_at: string;
-  message_count: number;
-  idempotency_key: string;
-  delivery_mode: "candidate_pool" | "direct_push";
-  briefing_type?: FinanceBriefingType;
-  result?: Awaited<ReturnType<IntelligenceService["run"]>> | Awaited<ReturnType<FinanceIntelligenceService["run"]>>;
-  error?: string;
-  retryable?: boolean;
-  growth_review?: { status: "not_due" | "proposed" | "failed"; proposal_id?: string; error?: string };
-}
-
-interface IntelligenceTaskInput {
-  domain?: "ai" | "finance";
-  message_count?: number;
-  idempotency_key?: string;
-  delivery_mode?: "candidate_pool" | "direct_push";
-  briefing_type?: FinanceBriefingType;
-}
-
 export function createPlaygroundApp(options: PlaygroundOptions) {
   const jobs = new Map<string, RunJob>();
   const controllers = new Map<string, AbortController>();
   const jobInputs = new Map<string, RunRouteInput>();
   const settlement = new SettlementStore(options.dataDir);
   const jobStore = new JobStore<RunJob, RunRouteInput>(options.dataDir);
-  const developmentTasks = new Map<string, DevelopmentTask>();
-  const developmentTaskStore = new JobStore<DevelopmentTask, DevelopmentTaskInput>(options.dataDir, "development-tasks");
-  const intelligenceTasks = new Map<string, IntelligenceTask>();
-  const intelligenceTaskStore = new JobStore<IntelligenceTask, IntelligenceTaskInput>(options.dataDir, "intelligence-tasks");
   const specialistTasks = new SpecialistTaskRepository(options.dataDir);
   const barkManagement = new BarkNotificationService(options.dataDir, options.fetchImpl ?? fetch);
   const actionJournal = new ActionJournal(options.dataDir);
@@ -158,13 +109,6 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
   const skillRegistry = new SkillRegistryService(
     options.projectRoot ?? resolve(import.meta.dir, "../../.."), options.dataDir,
   );
-  const failInterruptedSpecialistTask = (taskId: string, summary: string) => {
-    const task = specialistTasks.get(taskId);
-    if (!task || !["queued", "routing", "running"].includes(task.status)) return;
-    specialistTasks.update(task.id, task.revision, {
-      status: "failed", current_stage: "failed", error: summary, summary,
-    });
-  };
   const runHydration = jobStore.list().then(async (records) => {
     for (const record of records) {
       const job = record.job;
@@ -184,36 +128,6 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
       jobInputs.set(job.id, record.input);
     }
   });
-  const developmentHydration = developmentTaskStore.list().then(async (records) => {
-    for (const record of records) {
-      const task = record.job;
-      if (["queued", "running"].includes(task.status)) {
-        task.status = "failed";
-        task.error = "Gateway restarted while the specialist task was running; start a new preparation task";
-        task.retryable = true;
-        task.updated_at = new Date().toISOString();
-        await developmentTaskStore.save(task, record.input);
-        failInterruptedSpecialistTask(task.id, task.error);
-      }
-      developmentTasks.set(task.id, task);
-    }
-  });
-  const intelligenceHydration = intelligenceTaskStore.list().then(async (records) => {
-    for (const record of records) {
-      const task = record.job;
-      task.domain ??= task.kind === "finance_brief" ? "finance" : "ai";
-      if (["queued", "running"].includes(task.status)) {
-        task.status = "failed";
-        task.error = "Gateway restarted while the intelligence task was running; start a new task with a new idempotency key";
-        task.retryable = true;
-        task.updated_at = new Date().toISOString();
-        await intelligenceTaskStore.save(task, record.input);
-        failInterruptedSpecialistTask(task.id, task.error);
-      }
-      intelligenceTasks.set(task.id, task);
-    }
-  });
-  const hydration = Promise.all([runHydration, developmentHydration, intelligenceHydration]);
   let configPromise: Promise<LocalConfigSet> | undefined;
   let memberServicesPromise: Promise<{
     state: MemberStateStore;
@@ -226,6 +140,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
     skillTrials: SkillTrialRunnerService;
   }> | undefined;
   let bindingsRegistered = false;
+  let contentTaskRunner: ContentTaskRunner;
   const getConfig = async () => {
     configPromise ??= loadLocalConfig({ configDir: options.configDir }).then((config) => {
       validateLocalConfig(config);
@@ -290,11 +205,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
       const content = new ContentStudioService(
         config, providers, state, options.dataDir, illustrationGenerator, getAssetRegistry(),
       );
-      for (const work of content.list(500)) {
-        if (work.status === "failed" && work.error?.startsWith("Gateway restarted while content members were collaborating")) {
-          failInterruptedSpecialistTask(work.id, work.error);
-        }
-      }
+      contentTaskRunner.reconcileInterrupted(content.list(500));
       const skills = new SkillCommissionService(config, providers, options.dataDir);
       return {
         state,
@@ -320,215 +231,31 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
     })();
     return memberServicesPromise;
   };
-  const enqueueDevelopmentTask = async (input: DevelopmentTaskInput): Promise<DevelopmentTask> => {
-    if (!input.workplace_id || !input.goal?.trim()) throw new HttpError(400, "workplace_id and goal are required");
-    const now = new Date().toISOString();
-    const task: DevelopmentTask = {
-      id: crypto.randomUUID(), kind: "git_flow", status: "queued",
-      created_at: now, updated_at: now, workplace_id: input.workplace_id, goal: input.goal.trim(),
-      mode: input.mode ?? "commit", issue_mode: input.issue_mode ?? (input.mode === "commit" || !input.mode ? "none" : "auto"),
-    };
-    developmentTasks.set(task.id, task);
-    await developmentTaskStore.save(task, input);
-    await ensureServiceBindings();
-    let serviceTask = specialistTasks.create({
-      id: task.id, service_id: "git.flow", service_version: 1, operation: task.mode,
-      trigger: "manual", status: "queued", current_stage: "routing",
-      chief_member_id: (await getConfig()).tribe.tribe.chief,
-      idempotency_key: task.id, input,
-    });
-    void (async () => {
-      task.status = "running";
-      task.updated_at = new Date().toISOString();
-      await developmentTaskStore.save(task, input);
-      serviceTask = specialistTasks.update(task.id, serviceTask.revision, {
-        status: "running", current_stage: "inspect", summary: "Chief 开始路由并检查工作地",
-      });
-      try {
-        task.result = await (await getDevelopmentService()).prepare(input.workplace_id, input.goal.trim(), {
-          mode: task.mode, issue_mode: task.issue_mode, trial_commission_id: input.trial_commission_id,
-        });
-        task.proposal_id = task.result.id;
-      } catch (error) {
-        task.error = error instanceof Error ? error.message : String(error);
-        task.retryable = true;
-      }
-      const terminalTask: DevelopmentTask = {
-        ...task,
-        status: task.error ? "failed" : "completed",
-        updated_at: new Date().toISOString(),
-      };
-      await developmentTaskStore.save(terminalTask, input);
-      Object.assign(task, terminalTask);
-      specialistTasks.update(task.id, serviceTask.revision, task.error ? {
-        status: "failed", current_stage: "failed", error: task.error,
-        summary: `Git 专业任务失败：${task.error}`,
-      } : {
-        status: "waiting_approval", current_stage: "local_gate",
-        result: task.result, result_ref: task.proposal_id,
-        member_id: task.result?.specialist_member_id,
-        summary: "专员已完成准备与自检，等待对应 Git 门禁",
-      });
-    })();
-    return task;
-  };
-  const enqueueIntelligenceTask = async (input: IntelligenceTaskInput): Promise<IntelligenceTask> => {
-    const domain = input.domain ?? "ai";
-    const messageCount = Math.max(1, Math.min(5, input.message_count ?? 1));
-    const deliveryMode = input.delivery_mode ?? "candidate_pool";
-    await intelligenceHydration;
-    if (input.idempotency_key) {
-      const existing = [...intelligenceTasks.values()].find((task) =>
-        task.domain === domain && task.idempotency_key === input.idempotency_key,
-      );
-      if (existing) {
-        if (existing.message_count !== messageCount || existing.delivery_mode !== deliveryMode
-          || existing.briefing_type !== input.briefing_type) {
-          throw new HttpError(409, `Idempotency key ${input.idempotency_key} was reused with different intelligence task input`);
-        }
-        return existing;
-      }
-    }
-    const finance = domain === "finance";
-    const serviceId = finance ? "finance.watch" : "intelligence.watch";
-    const memberId = finance ? "qwen_finance" : "qwen_intelligence";
-    const memberName = finance ? "观潮" : "听风";
-    const now = new Date().toISOString();
-    const task: IntelligenceTask = {
-      id: crypto.randomUUID(), kind: finance ? "finance_brief" : "intelligence_brief", domain, status: "queued",
-      created_at: now, updated_at: now,
-      message_count: messageCount,
-      idempotency_key: input.idempotency_key ?? `${domain}-intelligence-${crypto.randomUUID()}`,
-      delivery_mode: deliveryMode,
-      ...(input.briefing_type ? { briefing_type: input.briefing_type } : {}),
-    };
-    intelligenceTasks.set(task.id, task);
-    await intelligenceTaskStore.save(task, input);
-    await ensureServiceBindings();
-    let serviceTask = specialistTasks.create({
-      id: task.id, service_id: serviceId, service_version: 1, operation: "scan",
-      trigger: "manual", status: "queued", current_stage: "collect",
-      member_id: memberId, chief_member_id: (await getConfig()).tribe.tribe.chief,
-      idempotency_key: task.idempotency_key, input,
-    });
-    void (async () => {
-      task.status = "running"; task.updated_at = new Date().toISOString();
-      await intelligenceTaskStore.save(task, input);
-      serviceTask = specialistTasks.update(task.id, serviceTask.revision, {
-        status: "running", current_stage: "collect", summary: `${memberName}开始采集白名单来源`,
-        member_id: memberId,
-      });
-      try {
-        const services = await getMemberServices();
-        task.result = finance ? await services.finance.run({
-          message_count: task.message_count, idempotency_key: task.idempotency_key, reason: "manual",
-          defer_push: task.delivery_mode === "candidate_pool", briefing_type: task.briefing_type,
-        }) : await services.intelligence.run({
-          message_count: task.message_count, idempotency_key: task.idempotency_key, reason: "manual",
-          defer_push: task.delivery_mode === "candidate_pool",
-        });
-      } catch (error) {
-        task.error = error instanceof Error ? error.message : String(error);
-        task.retryable = true;
-      }
-      const terminal: IntelligenceTask = {
-        ...task, status: task.error ? "failed" : "completed", updated_at: new Date().toISOString(),
-      };
-      await intelligenceTaskStore.save(terminal, input);
-      Object.assign(task, terminal);
-      specialistTasks.update(task.id, serviceTask.revision, task.error ? {
-        status: "failed", current_stage: "failed", error: task.error,
-        summary: `${memberName}扫描失败：${task.error}`,
-      } : {
-        status: "completed", current_stage: "candidate_gate", result: task.result,
-        result_ref: task.result?.id, summary: "扫描完成；候选已进入价值门禁，扫描本身不产生成长信用",
-      });
-      if (task.result) {
-        void (async () => {
-          try {
-            const proposal = await (await getMemberServices()).evolution.proposeIfEligible(task.result!.member_id);
-            task.growth_review = proposal ? { status: "proposed", proposal_id: proposal.id } : { status: "not_due" };
-          } catch (error) {
-            task.growth_review = { status: "failed", error: error instanceof Error ? error.message : String(error) };
-          }
-          task.updated_at = new Date().toISOString();
-          await intelligenceTaskStore.save(task, input);
-        })();
-      }
-    })();
-    return task;
-  };
-  const enqueueContentWork = async (
-    input: CreateContentInput,
-    trigger: "manual" | "scheduled" | "web" = "web",
-  ) => {
-    await ensureServiceBindings();
-    const services = await getMemberServices();
-    const work = await services.content.createQueued(input);
-    let serviceTask = specialistTasks.create({
-      id: work.id, service_id: "content.studio", service_version: 1,
-      operation: work.format, trigger, status: "queued", current_stage: "routing",
-      member_id: work.assignments.find((item) => item.role === "writer")?.member_id,
-      chief_member_id: work.chief_member_id, idempotency_key: work.id, input,
-    });
-    void (async () => {
-      serviceTask = specialistTasks.update(serviceTask.id, serviceTask.revision, {
-        status: "running", current_stage: "research", actor_id: work.chief_member_id,
-        summary: `Chief 已委任 ${work.assignments.length} 名成员协作创作`,
-      });
-      const result = await services.content.execute(work.id);
-      specialistTasks.update(serviceTask.id, serviceTask.revision, result.status === "ready" ? {
-        status: "completed", current_stage: "copy_ready", result, result_ref: result.id,
-        member_id: result.assignments.find((item) => item.role === "writer")?.member_id,
-        actor_id: result.review?.outcome === "accepted"
-          ? result.assignments.find((item) => item.role === "researcher_reviewer")?.member_id
-          : undefined,
-        summary: result.illustration?.status === "ready"
-          ? "研究、写作、独立审校与配图均已完成，内容进入图文可用状态"
-          : `文字协作已完成；配图${result.illustration?.status === "failed" ? "未通过门禁，可人工重试" : "未启用"}`,
-      } : {
-        status: "failed", current_stage: "review", result, result_ref: result.id,
-        error: result.error, summary: `内容协作失败：${result.error ?? "unknown error"}`,
-      });
-    })().catch((error) => {
-      const message = error instanceof Error ? error.message : String(error);
-      const current = specialistTasks.get(work.id);
-      if (!current || ["completed", "failed", "cancelled"].includes(current.status)) return;
-      try {
-        specialistTasks.update(current.id, current.revision, {
-          status: "failed", current_stage: "failed", error: message,
-          summary: `内容后台任务异常收敛：${message.slice(0, 300)}`,
-        });
-      } catch (updateError) {
-        console.error(`Unable to persist failed content specialist task ${work.id}: ${updateError instanceof Error ? updateError.message : String(updateError)}`);
-      }
-    });
-    return work;
-  };
-  const syncDevelopmentSpecialistTask = (proposal: {
-    id: string; status: string; specialist_member_id: string; error?: string;
-  }) => {
-    const task = specialistTasks.findByResultRef("git.flow", proposal.id);
-    if (!task) return;
-    const stateByProposal: Record<string, { status: "running" | "waiting_approval" | "waiting_external" | "completed" | "failed"; stage: string }> = {
-      awaiting_approval: { status: "waiting_approval", stage: "local_gate" },
-      executing: { status: "running", stage: "local_gate" },
-      awaiting_remote_approval: { status: "waiting_approval", stage: "remote_gate" },
-      publishing: { status: "waiting_external", stage: "remote_gate" },
-      awaiting_merge_approval: { status: "waiting_approval", stage: "merge_gate" },
-      merging: { status: "waiting_external", stage: "merge_gate" },
-      changes_requested: { status: "waiting_approval", stage: "plan" },
-      completed: { status: "completed", stage: "accepted" },
-      failed: { status: "failed", stage: "failed" },
-    };
-    const next = stateByProposal[proposal.status];
-    if (!next) return;
-    specialistTasks.update(task.id, task.revision, {
-      status: next.status, current_stage: next.stage, result: proposal,
-      result_ref: proposal.id, member_id: proposal.specialist_member_id,
-      error: proposal.error, summary: `Git Flow 进入 ${proposal.status}`,
-    });
-  };
+  const getChiefMemberId = async () => (await getConfig()).tribe.tribe.chief;
+  const developmentTaskRunner = new DevelopmentTaskRunner({
+    dataDir: options.dataDir,
+    specialistTasks,
+    ensureServiceBindings,
+    getChiefMemberId,
+    getDevelopmentService,
+  });
+  const intelligenceTaskRunner = new IntelligenceTaskRunner({
+    dataDir: options.dataDir,
+    specialistTasks,
+    ensureServiceBindings,
+    getChiefMemberId,
+    getServices: getMemberServices,
+  });
+  contentTaskRunner = new ContentTaskRunner({
+    specialistTasks,
+    ensureServiceBindings,
+    getContentService: async () => (await getMemberServices()).content,
+  });
+  const hydration = Promise.all([
+    runHydration,
+    developmentTaskRunner.ready,
+    intelligenceTaskRunner.ready,
+  ]);
 
   const enqueueRun = async (input: RunRouteInput): Promise<RunJob> => {
     const settlementData = await settlement.get();
@@ -625,54 +352,9 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
 
   return {
     jobs,
-    async runScheduledIntelligence() {
-      await ensureServiceBindings();
-      const services = await getMemberServices();
-      const result = await services.intelligence.runDue();
-      if (result?.scan) {
-        const task = specialistTasks.create({
-          id: crypto.randomUUID(), service_id: "intelligence.watch", service_version: 1,
-          operation: "scan", trigger: "scheduled", status: "completed", current_stage: "candidate_gate",
-          member_id: result.scan.member_id, chief_member_id: (await getConfig()).tribe.tribe.chief,
-          idempotency_key: `scheduled:${result.scan.id}`, input: { reason: "scheduled" },
-          result: result.scan, result_ref: result.scan.id,
-        });
-        void task;
-        void services.evolution.proposeIfEligible(result.scan.member_id).catch(async (error) => {
-          await services.state.remember({
-            member_id: result.scan!.member_id, kind: "system_failure", verified: true, source_id: result.scan!.id,
-            summary: `自动成长评审失败：${(error instanceof Error ? error.message : String(error)).slice(0, 300)}`,
-          });
-        });
-      }
-      return result;
-    },
-    async runScheduledFinance() {
-      await ensureServiceBindings();
-      const services = await getMemberServices();
-      const result = await services.finance.runDue();
-      if (result?.scan) {
-        const task = specialistTasks.create({
-          id: crypto.randomUUID(), service_id: "finance.watch", service_version: 1,
-          operation: "scan", trigger: "scheduled", status: "completed", current_stage: "candidate_gate",
-          member_id: result.scan.member_id, chief_member_id: (await getConfig()).tribe.tribe.chief,
-          idempotency_key: `scheduled:${result.scan.id}`, input: { reason: "scheduled", domain: "finance" },
-          result: result.scan, result_ref: result.scan.id,
-        });
-        void task;
-        void services.evolution.proposeIfEligible(result.scan.member_id).catch(async (error) => {
-          await services.state.remember({
-            member_id: result.scan!.member_id, kind: "system_failure", verified: true, source_id: result.scan!.id,
-            summary: `财经成员自动成长评审失败：${(error instanceof Error ? error.message : String(error)).slice(0, 300)}`,
-          });
-        });
-      }
-      return result;
-    },
-    async runScheduledContent() {
-      const input = await (await getMemberServices()).content.dueInput();
-      return input ? enqueueContentWork(input, "scheduled") : undefined;
-    },
+    runScheduledIntelligence: () => intelligenceTaskRunner.runScheduled("ai"),
+    runScheduledFinance: () => intelligenceTaskRunner.runScheduled("finance"),
+    runScheduledContent: () => contentTaskRunner.runScheduled(),
     async fetch(request: Request): Promise<Response> {
       const url = new URL(request.url);
       try {
@@ -713,7 +395,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
 
         const contentResponse = await handleContentRoutes(request, url, {
           getContent: async () => (await getMemberServices()).content,
-          enqueue: (input) => enqueueContentWork(input, "web"),
+          enqueue: (input) => contentTaskRunner.enqueue(input, "web"),
           requireOperator: (candidate) => requireOperator(candidate, options.operatorToken),
         });
         if (contentResponse) return contentResponse;
@@ -725,8 +407,8 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
             x_trends: await hasLocalSecret(options.dataDir, "x-bearer-token", "TOTEMORA_X_BEARER_TOKEN"),
             weibo_hot: await hasLocalSecret(options.dataDir, "weibo-access-token", "TOTEMORA_WEIBO_ACCESS_TOKEN"),
           }),
-          enqueueTask: (input) => enqueueIntelligenceTask(input),
-          getTask: (id) => intelligenceTasks.get(id),
+          enqueueTask: (input) => intelligenceTaskRunner.enqueue(input),
+          getTask: (id) => intelligenceTaskRunner.get(id),
           requireOperator: (candidate) => requireOperator(candidate, options.operatorToken),
         });
         if (intelligenceResponse) return intelligenceResponse;
@@ -734,18 +416,18 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
         const financeResponse = await handleFinanceRoutes(request, url, {
           getFinance: async () => (await getMemberServices()).finance,
           preferences: financePreferences,
-          enqueueTask: (input) => enqueueIntelligenceTask(input),
-          getTask: (id) => intelligenceTasks.get(id),
+          enqueueTask: (input) => intelligenceTaskRunner.enqueue(input),
+          getTask: (id) => intelligenceTaskRunner.get(id),
           requireOperator: (candidate) => requireOperator(candidate, options.operatorToken),
         });
         if (financeResponse) return financeResponse;
 
         const developmentResponse = await handleDevelopmentRoutes(request, url, {
           getDevelopment: getDevelopmentService,
-          enqueueTask: enqueueDevelopmentTask,
-          listTasks: () => [...developmentTasks.values()],
-          getTask: (id) => developmentTasks.get(id),
-          syncSpecialistTask: syncDevelopmentSpecialistTask,
+          enqueueTask: (input) => developmentTaskRunner.enqueue(input),
+          listTasks: () => developmentTaskRunner.list(),
+          getTask: (id) => developmentTaskRunner.get(id),
+          syncSpecialistTask: (proposal) => developmentTaskRunner.syncSpecialistTask(proposal),
           requireOperator: (candidate) => requireOperator(candidate, options.operatorToken),
         });
         if (developmentResponse) return developmentResponse;
@@ -886,6 +568,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
         return json({ error: "Not found" }, 404);
       } catch (error) {
         const status = error instanceof HttpError ? error.status
+          : error instanceof IntelligenceTaskConflictError ? 409
           : error instanceof SkillCommissionConflictError || error instanceof SkillTrialConflictError ? 409
             : error instanceof SkillTrialInputError ? 400 : undefined;
         if (status) return json({ error: error instanceof Error ? error.message : String(error) }, status);

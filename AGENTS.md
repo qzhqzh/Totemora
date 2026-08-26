@@ -149,7 +149,7 @@ Server 通过 `packages/server/src/web-assets.ts` 显式提供 Web 根资产和�
 
 这是增量路线，不是要求当前任务一次完成：
 
-1. `server/app.ts`：`ability-templates`、`skill-registry`、`skill-commission`、`members`、`content`、`intelligence`、`finance`、`development`、`runs`、`workplaces/settlement` route modules 和公共 HTTP/input boundary 已提取；后续按真实变更继续提取通知与运维入口，composition 留在 App factory。
+1. `server/app.ts`：领域 route modules、通知/运维入口和 Development/Intelligence/Content 后台任务 Runner 已提取；App factory 保留 composition、通用 Run 协调和少量只读兼容入口，后续只在触碰相关职责时继续局部提取。
 2. `web/app.js`：薄 bootstrap 和领域 Feature 基线已完成；后续保持该边界，按真实子领域拆分超过预算的 Feature，路由级懒加载另行评估。
 3. `development-service.ts`：本地 Git/进程边界、GitHub remote client 和 plan/review 契约已提取；下一步分离 prepare/publish/merge 状态阶段。
 4. `tribe-runtime.ts`：prompt builders、response parsers/validators 和 staffing policy 已提取；下一步仅在需要新增职责时拆分 onboarding/generic orchestration 阶段。
