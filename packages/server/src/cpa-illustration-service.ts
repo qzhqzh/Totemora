@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 
-import type { AgentConfig, LocalConfigSet, ModelUsage } from "@totemora/core";
+import type { AgentConfig, LocalConfigSet, ModelUsage, ProviderConfig } from "@totemora/core";
 import { CpaImageProvider, resolveProviderConnection, type ImageReference } from "@totemora/providers";
 
 import type {
@@ -16,15 +16,15 @@ const DEFAULT_IMAGE_MODEL = "gemini-3.1-flash-image";
 const REFERENCE_FILES = ["character.png", "style-user-ip.png"];
 
 export class CpaIllustrationService implements ContentIllustrationGenerator {
-  private readonly imageProvider: CpaImageProvider;
+  private imageProvider?: CpaImageProvider;
+  private readonly provider: ProviderConfig;
   private readonly imageModel: string;
   private readonly referenceDir: string;
 
-  constructor(config: LocalConfigSet, dataDir: string, request: typeof fetch = fetch) {
+  constructor(config: LocalConfigSet, dataDir: string, private readonly request: typeof fetch = fetch) {
     const provider = config.providers.providers.cpa;
     if (!provider) throw new Error("CPA provider is not configured");
-    const connection = resolveProviderConnection("cpa", provider);
-    this.imageProvider = new CpaImageProvider({ id: "cpa", ...connection }, request);
+    this.provider = provider;
     this.imageModel = process.env.TOTEMORA_CPA_IMAGE_MODEL?.trim() || DEFAULT_IMAGE_MODEL;
     this.referenceDir = process.env.TOTEMORA_ILLUSTRATION_REFERENCE_DIR?.trim()
       || join(dataDir, "illustration-references", "user-ip-v1");
@@ -37,22 +37,23 @@ export class CpaIllustrationService implements ContentIllustrationGenerator {
     onProgress?: (stage: "generating" | "reviewing", attempt: number) => void;
   }): Promise<IllustrationGeneration> {
     const references = await this.loadReferences();
+    const imageProvider = this.getImageProvider();
     let lastReview: IllustrationReview | undefined;
     let totalUsage: ModelUsage | undefined;
     for (let attempt = 1; attempt <= 2; attempt += 1) {
       input.onProgress?.("generating", attempt);
       const prompt = buildImagePrompt(input.work, input.brief, lastReview);
-      const image = await this.imageProvider.generate({ model: this.imageModel, prompt, references });
+      const image = await imageProvider.generate({ model: this.imageModel, prompt, references });
       totalUsage = sumUsage(totalUsage, image.usage);
       input.onProgress?.("reviewing", attempt);
-      const reviewed = await this.imageProvider.review({
+      const reviewed = await imageProvider.review({
         model: input.member.model,
         image: { data: image.data, mimeType: image.mimeType },
         prompt: buildReviewPrompt(input.work, input.brief),
       });
       totalUsage = sumUsage(totalUsage, reviewed.usage);
       const semanticReview = validateReview(parseJson(reviewed.content));
-      const gated = await this.imageProvider.review({
+      const gated = await imageProvider.review({
         model: input.member.model,
         image: { data: image.data, mimeType: image.mimeType },
         prompt: buildStyleGatePrompt(),
@@ -69,6 +70,13 @@ export class CpaIllustrationService implements ContentIllustrationGenerator {
       }
     }
     throw new Error(`绘影在两次尝试后仍未通过视觉验收：${lastReview?.issues.join("；") || "无有效审核结果"}`);
+  }
+
+  private getImageProvider(): CpaImageProvider {
+    return this.imageProvider ??= new CpaImageProvider({
+      id: "cpa",
+      ...resolveProviderConnection("cpa", this.provider),
+    }, this.request);
   }
 
   private async loadReferences(): Promise<Array<ImageReference & { name: string }>> {

@@ -20,7 +20,7 @@
 - Ability Template、Skill Registry、Skill Commission、Member、Content、Intelligence、Finance、Development、Run/Job/Intake、Workplace/Settlement、通知与运维路由已从 `server/app.ts` 提取；Development、Intelligence/Finance 和 Content 的后台恢复、排队与专业任务同步由独立 Application Runner 持有。
 - SQLite migration 已按版本拆入 `packages/server/src/migrations/` 并由单一注册器顺序执行；版本 1–8 的重复执行和历史数据迁移由测试固定。
 - Core Runtime 已分离 Prompt、输出解析/校验和派工证据策略；Git Flow 服务已分离本地 Git/进程边界、GitHub remote client 与模型输出契约，`gh` 返回值在 Adapter 边界完成运行时校验；Development、Intelligence/Finance 的任务与门禁、偏好和 Telegram Update 同样在 HTTP 边界校验。
-- Provider Registry 已改为按需解析单个 Provider，缺失的可选 Provider 配置不会阻断其他健康模型；当前部署边界由版本化 Archify 图和 canonical 别名共同维护。
+- Provider Registry 已改为按需解析单个 Provider，CPA 插图连接也延迟到真实配图请求；缺失的可选 Provider 配置不会阻断其他健康模型或无配图任务。当前部署边界由版本化 Archify 图和 canonical 别名共同维护。
 - 仍需治理的首要热点是 `server/app.ts`、`development-service.ts` 以及各 600 行以上领域服务；采取按变更触发的局部提取，不做一次性目录搬迁。
 
 ## E1：对话式 Skill Commission
