@@ -62,6 +62,9 @@ test("benchmark compares strong, cheap, and tribe strategies on the same task", 
     strongMemberId: "deepseek_reasoner",
     cheapMemberId: "qwen_worker",
     chiefMemberId: "deepseek_reasoner",
+    maxContextBytes: 32_000,
+    maxMembers: 1,
+    maxTotalTokens: 50_000,
   });
   expect(output.result.results).toHaveLength(3);
   expect(output.result.results.every((item) => item.structural_passed)).toBe(true);
@@ -70,6 +73,11 @@ test("benchmark compares strong, cheap, and tribe strategies on the same task", 
   expect(output.result.summary.tribe.structural_passed).toBe(1);
   expect(output.result.summary.tribe.strong_model_tokens).toBeGreaterThan(0);
   expect(output.result.budget.max_output_tokens_per_call).toBe(2_000);
+  expect(output.result.budget).toMatchObject({
+    max_context_bytes: 32_000,
+    max_members_per_tribe_case: 1,
+    max_total_tokens_per_tribe_case: 50_000,
+  });
   expect(provider.maxTokens.every((value) => value === 2_000)).toBe(true);
   const initialPrompts = [
     ...provider.prompts.filter((prompt) => prompt.includes("可重复评测")),
@@ -80,6 +88,14 @@ test("benchmark compares strong, cheap, and tribe strategies on the same task", 
   )).toBe(true);
   expect(JSON.parse(await readFile(output.jsonPath, "utf8")).suite.id).toBe("test-suite");
   expect(await readFile(output.markdownPath, "utf8")).toContain("| tribe | 1/1 |");
+  expect(await readFile(output.markdownPath, "utf8")).toContain("Max total tokens per tribe case: 50000");
+  const tribeRunId = output.result.results.find((item) => item.strategy === "tribe")?.run_id;
+  expect(tribeRunId).toBeTruthy();
+  expect(JSON.parse(await readFile(join(dataDir, "runs", `${tribeRunId}.json`), "utf8")).task.budget).toMatchObject({
+    max_context_bytes: 32_000,
+    max_members: 1,
+    max_total_tokens: 50_000,
+  });
   await rm(root, { recursive: true, force: true });
 });
 

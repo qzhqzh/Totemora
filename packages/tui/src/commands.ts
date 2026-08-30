@@ -129,6 +129,8 @@ export async function runCli(
         maxFiles: parsed.maxFiles,
         maxContextBytes: parsed.maxContextBytes,
         maxOutputTokens: parsed.maxOutputTokens,
+        maxMembers: parsed.maxMembers,
+        maxTotalTokens: parsed.maxTotalTokens,
         pricingSnapshotPath: parsed.pricingSnapshot,
       });
       streams.stdout.write(`Benchmark: ${benchmark.result.id}\n`);
@@ -370,6 +372,7 @@ function writeHelp(stdout: CliStreams["stdout"]): void {
       '  totemora development prepare --workplace <id> --goal "<text>" [--gateway-url <url>]',
       "  totemora development approve <proposal_id> [--gateway-url <url>]",
       "  totemora benchmark run --suite <path> --strong-member <id> --cheap-member <id> [--chief <id>] [--pricing-snapshot <path>] [--data-dir <path>]",
+      "    Optional budgets: --max-files <n> --max-context-bytes <n> --max-output-tokens <n> --max-members <n> --max-total-tokens <n>",
       "  totemora run onboarding-exam --offline [--chief <member_id>] [--config-dir <path>] [--data-dir <path>]",
       '  totemora run "<goal>" [--workspace <path> | --workplace <id> | --mission <id>] [--gateway-url <url>] [--data-dir <path>]',
       '  totemora run "<goal>" --offline [--workspace <path>] [--accept <criterion>] [--chief <member_id>] [--config-dir <path>] [--data-dir <path>]',

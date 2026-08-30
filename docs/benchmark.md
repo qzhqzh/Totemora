@@ -48,7 +48,36 @@ bun run totemora benchmark run \
 bun run benchmark:e5
 ```
 
-该脚本统一使用 `1600` Token 输出上限，仍会为三种策略发起多次真实模型调用。运行会把 `examples/` 中对应的固定样本发送给配置的外部 Provider 并产生费用，因此必须由 Operator 明确确认数据外发范围、可用 Provider 和预算后执行。仓库只提交可复现的 suite 与 fixture，不提交凭据，也不把未经授权的本地运行结果伪装成产品结论。
+该脚本为每个 case 使用 `32,000` bytes Workspace 上限和 `1,600` Token 单次输出上限，并把每个部落 case 限制为最多 2 名成员、`40,000` 总 Token。后两个硬门禁只约束 `tribe` 策略；两种单模型策略各固定一次调用，仍受相同的 Workspace 与单次输出上限约束。所有门禁都会固化到结果文件。
+
+### E5 执行门禁
+
+以下条件必须全部满足，才运行真实 E5：
+
+1. Operator 明确批准把五个 `examples/` 固定样本发送给本次选定的 Provider，并确认至少 36 次真实模型调用及可能的部落修复/复核调用。
+2. `providers doctor` 确认 strong、cheap、chief 实际使用的 Provider 可用；Doctor 本身也会产生少量真实调用。
+3. 准备带日期、来源且逐项覆盖实际 `provider + model` 的价格快照，先人工核对本次美元预算；正式结论必须通过 `--pricing-snapshot /absolute/path/pricing.json` 运行，不能把 `unconfigured` 或 `partial` 当成零成本。
+4. 保持脚本中的 `32,000 / 1,600 / 2 / 40,000` 四项硬上限；任何上调都需要重新确认数据量和预算。
+5. 使用独立数据目录或先记录当前 benchmark 目录状态；执行中若出现 Provider 异常、usage 缺失或价格缺口，停止追加运行并先复核已有结果。
+
+完成授权后，使用与脚本相同的参数并显式加入价格快照：
+
+```bash
+bun run totemora benchmark run \
+  --suite benchmarks/cross-domain-proof-v1.json \
+  --strong-member deepseek_reasoner \
+  --cheap-member qwen_worker \
+  --chief deepseek_reasoner \
+  --max-context-bytes 32000 \
+  --max-output-tokens 1600 \
+  --max-members 2 \
+  --max-total-tokens 40000 \
+  --pricing-snapshot /absolute/path/verified-model-pricing.json \
+  --config-dir configs/example \
+  --data-dir .totemora
+```
+
+运行会把 `examples/` 中对应的固定样本发送给配置的外部 Provider 并产生费用。仓库只提交可复现的 suite 与 fixture，不提交凭据，也不把未经授权或价格不完整的本地运行结果伪装成产品结论。
 
 结果写入 `.totemora/benchmarks/` 的 JSON 与 Markdown 文件，并自动出现在 Web“部落证据台”的“部落收益实验”中。汇总包含结构通过率、总 Token、强模型火种 Token、时延和失败数。火种按 `provider + model` 归类，而不是按成员名字；同一火种塑造出的不同成员会计入同一类消耗。
 
