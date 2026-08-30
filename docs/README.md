@@ -55,7 +55,7 @@ Totemora 是一个预算约束下的异构智能部落，不是通用聊天产�
 
 - [Skill governance](skill-governance.md)
 - [Finance intelligence](finance-intelligence.md)
-- [Internal Bark](internal-bark.md)
+- [Notification transports: Bark and ntfy](internal-bark.md)
 - [Telegram bot](telegram-bot.md)
 - [Unified notification platform](notification-platform.md)
 - [AI HOT source](aihot-source.md)

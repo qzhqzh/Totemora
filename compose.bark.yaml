@@ -1,3 +1,7 @@
+name: totemora
+
+# Legacy filename kept for operator compatibility. This is the canonical
+# Totemora notification-transport Compose for both Bark and ntfy.
 services:
   bark:
     image: ghcr.io/finb/bark-server:v2.3.5
@@ -10,6 +14,31 @@ services:
     environment:
       BARK_SERVER_BASIC_AUTH_USER: "${BARK_SERVER_BASIC_AUTH_USER:-}"
       BARK_SERVER_BASIC_AUTH_PASSWORD: "${BARK_SERVER_BASIC_AUTH_PASSWORD:-}"
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  ntfy:
+    image: binwiederhier/ntfy:v2.26.3
+    container_name: totemora-ntfy
+    restart: unless-stopped
+    command: serve
+    ports:
+      - "${TOTEMORA_NTFY_BIND:-127.0.0.1}:${TOTEMORA_NTFY_PORT:-40011}:80"
+    volumes:
+      - ./.totemora/ntfy-data:/var/lib/ntfy
+    environment:
+      NTFY_BASE_URL: "${TOTEMORA_NTFY_BASE_URL:-https://ntfy.qzhqzh.com}"
+      NTFY_CACHE_FILE: /var/lib/ntfy/cache.db
+      NTFY_CACHE_DURATION: "${TOTEMORA_NTFY_CACHE_DURATION:-24h}"
+      NTFY_AUTH_FILE: /var/lib/ntfy/auth.db
+      NTFY_AUTH_DEFAULT_ACCESS: deny-all
+      NTFY_ENABLE_LOGIN: "true"
+      NTFY_UPSTREAM_BASE_URL: https://ntfy.sh
+      NTFY_BEHIND_PROXY: "${TOTEMORA_NTFY_BEHIND_PROXY:-true}"
+    security_opt:
+      - no-new-privileges:true
     logging:
       options:
         max-size: "10m"
