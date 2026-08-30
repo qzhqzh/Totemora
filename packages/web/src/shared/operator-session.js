@@ -3,6 +3,7 @@ import { $ } from "./dom.js";
 
 let authenticated = false;
 let revision = 0;
+const OPERATOR_TOKEN_KEY = "totemora_operator_token";
 
 export const operatorSession = {
   get authenticated() {
@@ -14,7 +15,9 @@ export const operatorSession = {
 };
 
 export function initializeOperatorSession() {
-  $("operator-token").value = sessionStorage.getItem("totemora_operator_token") || "";
+  const persistentToken = localStorage.getItem(OPERATOR_TOKEN_KEY) || "";
+  $("operator-token").value = sessionStorage.getItem(OPERATOR_TOKEN_KEY) || persistentToken;
+  $("operator-remember").checked = Boolean(persistentToken);
   $("operator-login-open").addEventListener("click", openOperatorDialog);
   $("operator-dialog-close").addEventListener("click", () => $("operator-dialog").close());
   $("operator-form").addEventListener("submit", (event) => {
@@ -27,9 +30,26 @@ export function initializeOperatorSession() {
     void refreshProtectedViews();
   });
   $("operator-token").addEventListener("input", () => {
-    sessionStorage.removeItem("totemora_operator_token");
+    clearStoredOperatorToken();
     if (authenticated) invalidateOperatorSession("Token 已更改，验证后才会重新解锁。", { clearInput: false });
     else setOperatorAuthState("anonymous", "验证新 Token 后才会保存。");
+  });
+  $("operator-remember").addEventListener("change", () => {
+    if (authenticated) {
+      storeOperatorToken($("operator-token").value.trim());
+      setOperatorAuthState("authenticated");
+    } else {
+      setOperatorAuthState("anonymous");
+    }
+  });
+  window.addEventListener("storage", (event) => {
+    if (event.key !== OPERATOR_TOKEN_KEY || !authenticated) return;
+    if (event.newValue === $("operator-token").value.trim()) return;
+    const message = "Operator Token 已在另一个标签页中变更或退出。";
+    sessionStorage.removeItem(OPERATOR_TOKEN_KEY);
+    invalidateOperatorSession(message, { clearStorage: false });
+    setOperatorAuthState("anonymous", message);
+    void refreshProtectedViews();
   });
   if ($("operator-token").value.trim()) void validateOperatorSession();
 }
@@ -101,9 +121,9 @@ export function assertOperatorSession(protectedResponse) {
   }
 }
 
-export function invalidateOperatorSession(message, { clearInput = true } = {}) {
+export function invalidateOperatorSession(message, { clearInput = true, clearStorage = true } = {}) {
   revision += 1;
-  sessionStorage.removeItem("totemora_operator_token");
+  if (clearStorage) clearStoredOperatorToken();
   authenticated = false;
   if (clearInput) $("operator-token").value = "";
   for (const feature of Object.values(features)) feature.lockProtected?.();
@@ -120,7 +140,7 @@ async function validateOperatorSession({ closeOnSuccess = false } = {}) {
     if (!candidateToken) throw new Error("请输入操作员 Token");
     await api("/api/operator/session", { headers: { authorization: `Bearer ${candidateToken}` } });
     if ($("operator-token").value.trim() !== candidateToken) throw new Error("Token 已更改，请重新验证");
-    sessionStorage.setItem("totemora_operator_token", candidateToken);
+    storeOperatorToken(candidateToken);
     revision += 1;
     setOperatorAuthState("authenticated");
     await refreshProtectedViews();
@@ -155,6 +175,25 @@ function setOperatorAuthState(state, message) {
   $("operator-logout").classList.toggle("hidden", !authenticated);
   $("operator-login-status").className = `operator-login-status${state === "authenticated" ? " success" : state === "invalid" ? " error" : ""}`;
   $("operator-login-status").textContent = message ?? (authenticated
-    ? "Token 已通过服务器验证，仅保存在当前标签页。"
-    : "Token 仅保存在当前浏览器标签页。");
+    ? $("operator-remember").checked
+      ? "Token 已通过服务器验证，并保存在此浏览器设备。"
+      : "Token 已通过服务器验证，仅保存在当前标签页。"
+    : $("operator-remember").checked
+      ? "验证后 Token 将保存在此浏览器设备；共享设备不要使用。"
+      : "Token 仅保存在当前浏览器标签页。");
+}
+
+function storeOperatorToken(token) {
+  if ($("operator-remember").checked) {
+    sessionStorage.removeItem(OPERATOR_TOKEN_KEY);
+    localStorage.setItem(OPERATOR_TOKEN_KEY, token);
+  } else {
+    localStorage.removeItem(OPERATOR_TOKEN_KEY);
+    sessionStorage.setItem(OPERATOR_TOKEN_KEY, token);
+  }
+}
+
+function clearStoredOperatorToken() {
+  sessionStorage.removeItem(OPERATOR_TOKEN_KEY);
+  localStorage.removeItem(OPERATOR_TOKEN_KEY);
 }

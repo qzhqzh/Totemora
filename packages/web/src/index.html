@@ -28,6 +28,7 @@
         <p>输入服务器生成的 Operator Token，解锁 Skill 文件预览、试炼与其他受保护操作。</p>
         <details class="operator-token-help"><summary>在哪里查看 Token？</summary><p>登录 Totemora 服务器，在项目目录运行 <code>cat .totemora/operator-token</code>。不要把输出发到聊天、截图或公开日志。</p></details>
         <label>Operator Token<input id="operator-token" type="password" autocomplete="off" spellcheck="false" required></label>
+        <label class="inline-check operator-remember"><input id="operator-remember" type="checkbox"><span>记住此设备<small>显式启用后保存在当前浏览器；共享设备不要勾选。</small></span></label>
         <div id="operator-login-status" class="operator-login-status" role="status" aria-live="polite">Token 仅保存在当前浏览器标签页。</div>
         <div class="operator-dialog-actions"><button id="operator-logout" type="button" class="secondary hidden">退出登录</button><button id="operator-login-submit" type="submit">验证并登录</button></div>
       </form>

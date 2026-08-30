@@ -25,3 +25,28 @@ test("app renders, opens the operator gate, and navigates to Skills", async ({ p
 
   expect(runtimeErrors).toEqual([]);
 });
+
+test("operator can explicitly remember this device and revoke the stored token", async ({ page, context }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: /操作员登录/ }).click();
+  await page.locator("#operator-token").fill("totemora-e2e-operator-token");
+  await page.getByRole("checkbox", { name: /记住此设备/ }).check();
+  await page.getByRole("button", { name: "验证并登录" }).click();
+  await expect(page.locator("#operator-auth-state")).toHaveText("已认证");
+  await expect.poll(() => page.evaluate(() => ({
+    persistent: Boolean(localStorage.getItem("totemora_operator_token")),
+    perTab: Boolean(sessionStorage.getItem("totemora_operator_token")),
+  }))).toEqual({ persistent: true, perTab: false });
+
+  const reopened = await context.newPage();
+  await reopened.goto("/");
+  await expect(reopened.locator("#operator-auth-state")).toHaveText("已认证");
+  await reopened.getByRole("button", { name: /操作员账户/ }).click();
+  await expect(reopened.getByRole("checkbox", { name: /记住此设备/ })).toBeChecked();
+  await reopened.getByRole("button", { name: "退出登录" }).click();
+  await expect.poll(() => reopened.evaluate(() => ({
+    persistent: Boolean(localStorage.getItem("totemora_operator_token")),
+    perTab: Boolean(sessionStorage.getItem("totemora_operator_token")),
+  }))).toEqual({ persistent: false, perTab: false });
+  await expect(page.locator("#operator-auth-state")).toHaveText("未登录");
+});

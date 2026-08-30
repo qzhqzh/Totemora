@@ -30,6 +30,8 @@ header { padding:44px 24px 28px; display:flex; justify-content:space-between; al
 .operator-token-help summary { color:var(--ink); cursor:pointer; }
 .operator-token-help p { margin-top:8px; font-size:11px; }
 .operator-token-help code { color:var(--amber); overflow-wrap:anywhere; }
+.operator-remember { margin:0; align-items:start; }
+.operator-remember small { display:block; margin-top:2px; color:var(--muted); letter-spacing:0; }
 .operator-login-status { min-height:24px; font-size:11px; }
 .operator-login-status.success { color:var(--green); }
 .operator-login-status.error { color:#e87968; }

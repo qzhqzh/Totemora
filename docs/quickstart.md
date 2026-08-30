@@ -20,7 +20,7 @@ bun run dev:web
 浏览器即可看到变化。非监听式启动使用 `bun run start:web`。完整边界见
 [`always-on-gateway.md`](always-on-gateway.md)。
 
-首次启动会生成 `.totemora/operator-token`（权限 `0600`）。登记工作地、发起模型任务、取消、重试及开发门禁都需要点击 Web 右上角“操作员登录”，粘贴 Token 并通过服务器验证；纯状态和成员浏览保持只读。Token 只保存在当前浏览器标签页的 `sessionStorage`，关闭标签页后需要重新登录。也可以通过 `TOTEMORA_OPERATOR_TOKEN` 显式提供。
+首次启动会生成 `.totemora/operator-token`（权限 `0600`）。登记工作地、发起模型任务、取消、重试及开发门禁都需要点击 Web 右上角“操作员登录”，粘贴 Token 并通过服务器验证；纯状态和成员浏览保持只读。默认只保存在当前标签页的 `sessionStorage`，关闭标签页后需要重新登录；只有显式勾选“记住此设备”时才保存到该浏览器的 `localStorage`，退出登录或验证失败会同时清除两处记录。共享设备不要启用持久保存。也可以通过 `TOTEMORA_OPERATOR_TOKEN` 显式提供。
 
 在运行 Totemora 的服务器上查看当前文件 Token：
 
