@@ -9,7 +9,7 @@
 - Workplace、Mission、Run、专业任务、候选、反馈、成员经历和治理状态进入 SQLite WAL 内核。
 - 通用 Run 提供预算派工、结构化 Trace、取消、恢复、失败归因和独立验收骨架。
 - Git Flow、听风、观潮和内容工坊已成为强类型专业服务；Bark、Telegram、Git 状态机和 CPA 生图作为受治理资产留下动作证据。
-- Web 已提供任务大厅、部落证据台、成员营帐、火种、资产、AI / 财经双域情报台、内容工坊和审批入口。
+- Web 已提供任务大厅、部落证据台、成员营帐、火种、资产、AI / 财经双域情报台、事项提醒、内容工坊和审批入口。
 - Web 入口已收敛为薄 bootstrap，各界面领域由独立 Feature 持有状态和事件；Prompt/Workflow 模板由 Gateway + SQLite 提供正式定义，不再以浏览器本地状态作为真源。
 - 成员画像区分正式内核、观察画像、经历、成长 Proposal 与升级后效果窗口。
 - `git-flow-release` 已具备活动版本和经验追加 Proposal，但仍是专用过渡实现。
@@ -77,6 +77,8 @@
 
 进展：`finance.watch` 已复用 SpecialistTask、成员绑定、资产断言、候选派发、反馈和经历信用；三个周期值守由同一 `RecurringServiceRunner` 管理，状态持久化并暴露到受保护运维视图，单服务失败和重叠运行互相隔离。Development、Intelligence/Finance 和 Content 的应用任务生命周期已从 App factory 提取；只有新增第五类专业服务时才评估注册式工厂，避免为当前四类服务过度抽象。
 
+通知项目整合已经收口：Bark、Telegram、ntfy 共用 `NotificationEnvelope v1` 和逐目标 Action Journal；旧 Compose 停止且不做影子运行。`reminder.watch`、`deals.watch`、`forwarded.relay` 分别使用 migration 12–14、独立 Repository、Operator API、Web 案卷和可重复快照导入器接管旧能力。scheduled content 只通知 cutover 后新产生的 ready 作品，历史作品被确定性抑制；CISA、USGS 与中新网补入听风/观潮的独立来源健康账本。migration 15 只导入最近 168 小时真实已投递的 HTTPS 证据作为模型调用前去重种子。旧 Codex reset worker 已退役，实际会话监督继续由 `codex.supervisor` 承担。完整台账见 [ADR-0019](adr/0019-notice-consolidation-cutover.md) 与[通知项目整合报告](notice-consolidation.md)。
+
 验证：观潮的来源故障不影响 AI 情报；两域候选和反馈互不串扰；同一候选对多个 Bark 目标按目标幂等；Gateway 重启后任务和来源健康可恢复。
 
 ## E5：稳定性与核心假设复验
@@ -93,7 +95,7 @@
 
 检查点：若部落策略没有稳定收益，优先调整 Task Analyzer、Staffing、Skill 或验收，而不是继续增加成员和界面。
 
-进展：证据台已展示 AI / 财经来源前置门禁、候选/外发/反馈漏斗、成员结果归因和最近收益实验；`core-proof-v1` 提供 10 个固定任务，`cross-domain-proof-v1` 提供跨 5 个 Workspace 的 12 个固定任务，CLI 支持带来源和日期的价格快照。离线稳定性演练已覆盖 Provider 504 归因、周期服务隔离与重启恢复、Gateway 中断任务恢复、Bark 三次失败熔断，并通过真实生产类边界生成结构化回执。
+进展：证据台已展示 AI / 财经来源前置门禁、候选/外发/反馈漏斗、成员结果归因和最近收益实验；`core-proof-v1` 提供 10 个固定任务，`cross-domain-proof-v1` 提供跨 5 个 Workspace 的 12 个固定任务，CLI 支持带来源和日期的价格快照。E5 脚本已固定 Workspace、单次输出、部落成员数和每个部落 case 的总 Token 硬上限，并在结果中保留实际门禁。离线稳定性演练已覆盖 Provider 504 归因、周期服务隔离与重启恢复、Gateway 中断任务恢复、Bark 三次失败熔断，并通过真实生产类边界生成结构化回执。
 
 尚缺的是在明确数据外发与费用授权后执行跨领域真实模型对比，并结合受验证的价格快照复核结果。因此当前节点证明了“评测与故障演练可重复”，没有证明“部落策略已经稳定产生收益”。
 

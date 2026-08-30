@@ -112,6 +112,11 @@ const ACTIVE_SOURCES: ActiveSource[] = [
     summary: "新浪财经公开滚动新闻，用于发现突发与媒体报道；重要事实必须回到 S0/S1 原文复核。", parser: "sina-roll",
     allowed_link_origins: ["https://finance.sina.com.cn"],
   },
+  {
+    id: "chinanews-finance", name: "中新网财经", url: "https://www.chinanews.com.cn/rss/finance.xml",
+    tier: "S4", markets: ["CN", "HK"], category: "market_media", availability: "active", official: false,
+    summary: "中新网财经公开 RSS；只用于发现国内财经报道，关键事实必须回到 S0/S1 原文复核。", parser: "rss",
+  },
 ];
 
 const CATALOG_ONLY: FinanceSourceDefinition[] = [

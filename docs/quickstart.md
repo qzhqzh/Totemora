@@ -20,7 +20,7 @@ bun run dev:web
 浏览器即可看到变化。非监听式启动使用 `bun run start:web`。完整边界见
 [`always-on-gateway.md`](always-on-gateway.md)。
 
-首次启动会生成 `.totemora/operator-token`（权限 `0600`）。登记工作地、发起模型任务、取消、重试及开发门禁都需要点击 Web 右上角“操作员登录”，粘贴 Token 并通过服务器验证；纯状态和成员浏览保持只读。Token 只保存在当前浏览器标签页的 `sessionStorage`，关闭标签页后需要重新登录。也可以通过 `TOTEMORA_OPERATOR_TOKEN` 显式提供。
+首次启动会生成 `.totemora/operator-token`（权限 `0600`）。登记工作地、发起模型任务、取消、重试及开发门禁都需要点击 Web 右上角“操作员登录”，粘贴 Token 并通过服务器验证；纯状态和成员浏览保持只读。默认只保存在当前标签页的 `sessionStorage`，关闭标签页后需要重新登录；只有显式勾选“记住此设备”时才保存到该浏览器的 `localStorage`，退出登录或验证失败会同时清除两处记录。共享设备不要启用持久保存。也可以通过 `TOTEMORA_OPERATOR_TOKEN` 显式提供。
 
 在运行 Totemora 的服务器上查看当前文件 Token：
 
@@ -44,11 +44,19 @@ http://127.0.0.1:4310
 3. 首次在“登记常用工作地”保存服务器上的项目目录；通用 Run 只能读取已登记工作地或其子目录。
 4. 在“任务大厅”描述只读分析目标。默认创建新 Mission，也可以选择已有 Mission 继续此前目标；按需调整 Chief、验收标准和智能预算。
 5. 在 Run 现场观察 planning、executing、reviewing 等阶段，并查看派工理由、报告、验收、Token 和 Trace。
-6. 专业任务使用对应入口：已有代码改动走 Git Flow 门禁，AI / 技术与财经情报走“双域情报台”，协作写作与配图走“创作工坊”；不要把这些副作用隐含在通用 Run 文本里。
+6. 专业任务使用对应入口：已有代码改动走 Git Flow 门禁，AI / 技术与财经情报走“双域情报台”，个人事项在“事项提醒”维护，协作写作与配图走“创作工坊”；不要把这些副作用隐含在通用 Run 文本里。
 
 第二台 Bark 手机不需要再手改 JSON：在“双域情报台”的“通知设备”中填写设备
 信息、选择 AI / 财经路由并发送测试。完整 device key 只写入服务器 Secret，保存后
 即时生效；详细步骤见 [内部 Bark 通知通道](internal-bark.md)。
+
+事项提醒按北京时间运行，重要度 `1 / 3 / 5` 决定截止前三天的提醒频率。Web 只对已登录 Operator 显示标题和生命周期；CLI、旧 memo 一致性快照与可重复导入步骤见[事项提醒](reminders.md)。
+
+优惠雷达每小时从受限 HTTPS 公开来源采集一次，最多投递 5 条；Web 展示来源健康和去重案卷，旧 deals 快照的 dry-run / apply 步骤见[优惠雷达](deals.md)。
+
+指定消息转发由 `forwarded.relay` 每分钟轮询唯一获准的上游 ntfy Topic；真实地址和凭据只从 owner-only Secret 读取，Web 只显示脱敏健康和投递案卷。配置、状态语义与旧 history 快照导入步骤见[指定 ntfy 消息转发](forwarded-relay.md)。
+
+听风来源健康在“双域情报台”单独展示。CISA、USGS、中新网与其他 RSS/官方来源各自降级，单源失败不会阻断整轮。内容工坊只有在 Operator 显式启用创作节律后才生成 scheduled 作品；通过审校的新作品按 `content` 领域通知，手动/Web 作品和切流前历史作品不会自动外发。通知项目完整归宿见[整合与退役报告](notice-consolidation.md)。
 
 任务大厅会在提交前显示 Task Analyzer 判断的模式。通用 Run 当前执行 `inspect` 和绑定工作地的 `continue`；`change`、`operate` 和无工作地 `answer` 不会伪装成只读执行。受控变更、通知和内容生产由强类型专业服务承接。运行中的模型请求可以点击“取消 Run”中止。
 

@@ -14,7 +14,7 @@ const FEEDBACK_SIGNALS = ["valuable", "not_valuable", "duplicate", "too_late"] a
 
 export type IntelligenceRouteService = Pick<IntelligenceService,
   "list" | "listCandidates" | "candidateCounts" | "barkStatus" | "telegramStatus"
-  | "verifyTelegramWebhook" | "handleTelegramUpdate" | "recordFeedback" | "openFeedback" | "run"
+  | "verifyTelegramWebhook" | "handleTelegramUpdate" | "recordFeedback" | "openFeedback" | "run" | "sourceHealth"
 >;
 
 export interface IntelligenceTaskView {
@@ -27,6 +27,7 @@ export interface IntelligenceRouteDependencies {
   credentialStatus(): Promise<{ x_trends: boolean; weibo_hot: boolean }>;
   enqueueTask(input: IntelligenceTaskRouteInput & { domain: "ai" }): Promise<unknown>;
   getTask(id: string): IntelligenceTaskView | undefined;
+  handleTelegramUpdate?(update: Parameters<IntelligenceService["handleTelegramUpdate"]>[0]): Promise<unknown>;
   requireOperator(request: Request): void;
 }
 
@@ -39,6 +40,9 @@ export async function handleIntelligenceRoutes(
 
   if (request.method === "GET" && url.pathname === "/api/intelligence") {
     return json({ briefs: await (await dependencies.getIntelligence()).list() });
+  }
+  if (request.method === "GET" && url.pathname === "/api/intelligence/sources") {
+    return json({ sources: (await dependencies.getIntelligence()).sourceHealth() });
   }
   if (request.method === "GET" && url.pathname === "/api/intelligence/candidates") {
     const intelligence = await dependencies.getIntelligence();
@@ -62,7 +66,8 @@ export async function handleIntelligenceRoutes(
     } catch {
       throw new HttpError(401, "Telegram webhook authorization failed");
     }
-    return json(await intelligence.handleTelegramUpdate(telegramUpdateInput(await readJson(request, 128_000))));
+    const update = telegramUpdateInput(await readJson(request, 128_000));
+    return json(await (dependencies.handleTelegramUpdate?.(update) ?? intelligence.handleTelegramUpdate(update)));
   }
 
   const candidateFeedback = url.pathname.match(/^\/api\/intelligence\/candidates\/([^/]+)\/feedback$/);

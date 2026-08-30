@@ -1,22 +1,35 @@
-# 内部 Bark 通知通道
+# 通知传输服务：Bark 与 ntfy
 
 Totemora 默认通过本机 `BarkNotificationService` 调用自建 Bark 的 V2 `POST /push`。
 device key 与 Basic Auth 不进入仓库、成员提示词或动作证据。
+
+同一份 `compose.bark.yaml` 也托管兼容 iOS 订阅的 ntfy 传输服务。文件名为历史兼容入口，
+Compose 项目名固定为 `totemora`；它不包含旧 `notice-ntfy` 项目的 Python workers、历史
+面板或第二套调度状态。
 
 ## 1. 启动服务
 
 ```bash
 docker compose -f compose.bark.yaml up -d
 curl http://127.0.0.1:18080/ping
+curl --fail http://127.0.0.1:40011/v1/health
 ```
 
-默认只绑定 `127.0.0.1`。Bark App 需要访问服务器完成设备注册，因此手机端应通过
+两个传输服务默认都只绑定 `127.0.0.1`。Bark App 需要访问服务器完成设备注册，因此手机端应通过
 HTTPS 反向代理或 Tailscale 访问；仅在可信局域网临时注册时，才设置
 `TOTEMORA_BARK_BIND=<服务器局域网 IP>` 后重启容器。
 
 生产部署应使用管理员控制的 HTTPS 域名，由宿主机统一 Nginx 反向代理到
 `127.0.0.1:18080`。仓库模板位于 `ops/nginx/bark.example.conf`；安装前必须将
 `bark.example.com` 替换为实际域名。Bark 容器本身不直接暴露公网端口。
+
+ntfy 延续 `https://ntfy.qzhqzh.com` 公网入口与 `40011` 本机端口。认证数据库和短期
+cache 位于 `.totemora/ntfy-data/`，不进入 Git。旧项目退役时只迁移这两个传输层文件，
+业务 worker 数据库继续作为只读恢复档案，不复制成 Totemora 的第二套运行时。
+
+2026-08-30 已完成运行归属切换：旧 `notice-ntfy` Compose 的 workers、history、ntfy
+及可选 `codex-reset` 容器均已停止并移除；没有删除旧仓库数据、Docker volume 或凭据。
+后续故障只修复 Totemora 管理的服务，不恢复旧项目形成双运行时。
 
 ## 2. 让 Bark App 注册设备
 

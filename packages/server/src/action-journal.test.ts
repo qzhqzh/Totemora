@@ -119,3 +119,34 @@ test("network-uncertain external effects are not automatically replayed", async 
   expect((await journal.list())[0]).toMatchObject({ status: "uncertain", attempts: 1 });
   await rm(dataDir, { recursive: true, force: true });
 });
+
+test("a receipt followed by completion persistence failure is uncertain and never replayed", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-action-receipt-persistence-"));
+  const journal = new ActionJournal(dataDir);
+  const state = StateDatabase.open(dataDir);
+  state.db.exec(`
+    CREATE TRIGGER reject_completed_action
+    BEFORE UPDATE OF status ON action_journal
+    WHEN NEW.status='completed'
+    BEGIN
+      SELECT RAISE(ABORT,'simulated completed persistence failure');
+    END;
+  `);
+  let calls = 0;
+  const input = {
+    idempotency_key: "candidate-receipt:telegram:-1001", asset_id: "telegram-bot",
+    member_id: "qwen_intelligence", action: "push_notification",
+    request: { candidate_id: "candidate-receipt", chat_id: "-1001" },
+  };
+  await expect(journal.executeEffectOnce(input, async () => {
+    calls += 1;
+    return "message 42";
+  })).rejects.toBeInstanceOf(UncertainExternalEffectError);
+  await expect(journal.executeEffectOnce(input, async () => {
+    calls += 1;
+    return "duplicate";
+  })).rejects.toBeInstanceOf(UncertainExternalEffectError);
+  expect(calls).toBe(1);
+  expect((await journal.list())[0]).toMatchObject({ status: "uncertain", attempts: 1 });
+  await rm(dataDir, { recursive: true, force: true });
+});

@@ -14,6 +14,8 @@ test("intelligence routes keep reads public and tasks operator-gated", async () 
   expect(await handle(new Request("http://local/api/status"))).toBeUndefined();
   const listed = await handle(new Request("http://local/api/intelligence"));
   expect(await listed?.json()).toEqual({ briefs: [{ id: "brief-1" }] });
+  const sources = await handle(new Request("http://local/api/intelligence/sources"));
+  expect(await sources?.json()).toEqual({ sources: [{ id: "cisa-kev", status: "ready" }] });
   const preferences = await handle(new Request("http://local/api/intelligence/preferences"));
   expect(await preferences?.json()).toMatchObject({ credentials: { x_trends: true, weibo_hot: false } });
 
@@ -100,6 +102,7 @@ function routeHandler(calls: unknown[][]) {
 function intelligenceService(calls: unknown[][]): IntelligenceRouteService {
   return {
     async list() { return [{ id: "brief-1" }] as any; },
+    sourceHealth() { return [{ id: "cisa-kev", status: "ready" }] as any; },
     async listCandidates() { return [] as any; },
     async candidateCounts() { return {} as any; },
     async barkStatus(health) { return { health } as any; },

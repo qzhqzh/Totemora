@@ -8,6 +8,13 @@ import { applySkillTrialRunLeaseMigration } from "./005-skill-trial-run-lease";
 import { applySkillTrialLeaseFencingMigration } from "./006-skill-trial-lease-fencing";
 import { applyGitFlowSkillIdMigration } from "./007-git-flow-skill-id";
 import { applySkillTrialOutcomeMigration } from "./008-skill-trial-outcome";
+import { applyCodexSupervisorMigration } from "./009-codex-supervisor";
+import { applyCodexThreadHistoryModeMigration } from "./010-codex-thread-history-mode";
+import { applyCodexScheduledSubscriptionsMigration } from "./011-codex-scheduled-subscriptions";
+import { applyReminderDomainMigration } from "./012-reminder-domain";
+import { applyDealsDomainMigration } from "./013-deals-domain";
+import { applyForwardedRelayMigration } from "./014-forwarded-relay";
+import { applyLegacyIntelligenceEvidenceMigration } from "./015-legacy-intelligence-evidence";
 import type { StateMigration } from "./migration";
 
 const migrations: readonly StateMigration[] = [
@@ -19,6 +26,13 @@ const migrations: readonly StateMigration[] = [
   applySkillTrialLeaseFencingMigration,
   applyGitFlowSkillIdMigration,
   applySkillTrialOutcomeMigration,
+  applyCodexSupervisorMigration,
+  applyCodexThreadHistoryModeMigration,
+  applyCodexScheduledSubscriptionsMigration,
+  applyReminderDomainMigration,
+  applyDealsDomainMigration,
+  applyForwardedRelayMigration,
+  applyLegacyIntelligenceEvidenceMigration,
 ];
 
 export function runStateMigrations(db: Database): void {

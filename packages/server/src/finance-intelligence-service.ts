@@ -16,6 +16,7 @@ import {
 } from "./intelligence-candidate-store";
 import { IntelligenceDispatcher } from "./intelligence-dispatcher";
 import { MemberStateStore } from "./member-state-store";
+import { groundEvidenceUrls, optionalEvidenceId } from "./model-evidence-grounding";
 import { StateDatabase } from "./state-database";
 import { ToolAssetRegistry } from "./tool-asset-registry";
 
@@ -23,6 +24,7 @@ interface FinanceItem {
   headline: string;
   brief: string;
   url: string;
+  evidence_id?: number;
   event_key?: string;
   importance?: number;
   interest?: number;
@@ -56,6 +58,7 @@ export interface FinanceIntelligenceBrief {
     collected: number;
     out_of_scope: number;
     history_suppressed: number;
+    capacity_suppressed?: number;
     model_evaluated: number;
   };
   error?: string;
@@ -134,13 +137,16 @@ export class FinanceIntelligenceService {
         domain: "finance", evidence: scopedSources,
         history_hours: preferences.novelty_history_hours,
       });
-      const evidenceSources = evidenceGate.novel;
+      const evidenceSources = evidenceGate.novel.slice(0, 24);
+      const capacitySuppressed = evidenceGate.novel.length - evidenceSources.length;
       brief.source_gate = {
         collected: brief.sources.length,
         out_of_scope: Math.max(0, brief.sources.length - scopedSources.length),
         history_suppressed: evidenceGate.suppressed.length,
+        ...(capacitySuppressed ? { capacity_suppressed: capacitySuppressed } : {}),
         model_evaluated: evidenceSources.length,
       };
+      if (capacitySuppressed) brief.warnings.push(`模型输入边界过滤 ${capacitySuppressed} 条较低顺序证据`);
       if (!evidenceSources.length) brief.warnings.push("本轮证据已在历史窗口内处理，未调用模型重复评估");
       const allowedLinks = new Set([
         ...evidenceSources.map((item) => item.link),
@@ -172,7 +178,7 @@ export class FinanceIntelligenceService {
       let rejectionReason = "";
       for (let attempt = 0; !evaluated && attempt < 2; attempt += 1) {
         const response = await this.providers.get(member.provider).generate({
-          memberId: member.id, model: member.model, responseFormat: "json", maxTokens: input.briefing_type ? 2_000 : 3_500,
+          memberId: member.id, model: member.model, responseFormat: "json", maxTokens: input.briefing_type ? 1_600 : 2_200,
           messages: [
             { role: "system", content: [
               member.persona ?? "",
@@ -192,7 +198,7 @@ export class FinanceIntelligenceService {
               input.briefing_type ? `结构化行情（S3，数值必须原样使用）：${JSON.stringify(brief.market_snapshot)}` : "",
               `来源证据：${JSON.stringify(sourceEvidence)}`,
               briefingInstruction(input.briefing_type, brief.market_snapshot),
-              "输出严格 JSON：{title,summary,items:[{headline,brief,url,event_key,importance,interest,confidence,novelty,push_worthy,rationale,is_update}]}。items 取 3-8 条并合并同一事件；四项分数为 0-1。headline 先写市场/标的（若有）再写事实；brief 只写已知事实、为什么可能重要、下一观察点，最多 220 字。无自选匹配时，只把重大监管、货币政策、关键宏观或明显重大公司事件标为 push_worthy。summary 不超过 180 字，并提醒不构成投资建议。",
+              "输出严格 JSON：{title,summary,items:[{evidence_id,headline,brief,url,event_key,importance,interest,confidence,novelty,push_worthy,rationale,is_update}]}。evidence_id 必须复制来源证据中的数字 id，url 必须与该 id 的 url 完全一致。items 取 3-8 条并合并同一事件；四项分数为 0-1。headline 先写市场/标的（若有）再写事实；brief 只写已知事实、为什么可能重要、下一观察点，最多 220 字。无自选匹配时，只把重大监管、货币政策、关键宏观或明显重大公司事件标为 push_worthy。summary 不超过 180 字，并提醒不构成投资建议。",
               attempt === 1
                 ? `上一次输出被确定性门禁拒绝：${rejectionReason}。修正后重发完整 JSON：${rejected.slice(0, 6_000)}`
                 : "",
@@ -200,10 +206,13 @@ export class FinanceIntelligenceService {
           ],
         });
         const parsed = parseFinanceSummary(response.content);
-        const invalidUrl = parsed.items.find((item) => !allowedLinks.has(item.url));
+        const grounded = groundEvidenceUrls(parsed.items, sourceEvidence, allowedLinks);
+        parsed.items = grounded.items;
+        const invalidUrl = grounded.invalid[0];
         const adviceViolation = financeAdviceViolation(parsed);
         if (!invalidUrl && !adviceViolation) {
           evaluated = parsed;
+          if (grounded.corrected) brief.warnings.push(`按 evidence_id 纠正 ${grounded.corrected} 条来源 URL`);
           if (attempt === 1) brief.warnings.push("观潮经过一次确定性门禁纠正后完成评估");
           break;
         }
@@ -422,6 +431,7 @@ function parseFinanceSummary(content: string): Pick<FinanceIntelligenceBrief, "t
     title: String(value.title).slice(0, 100), summary: String(value.summary).slice(0, 240),
     items: value.items.slice(0, 8).map((item) => ({
       headline: String(item.headline).slice(0, 180), brief: String(item.brief).slice(0, 500), url: String(item.url),
+      evidence_id: optionalEvidenceId((item as { evidence_id?: unknown }).evidence_id),
       event_key: item.event_key ? String(item.event_key).slice(0, 120) : undefined,
       importance: optionalScore(item.importance), interest: optionalScore(item.interest),
       confidence: optionalScore(item.confidence), novelty: optionalScore(item.novelty),

@@ -132,12 +132,17 @@ test("finance sources collect Xueqiu heat and Sina news as S4 discovery signals"
         ctime: "1786547663", intro: "公司披露最新业绩变化。", media_name: "新浪财经",
       }],
     } });
+    if (url.includes("chinanews.com.cn")) return new Response(`<rss><channel><item>
+      <title>国内金融市场发布重要政策信息</title>
+      <link>https://www.chinanews.com.cn/cj/2026/08-30/10000000.shtml</link>
+      <guid>chinanews-finance-1</guid><pubDate>Sun, 30 Aug 2026 02:00:00 GMT</pubDate>
+    </item></channel></rss>`);
     throw new Error(`Unexpected URL ${url}`);
   };
   const registry = new FinanceSourceRegistry(dataDir, fakeFetch as typeof fetch);
   const result = await registry.collect(discoveryPreferences);
   expect(result.warnings).toEqual([]);
-  expect(result.items).toHaveLength(4);
+  expect(result.items).toHaveLength(5);
   expect(result.items.filter((item) => item.source === "雪球热股")).toMatchObject([
     { market: "CN", symbols: ["SH600519"], event_type: "market_attention", evidence_tier: "S4" },
     { market: "HK", symbols: ["00700"], event_type: "market_attention", evidence_tier: "S4" },
@@ -146,8 +151,15 @@ test("finance sources collect Xueqiu heat and Sina news as S4 discovery signals"
   expect(result.items.find((item) => item.source === "新浪财经滚动")).toMatchObject({
     market: "CN", symbols: ["SH600519"], evidence_tier: "S4", event_type: "earnings", source_id: "sina-finance-roll:comos:test-1",
   });
+  expect(result.items.find((item) => item.source === "中新网财经")).toMatchObject({
+    market: "CN", evidence_tier: "S4", source_id: "chinanews-finance-1",
+  });
   expect(registry.status().filter((source) => source.category === "market_media"))
-    .toMatchObject([{ status: "ready", item_count: 3 }, { status: "ready", item_count: 1 }]);
+    .toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "xueqiu-hot-stock", status: "ready", item_count: 3 }),
+      expect.objectContaining({ id: "sina-finance-roll", status: "ready", item_count: 1 }),
+      expect.objectContaining({ id: "chinanews-finance", status: "ready", item_count: 1 }),
+    ]));
   await rm(dataDir, { recursive: true, force: true });
 });
 

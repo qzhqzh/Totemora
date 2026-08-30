@@ -1,4 +1,5 @@
 import type { BarkDomain, BarkTargetMutationInput } from "../bark-notification-service";
+import { NOTIFICATION_DOMAINS } from "../domains/notification/notification-envelope";
 import { HttpError } from "./http-boundary";
 import {
   inputObject,
@@ -8,7 +9,7 @@ import {
   requiredString,
 } from "./input-schema";
 
-const BARK_DOMAINS = ["ai", "finance"] as const;
+const BARK_DOMAINS = NOTIFICATION_DOMAINS;
 const TARGET_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 export function barkTargetInput(value: unknown, pathId?: string): BarkTargetMutationInput {
@@ -18,7 +19,7 @@ export function barkTargetInput(value: unknown, pathId?: string): BarkTargetMuta
     throw new HttpError(400, "id must be 1-64 letters, numbers, dots, underscores, or dashes");
   }
   if (id === "primary") throw new HttpError(400, "id primary is reserved for the legacy Bark target");
-  const domains = optionalStringArray(input.domains, "domains", 2, 16);
+  const domains = optionalStringArray(input.domains, "domains", BARK_DOMAINS.length, 16);
   if (domains?.some((domain) => !BARK_DOMAINS.includes(domain as BarkDomain))) {
     throw new HttpError(400, `domains must contain only ${BARK_DOMAINS.join(", ")}`);
   }

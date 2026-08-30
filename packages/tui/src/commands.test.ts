@@ -86,6 +86,53 @@ test("checks every configured provider with its first member", async () => {
   expect(provider.requests).toHaveLength(4);
 });
 
+test("diagnoses the shared Codex supervisor through the authenticated Gateway", async () => {
+  const output = createOutput();
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-codex-doctor-"));
+  tempDirs.push(dataDir);
+  await writeFile(join(dataDir, "operator-token"), "doctor-token\n");
+  const requests: Array<{ url: string; authorization: string | null }> = [];
+  const exitCode = await runCli(
+    ["codex", "doctor", "--gateway-url", "http://gateway.local:4310", "--data-dir", dataDir],
+    output,
+    { fetch: async (input, init) => {
+      requests.push({ url: String(input), authorization: new Headers(init?.headers).get("authorization") });
+      return Response.json({
+        enabled: true, connected: true, socket_path: "/tmp/codex.sock", cli_version: "0.150.1",
+        last_scan_at: "2026-08-29T00:00:00.000Z", next_scan_at: "2026-08-29T00:00:15.000Z",
+        observed_threads: 12, running_threads: 5, managed_threads: 2, active_managed_threads: 1, open_interactions: 3,
+        directive_counts: {},
+      });
+    } },
+  );
+  expect(exitCode).toBe(0);
+  expect(requests).toEqual([{ url: "http://gateway.local:4310/api/codex/status", authorization: "Bearer doctor-token" }]);
+  expect(output.stdoutText()).toContain("shared App Server: connected");
+  expect(output.stdoutText()).toContain("observed=12 codex_running=5 managed=2 managed_active=1");
+});
+
+test("Codex doctor reports uncertain delivery as unhealthy", async () => {
+  const output = createOutput();
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-codex-doctor-uncertain-"));
+  tempDirs.push(dataDir);
+  await writeFile(join(dataDir, "operator-token"), "doctor-token\n");
+  const exitCode = await runCli(
+    ["codex", "doctor", "--gateway-url", "http://gateway.local:4310", "--data-dir", dataDir],
+    output,
+    { fetch: async () => Response.json({
+      enabled: true, connected: true, socket_path: "/tmp/codex.sock", cli_version: "0.150.1",
+      last_scan_at: "2026-08-29T00:00:00.000Z",
+      observed_threads: 12, running_threads: 0, managed_threads: 1,
+      active_managed_threads: 0, open_interactions: 0,
+      directive_counts: { uncertain: 1 },
+    }) },
+  );
+
+  expect(exitCode).toBe(1);
+  expect(output.stdoutText()).toContain("directives: uncertain=1");
+  expect(output.stderrText()).toContain("operator review");
+});
+
 test("runs the onboarding exam through the CLI and persists its trace", async () => {
   const output = createOutput();
   const dataDir = await mkdtemp(join(tmpdir(), "totemora-run-"));

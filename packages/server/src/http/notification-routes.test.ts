@@ -44,13 +44,13 @@ test("notification routes protect reads and validate health and target mutations
     headers: { authorization: "Bearer operator" },
     body: JSON.stringify({
       id: "phone-2", label: "Second phone", device_key: "device-key-1234",
-      domains: ["ai"], enabled: true, server_url: "https://bark.example.com",
+      domains: ["reminder"], enabled: true, server_url: "https://bark.example.com",
     }),
   }));
   expect(created?.status).toBe(201);
   expect(mutations).toEqual([{ mode: "create", input: {
     id: "phone-2", label: "Second phone", device_key: "device-key-1234",
-    domains: ["ai"], enabled: true, server_url: "https://bark.example.com",
+    domains: ["reminder"], enabled: true, server_url: "https://bark.example.com",
   } }]);
 });
 

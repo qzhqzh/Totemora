@@ -13,8 +13,12 @@
       <nav class="primary-nav" aria-label="主导航">
         <a href="/" data-primary-route="home">驻地总览</a>
         <a href="/skills" data-primary-route="skills">能力</a>
+        <a href="/codex">Codex 监控台</a>
         <a href="/#task-hall">任务大厅</a>
         <a href="/#intelligence-hall">情报台</a>
+        <a href="/#reminders">事项</a>
+        <a href="/#deals">优惠</a>
+        <a href="/#forwarded">转发</a>
       </nav>
     </div>
     <div class="header-actions">
@@ -27,6 +31,7 @@
         <p>输入服务器生成的 Operator Token，解锁 Skill 文件预览、试炼与其他受保护操作。</p>
         <details class="operator-token-help"><summary>在哪里查看 Token？</summary><p>登录 Totemora 服务器，在项目目录运行 <code>cat .totemora/operator-token</code>。不要把输出发到聊天、截图或公开日志。</p></details>
         <label>Operator Token<input id="operator-token" type="password" autocomplete="off" spellcheck="false" required></label>
+        <label class="inline-check operator-remember"><input id="operator-remember" type="checkbox"><span>记住此设备<small>显式启用后保存在当前浏览器；共享设备不要勾选。</small></span></label>
         <div id="operator-login-status" class="operator-login-status" role="status" aria-live="polite">Token 仅保存在当前浏览器标签页。</div>
         <div class="operator-dialog-actions"><button id="operator-logout" type="button" class="secondary hidden">退出登录</button><button id="operator-login-submit" type="submit">验证并登录</button></div>
       </form>
@@ -399,6 +404,7 @@ secrets/</textarea></label>
           <button id="run-intelligence" type="button">让听风立即扫描</button>
           <small id="intelligence-status" class="domain-status" role="status" aria-live="polite"></small>
           <div id="bark-status" class="channel-status" role="status" aria-live="polite">Bark 状态等待检查</div>
+          <details class="source-ledger"><summary>查看听风来源健康</summary><div id="intelligence-source-ledger"></div></details>
           <h4>候选消息池</h4>
           <div id="candidate-summary" class="chips" role="status" aria-live="polite"></div>
           <div id="intelligence-candidates" class="intelligence-history"></div>
@@ -429,6 +435,53 @@ secrets/</textarea></label>
           <div id="finance-history" class="intelligence-history"></div>
         </article>
       </div>
+    </section>
+    <section class="panel reminder-panel" id="reminders" aria-labelledby="reminder-title-heading">
+      <header class="reminder-head">
+        <div><h2 id="reminder-title-heading">事项提醒</h2><p>个人事项由 Totemora 持久化和调度；旧 memo 数据只迁移 active 项与当天防重复账本。</p></div>
+        <button id="refresh-reminders" type="button" class="secondary">刷新事项</button>
+      </header>
+      <div id="reminder-summary" class="notification-summary" role="status" aria-live="polite">输入操作员 Token 后可管理个人事项。</div>
+      <div class="reminder-workspace">
+        <form id="reminder-create-form" class="reminder-editor">
+          <div><h3>新增事项</h3><p>重要度决定截止前三天内的提醒频率；不会自动删除过期或已完成记录。</p></div>
+          <label>事项标题<input id="reminder-title" maxlength="240" required placeholder="例如：完成通知系统切流验收"></label>
+          <label>截止日期<input id="reminder-deadline" type="date" required></label>
+          <label>重要度<select id="reminder-importance"><option value="1">1 · 普通</option><option value="3" selected>3 · 重要</option><option value="5">5 · 高优先</option></select></label>
+          <button type="submit">保存事项</button>
+          <small id="reminder-form-status" class="form-status" role="status" aria-live="polite"></small>
+        </form>
+        <div class="reminder-board">
+          <header><div><h3>事项案卷</h3><p>完成与恢复都有明确状态；外发结果按时间窗和目标通道留痕。</p></div><label>状态<select id="reminder-filter-status"><option value="active">进行中</option><option value="all">全部</option><option value="completed">已完成</option><option value="expired">已过期</option></select></label></header>
+          <div id="reminder-list" class="reminder-list" aria-live="polite"></div>
+        </div>
+      </div>
+    </section>
+    <section class="panel deals-panel" id="deals" aria-labelledby="deals-title-heading">
+      <header class="deals-head">
+        <div><h2 id="deals-title-heading">优惠雷达</h2><p>公开来源由 Totemora 每小时采集；最多投递 5 条，其余只作为去重证据，不混入财经判断。</p></div>
+        <button id="refresh-deals" type="button" class="secondary">刷新优惠</button>
+      </header>
+      <div id="deal-summary" class="notification-summary" role="status" aria-live="polite">输入操作员 Token 后可查看优惠案卷。</div>
+      <div id="deal-health" class="deal-health"></div>
+      <div class="deal-board-head">
+        <div><h3>优惠案卷</h3><p>投递成功、未知结果和跳过去重都有独立状态，不把“服务接受”表述为“用户已读”。</p></div>
+        <label>状态<select id="deal-filter-status"><option value="all">全部</option><option value="delivered">已投递</option><option value="skipped">去重留档</option><option value="pending">待处理</option><option value="uncertain">结果未知</option></select></label>
+      </div>
+      <div id="deal-list" class="deal-list" aria-live="polite"></div>
+    </section>
+    <section class="panel forwarded-panel" id="forwarded" aria-labelledby="forwarded-title-heading">
+      <header class="forwarded-head">
+        <div><h2 id="forwarded-title-heading">指定消息转发</h2><p>Totemora 直接订阅唯一获准的上游 ntfy Topic，再按统一信封投递到指定通道；旧转发 worker 不再运行。</p></div>
+        <button id="refresh-forwarded" type="button" class="secondary">刷新转发</button>
+      </header>
+      <div id="forwarded-summary" class="notification-summary" role="status" aria-live="polite">输入操作员 Token 后可查看转发案卷。</div>
+      <div id="forwarded-health" class="forwarded-health"></div>
+      <div class="forwarded-board-head">
+        <div><h3>转发案卷</h3><p>每条上游消息、每个目标独立幂等；“通道已接受”不代表用户已读。</p></div>
+        <label>状态<select id="forwarded-filter-status"><option value="all">全部</option><option value="completed">已接受</option><option value="deduped">重叠去重</option><option value="pending">待转发</option><option value="failed">可重试失败</option><option value="uncertain">结果未知</option></select></label>
+      </div>
+      <div id="forwarded-list" class="forwarded-list" aria-live="polite"></div>
     </section>
     <section class="panel content-panel" id="content-studio">
       <div class="section-title"><h2>创作工坊</h2></div>

@@ -77,7 +77,7 @@ test("观潮 turns official finance evidence into a domain-isolated candidate", 
       title: "财经官方变化", summary: "一项自选公告和宏观变化值得观察，不构成投资建议。",
       items: [{
         headline: "A股 688209 · 回购相关公告", brief: "公司披露回购相关股东信息；下一步观察回购执行。",
-        url: "https://www.cninfo.com.cn/new/disclosure/detail?stockCode=688209&announcementId=1225470190&announcementTime=2026-08-13",
+        evidence_id: 1, url: "https://invented.example/disclosure",
         event_key: "CN:688209:buyback", importance: 0.8, interest: 1, confidence: 0.9, novelty: 0.9,
         push_worthy: true, rationale: "命中自选，来自法定披露平台", is_update: false,
       }],
@@ -96,6 +96,7 @@ test("观潮 turns official finance evidence into a domain-isolated candidate", 
   );
   const brief = await service.run({ defer_push: true, reason: "manual" });
   expect(brief).toMatchObject({ domain: "finance", member_id: "qwen_finance", status: "completed", queued_messages: 1 });
+  expect(brief.warnings).toContain("按 evidence_id 纠正 1 条来源 URL");
   expect((await service.listCandidates())[0]).toMatchObject({
     domain: "finance", market: "CN", symbols: ["688209"], evidence_tier: "S0", event_type: "ownership_change",
   });

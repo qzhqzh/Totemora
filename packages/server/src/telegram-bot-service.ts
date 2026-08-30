@@ -44,6 +44,7 @@ interface TelegramConfig {
   token: string;
   chatIds: string[];
   webhookSecret?: string;
+  httpProxy?: string;
 }
 
 interface TelegramResponse<T> {
@@ -175,6 +176,22 @@ export class TelegramBotService {
     return this.send(String(chatId), truncate(text, 4_000));
   }
 
+  async sendChoices(
+    chatId: string | number,
+    text: string,
+    choices: Array<{ label: string; callback_data: string }>,
+  ): Promise<{ message_id: number; chat_id: string }> {
+    if (!choices.length || choices.length > 3) throw new Error("Telegram choices must contain 1-3 options");
+    if (choices.some((choice) => !choice.label.trim() || Buffer.byteLength(choice.callback_data, "utf8") > 64)) {
+      throw new Error("Telegram choice labels must be non-empty and callback data must fit 64 bytes");
+    }
+    return this.send(String(chatId), truncate(text, 4_000), {
+      inline_keyboard: choices.map((choice) => [{
+        text: truncate(choice.label.trim(), 60), callback_data: choice.callback_data,
+      }]),
+    });
+  }
+
   async answerCallback(callbackQueryId: string, text: string): Promise<void> {
     const config = await this.requireConfig();
     await this.api(config, "answerCallbackQuery", {
@@ -203,6 +220,9 @@ export class TelegramBotService {
         { command: "help", description: "查看部落 Bot 用法" },
         { command: "tribe", description: "查看在线成员" },
         { command: "news", description: "查看最近情报候选" },
+        { command: "finance", description: "查看最近财经候选" },
+        { command: "codex", description: "查看 Codex 托管现场" },
+        { command: "decisions", description: "处理 Codex 建议与决策" },
       ],
     });
     const me = await this.api<{ username?: string }>(config, "getMe", {});
@@ -257,13 +277,15 @@ export class TelegramBotService {
     const target = new URL(`./bot${config.token}/${method}`, ensureSlash(config.apiBase));
     let response: Response;
     try {
-      response = await this.fetchImpl(target, {
+      const request: RequestInit & { proxy?: string } = {
         method: "POST",
         headers: { "content-type": "application/json; charset=utf-8" },
         body: JSON.stringify(payload),
         signal: AbortSignal.timeout(15_000),
         redirect: "error",
-      });
+        ...(config.httpProxy ? { proxy: config.httpProxy } : {}),
+      };
+      response = await this.fetchImpl(target, request);
     } catch (error) {
       throw new TelegramDeliveryError(`Telegram request failed: ${safeMessage(error, config.token)}`, true, undefined, undefined, true);
     }
@@ -275,19 +297,28 @@ export class TelegramBotService {
         response.status === 408 || response.status === 429 || response.status >= 500,
         response.status,
         undefined,
-        response.ok,
+        responseOutcomeIsUncertain(response),
       );
     }
     let body: TelegramResponse<T>;
     try { body = JSON.parse(raw) as TelegramResponse<T>; }
-    catch { throw new TelegramDeliveryError(`Telegram returned invalid JSON (${response.status})`, response.status >= 500, response.status, undefined, response.ok); }
+    catch {
+      throw new TelegramDeliveryError(
+        `Telegram returned invalid JSON (${response.status})`,
+        response.status === 408 || response.status === 429 || response.status >= 500,
+        response.status,
+        undefined,
+        responseOutcomeIsUncertain(response),
+      );
+    }
     if (!response.ok || !body.ok || body.result === undefined) {
       const status = body.error_code ?? response.status;
       const retryAfter = body.parameters?.retry_after
         ? new Date(Date.now() + body.parameters.retry_after * 1_000)
         : undefined;
       const retryable = status === 408 || status === 429 || status >= 500;
-      const outcomeUncertain = response.ok && body.ok === true && body.result === undefined;
+      const trustedRejection = body.ok === false && Number.isInteger(body.error_code);
+      const outcomeUncertain = !trustedRejection && responseOutcomeIsUncertain(response);
       throw new TelegramDeliveryError(
         `Telegram API ${method} failed (${status}): ${body.description ?? "unknown error"}`,
         retryable,
@@ -356,7 +387,12 @@ export class TelegramBotService {
     if (!["http:", "https:"].includes(api.protocol) || (api.protocol !== "https:" && !local)) {
       throw new Error("Telegram API base must use HTTPS unless it is localhost");
     }
-    return { apiBase: api.toString(), token, chatIds, webhookSecret };
+    const httpProxy = parseTelegramHttpProxy(
+      process.env.TOTEMORA_TELEGRAM_HTTP_PROXY
+      ?? await this.loadSecret("telegram-http-proxy")
+      ?? "",
+    );
+    return { apiBase: api.toString(), token, chatIds, webhookSecret, httpProxy };
   }
 
   private async loadSecret(name: string): Promise<string | undefined> {
@@ -375,8 +411,31 @@ function ensureSlash(value: string): string {
   return value.endsWith("/") ? value : `${value}/`;
 }
 
+function parseTelegramHttpProxy(value: string): string | undefined {
+  const raw = value.trim();
+  if (!raw) return undefined;
+  let proxy: URL;
+  try { proxy = new URL(raw); }
+  catch { throw new Error("Telegram HTTP proxy must be a valid URL"); }
+  if (!["http:", "https:"].includes(proxy.protocol)) {
+    throw new Error("Telegram HTTP proxy must use HTTP or HTTPS");
+  }
+  const local = ["127.0.0.1", "localhost", "::1"].includes(proxy.hostname);
+  if (proxy.protocol !== "https:" && !local) {
+    throw new Error("Telegram HTTP proxy must use HTTPS unless it is localhost");
+  }
+  if ((proxy.pathname && proxy.pathname !== "/") || proxy.search || proxy.hash) {
+    throw new Error("Telegram HTTP proxy URL cannot contain a path, query, or fragment");
+  }
+  return proxy.toString();
+}
+
 function truncate(value: string, limit: number): string {
   return value.length <= limit ? value : `${value.slice(0, limit - 1)}…`;
+}
+
+function responseOutcomeIsUncertain(response: Response): boolean {
+  return response.ok || response.status === 408 || response.status >= 500;
 }
 
 function safeMessage(error: unknown, token: string): string {

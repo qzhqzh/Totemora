@@ -40,7 +40,12 @@ export interface BenchmarkResult {
   created_at: string;
   suite: { id: string; version: number; task_count: number };
   members: { strong: string; cheap: string; chief: string };
-  budget: { max_output_tokens_per_call: number };
+  budget: {
+    max_output_tokens_per_call: number;
+    max_context_bytes?: number;
+    max_members_per_tribe_case?: number;
+    max_total_tokens_per_tribe_case?: number;
+  };
   results: BenchmarkCaseResult[];
   summary: Record<BenchmarkStrategy, BenchmarkStrategySummary>;
   pricing_status: "configured" | "partial" | "unconfigured";
@@ -169,6 +174,8 @@ export async function runBenchmark(input: {
   maxFiles?: number;
   maxContextBytes?: number;
   maxOutputTokens?: number;
+  maxMembers?: number;
+  maxTotalTokens?: number;
   pricingSnapshotPath?: string;
 }): Promise<{ result: BenchmarkResult; jsonPath: string; markdownPath: string }> {
   const loaded = await loadBenchmarkSuite(input.suitePath);
@@ -206,7 +213,12 @@ export async function runBenchmark(input: {
     created_at: new Date().toISOString(),
     suite: { id: loaded.suite.id, version: loaded.suite.version, task_count: loaded.suite.tasks.length },
     members,
-    budget: { max_output_tokens_per_call: maxOutputTokens },
+    budget: {
+      max_output_tokens_per_call: maxOutputTokens,
+      ...(input.maxContextBytes === undefined ? {} : { max_context_bytes: input.maxContextBytes }),
+      ...(input.maxMembers === undefined ? {} : { max_members_per_tribe_case: input.maxMembers }),
+      ...(input.maxTotalTokens === undefined ? {} : { max_total_tokens_per_tribe_case: input.maxTotalTokens }),
+    },
     results,
     summary: summarize(results),
     pricing_status: !pricing ? "unconfigured"
@@ -310,6 +322,8 @@ async function runTribe(
       budget: {
         max_context_bytes: input.maxContextBytes,
         max_output_tokens_per_call: maxOutputTokens,
+        max_members: input.maxMembers,
+        max_total_tokens: input.maxTotalTokens,
       },
     }, chiefMemberId);
     if (!run.final_report) throw new Error("Tribe benchmark completed without a report");
@@ -442,6 +456,9 @@ function renderBenchmarkMarkdown(result: BenchmarkResult): string {
     `- Created: ${result.created_at}`,
     `- Strong / cheap / chief: \`${result.members.strong}\` / \`${result.members.cheap}\` / \`${result.members.chief}\``,
     `- Max output tokens per call: ${result.budget.max_output_tokens_per_call}`,
+    ...(result.budget.max_context_bytes === undefined ? [] : [`- Max workspace context bytes per case: ${result.budget.max_context_bytes}`]),
+    ...(result.budget.max_members_per_tribe_case === undefined ? [] : [`- Max members per tribe case: ${result.budget.max_members_per_tribe_case}`]),
+    ...(result.budget.max_total_tokens_per_tribe_case === undefined ? [] : [`- Max total tokens per tribe case: ${result.budget.max_total_tokens_per_tribe_case}`]),
     result.pricing_status === "unconfigured"
       ? "- Pricing: unconfigured; no cost value is fabricated."
       : `- Pricing: ${result.pricing_status}; snapshot ${result.pricing_snapshot?.id} as of ${result.pricing_snapshot?.as_of} (${result.pricing_snapshot?.source}).`,

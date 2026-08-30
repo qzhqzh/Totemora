@@ -12,6 +12,7 @@ import { ConfiguredProviderRegistry } from "@totemora/providers";
 import { resolve } from "node:path";
 import { runBenchmark } from "./benchmark";
 import { parseCliArguments } from "./cli-arguments";
+import { runCodexDoctor } from "./codex-doctor";
 import { runDevelopmentGatewayCommand } from "./development-gateway-command";
 import { runGatewayTask } from "./gateway-run-command";
 import type { GatewayFetch } from "./gateway-request";
@@ -52,6 +53,10 @@ export async function runCli(
 
     if (resource === "development") {
       return runDevelopmentGatewayCommand(parsed, streams.stdout, dependencies.fetch ?? fetch);
+    }
+
+    if (resource === "codex" && action === "doctor") {
+      return runCodexDoctor(parsed, streams, dependencies.fetch ?? fetch);
     }
 
     if (resource === "run" && action !== "onboarding-exam" && !parsed.offline) {
@@ -124,6 +129,8 @@ export async function runCli(
         maxFiles: parsed.maxFiles,
         maxContextBytes: parsed.maxContextBytes,
         maxOutputTokens: parsed.maxOutputTokens,
+        maxMembers: parsed.maxMembers,
+        maxTotalTokens: parsed.maxTotalTokens,
         pricingSnapshotPath: parsed.pricingSnapshot,
       });
       streams.stdout.write(`Benchmark: ${benchmark.result.id}\n`);
@@ -361,9 +368,11 @@ function writeHelp(stdout: CliStreams["stdout"]): void {
       "  totemora providers doctor [--config-dir <path>]",
       "  totemora agents list [--config-dir <path>]",
       "  totemora tribe inspect [--config-dir <path>]",
+      "  totemora codex doctor [--gateway-url <url>] [--data-dir <path>]",
       '  totemora development prepare --workplace <id> --goal "<text>" [--gateway-url <url>]',
       "  totemora development approve <proposal_id> [--gateway-url <url>]",
       "  totemora benchmark run --suite <path> --strong-member <id> --cheap-member <id> [--chief <id>] [--pricing-snapshot <path>] [--data-dir <path>]",
+      "    Optional budgets: --max-files <n> --max-context-bytes <n> --max-output-tokens <n> --max-members <n> --max-total-tokens <n>",
       "  totemora run onboarding-exam --offline [--chief <member_id>] [--config-dir <path>] [--data-dir <path>]",
       '  totemora run "<goal>" [--workspace <path> | --workplace <id> | --mission <id>] [--gateway-url <url>] [--data-dir <path>]',
       '  totemora run "<goal>" --offline [--workspace <path>] [--accept <criterion>] [--chief <member_id>] [--config-dir <path>] [--data-dir <path>]',

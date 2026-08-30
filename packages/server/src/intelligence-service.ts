@@ -10,8 +10,18 @@ import { IntelligenceCandidateStore, type CandidateEvaluation, type CandidateFee
 import { IntelligenceDispatcher } from "./intelligence-dispatcher";
 import { IntelligencePreferenceStore } from "./intelligence-preference-store";
 import { MemberStateStore } from "./member-state-store";
+import { groundEvidenceUrls, optionalEvidenceId } from "./model-evidence-grounding";
 import { StateDatabase } from "./state-database";
 import { readBoundedResponseText } from "./integrations/bounded-response";
+import {
+  AuthoritativeIntelligenceSourceClient,
+  CISA_KEV_SOURCE,
+  USGS_SIGNIFICANT_SOURCE,
+} from "./integrations/authoritative-intelligence-source-client";
+import {
+  IntelligenceSourceHealthStore,
+  type IntelligenceSourceMetadata,
+} from "./repositories/intelligence-source-health-store";
 import { SpecialistTaskRepository } from "./specialist-service";
 import {
   parseTelegramFeedback,
@@ -39,6 +49,7 @@ interface AiHotCache {
 }
 interface IntelligenceItem {
   headline: string; brief: string; url: string;
+  evidence_id?: number;
   event_key?: string; importance?: number; interest?: number; confidence?: number; novelty?: number;
   push_worthy?: boolean; rationale?: string; is_update?: boolean;
 }
@@ -69,8 +80,9 @@ const DEFAULT_FEEDS = [
   "https://feeds.bbci.co.uk/news/world/rss.xml",
   "https://feeds.bbci.co.uk/news/technology/rss.xml",
   "https://hnrss.org/frontpage",
+  "https://www.chinanews.com.cn/rss/scroll-news.xml",
 ];
-const SOURCE_HOSTS = new Set(["news.google.com", "feeds.bbci.co.uk", "hnrss.org"]);
+const SOURCE_HOSTS = new Set(["news.google.com", "feeds.bbci.co.uk", "hnrss.org", "www.chinanews.com.cn"]);
 const AI_HOT_ORIGIN = "https://aihot.virxact.com";
 const AI_HOT_USER_AGENT = "Totemora-Intelligence/0.9 (+https://github.com/qzhqzh/Totemora)";
 
@@ -84,6 +96,8 @@ export class IntelligenceService {
   private readonly telegram: TelegramBotService;
   private readonly state: StateDatabase;
   private readonly specialistTasks: SpecialistTaskRepository;
+  private readonly authoritativeSources: AuthoritativeIntelligenceSourceClient;
+  private readonly sourceHealthStore: IntelligenceSourceHealthStore;
 
   constructor(
     private readonly config: LocalConfigSet,
@@ -102,6 +116,8 @@ export class IntelligenceService {
     this.telegram = new TelegramBotService(dataDir, fetchImpl);
     this.state = StateDatabase.open(dataDir);
     this.specialistTasks = new SpecialistTaskRepository(dataDir);
+    this.authoritativeSources = new AuthoritativeIntelligenceSourceClient(fetchImpl);
+    this.sourceHealthStore = new IntelligenceSourceHealthStore(dataDir);
     this.importLegacyBriefs();
     this.importLegacyScheduleLeases();
   }
@@ -182,7 +198,7 @@ export class IntelligenceService {
       let rejectedOutput = "";
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const response = await this.providers.get(member.provider).generate({
-          memberId: member.id, model: member.model, responseFormat: "json", maxTokens: 3_000,
+          memberId: member.id, model: member.model, responseFormat: "json", maxTokens: 1_800,
           messages: [
             { role: "system", content: [
               member.persona ?? "",
@@ -196,16 +212,19 @@ export class IntelligenceService {
               `用户关注方向：${JSON.stringify(preferences.interests)}`,
               `最近 ${preferences.novelty_history_hours} 小时已推送事件：${JSON.stringify(recentPushed)}`,
               `来源证据：${JSON.stringify(sourceEvidence)}`,
-              "输出严格 JSON：{title,summary,items:[{headline,brief,url,event_key,importance,interest,confidence,novelty,push_worthy,rationale,is_update}]}。items 取 3-8 条并合并同一事件；四项分数为 0-1；event_key 使用稳定的短语；与已推送事件相比只有出现可陈述的新事实时 is_update 才为 true；优先用户关注方向，同时保留真正重大的突发变化；summary 不超过 180 字。",
+              "输出严格 JSON：{title,summary,items:[{evidence_id,headline,brief,url,event_key,importance,interest,confidence,novelty,push_worthy,rationale,is_update}]}。evidence_id 必须复制来源证据中的数字 id，url 必须与该 id 的 url 完全一致。items 取 3-8 条并合并同一事件；四项分数为 0-1；event_key 使用稳定的短语；与已推送事件相比只有出现可陈述的新事实时 is_update 才为 true；优先用户关注方向，同时保留真正重大的突发变化；summary 不超过 180 字。",
               attempt === 1
-                ? `上一次输出因包含证据集之外的 URL 被拒绝。只修正 URL 并重新输出完整 JSON。被拒绝的输出：${rejectedOutput.slice(0, 6_000)}`
+                ? `上一次输出因证据 ID 或 URL 不合法被拒绝。逐项补全正确 evidence_id，并复制对应来源 url 后重新输出完整 JSON。被拒绝的输出：${rejectedOutput.slice(0, 6_000)}`
                 : "",
             ].filter(Boolean).join("\n") },
           ],
         });
         const candidate = parseSummary(response.content);
-        if (candidate.items.every((item) => allowedLinks.has(item.url))) {
+        const grounded = groundEvidenceUrls(candidate.items, sourceEvidence, allowedLinks);
+        if (!grounded.invalid.length) {
+          candidate.items = grounded.items;
           summary = candidate;
+          if (grounded.corrected) brief.warnings.push(`按 evidence_id 纠正 ${grounded.corrected} 条来源 URL`);
           if (attempt === 1) brief.warnings.push("情报员经过一次证据边界纠正后完成摘要");
           break;
         }
@@ -297,6 +316,10 @@ export class IntelligenceService {
       .sort((left, right) => right.created_at.localeCompare(left.created_at));
   }
 
+  sourceHealth() {
+    return this.sourceHealthStore.list();
+  }
+
   async barkStatus(checkHealth = false) {
     return this.dispatcher.barkStatus("ai", checkHealth);
   }
@@ -354,8 +377,10 @@ export class IntelligenceService {
           "/tribe — 查看当前在线成员",
           "/news — 查看最近 3 条 AI 情报候选",
           "/finance — 查看最近 3 条财经情报候选",
+          "/codex — 查看 Codex 托管现场",
+          "/decisions — 处理 Codex 建议与决策",
           "情报消息下方按钮可反馈价值、重复或时效。",
-          "涉及执行和修改的任务仍通过 MCP / Web 进入 Chief 门禁。",
+          "Codex 系统审批只在 Web 监控台开放；其他执行与修改仍通过 MCP / Web 进入门禁。",
         ].join("\n");
       } else if (command === "/tribe") {
         const active = this.config.agents.agents.filter((member) => !["inactive", "retired"].includes(member.status ?? "active"));
@@ -449,13 +474,34 @@ export class IntelligenceService {
     const urls = (process.env.TOTEMORA_NEWS_FEEDS?.split(",").map((item) => item.trim()).filter(Boolean) ?? DEFAULT_FEEDS);
     const collectors: Array<Promise<SourceBatch>> = preferences.channels.rss ? urls.map(async (value) => {
       const url = new URL(value);
-      if (url.protocol !== "https:" || !SOURCE_HOSTS.has(url.hostname)) throw new Error(`News source is not allowed: ${url.hostname}`);
-      const response = await fetchWithLimit(this.fetchImpl, url, 3_000_000);
-      return { items: parseRss(response, url.hostname, feedCategory(url)), warnings: [] };
+      if (url.protocol !== "https:" || url.username || url.password || !SOURCE_HOSTS.has(url.hostname)) {
+        throw new Error(`News source is not allowed: ${url.hostname}`);
+      }
+      return this.collectTracked(rssMetadata(url), async () => {
+        const response = await fetchWithLimit(this.fetchImpl, url, 3_000_000);
+        return { items: parseRss(response, url.hostname, feedCategory(url)), warnings: [] };
+      });
     }) : [];
-    if (preferences.channels.ai_hot) collectors.push(this.collectAiHot());
-    if (preferences.channels.x_trends) collectors.push(this.collectXTrends(preferences.x_woeid).then((items) => ({ items, warnings: [] })));
-    if (preferences.channels.weibo_hot) collectors.push(this.collectWeiboHot().then((items) => ({ items, warnings: [] })));
+    if (preferences.channels.rss) {
+      collectors.push(this.collectTracked(CISA_KEV_SOURCE, async () => ({
+        items: await this.authoritativeSources.collectCisa(), warnings: [],
+      })));
+      collectors.push(this.collectTracked(USGS_SIGNIFICANT_SOURCE, async () => ({
+        items: await this.authoritativeSources.collectUsgs(), warnings: [],
+      })));
+    }
+    if (preferences.channels.ai_hot) collectors.push(this.collectTracked({
+      id: "ai-hot", name: "AI HOT 精选", kind: "公开聚合 API", url: AI_HOT_ORIGIN,
+      summary: "面向 AI 与技术变化的公开精选，只作为发现和排序线索。",
+    }, () => this.collectAiHot()));
+    if (preferences.channels.x_trends) collectors.push(this.collectTracked({
+      id: "x-trends", name: "X 热点", kind: "官方 API", url: "https://x.com/explore",
+      summary: "需要本地只读 bearer token；默认关闭。",
+    }, () => this.collectXTrends(preferences.x_woeid).then((items) => ({ items, warnings: [] }))));
+    if (preferences.channels.weibo_hot) collectors.push(this.collectTracked({
+      id: "weibo-hot", name: "微博热点", kind: "官方 API", url: "https://s.weibo.com/top/summary",
+      summary: "需要本地只读 access token；默认关闭。",
+    }, () => this.collectWeiboHot().then((items) => ({ items, warnings: [] }))));
     const batches = await Promise.allSettled(collectors);
     const warnings = batches.flatMap((batch) => batch.status === "rejected"
       ? [batch.reason instanceof Error ? batch.reason.message : String(batch.reason)]
@@ -486,6 +532,20 @@ export class IntelligenceService {
       }
     }
     return { items, warnings, observed_items: observedItems, out_of_scope: outOfScope };
+  }
+
+  private async collectTracked(
+    metadata: IntelligenceSourceMetadata,
+    collect: () => Promise<SourceBatch>,
+  ): Promise<SourceBatch> {
+    try {
+      const batch = await collect();
+      this.sourceHealthStore.recordSuccess(metadata, batch.items.length);
+      return batch;
+    } catch (error) {
+      this.sourceHealthStore.recordFailure(metadata, error);
+      throw error;
+    }
   }
 
   private async collectAiHot(): Promise<SourceBatch> {
@@ -706,9 +766,25 @@ function feedCategory(url: URL): string {
   return "general";
 }
 
+function rssMetadata(url: URL): IntelligenceSourceMetadata {
+  const publicUrl = new URL(url);
+  publicUrl.search = "";
+  publicUrl.hash = "";
+  return {
+    id: `rss:${url.hostname}:${url.pathname}`,
+    name: url.hostname === "hnrss.org" ? "Hacker News"
+      : url.hostname === "www.chinanews.com.cn" ? "中新网即时新闻"
+      : url.pathname.includes("technology") ? "BBC Technology"
+        : url.hostname === "feeds.bbci.co.uk" ? "BBC World" : "Google News 中文",
+    kind: "RSS",
+    url: publicUrl.toString(),
+    summary: "白名单新闻源；条目先经过领域范围与历史去重门禁。",
+  };
+}
+
 function isAiWatchSource(item: NewsItem): boolean {
   const category = item.category?.toLowerCase() ?? "";
-  if (["developer", "technology"].includes(category)
+  if (["developer", "technology", "cybersecurity", "critical_event"].includes(category)
     || category.includes("artificial intelligence") || category === "ai") return true;
   const text = `${item.title}\n${item.summary ?? ""}`;
   return /人工智能|\bAI\b|A\.I\.|大模型|基础模型|智能体|\bAgent(?:s|ic)?\b|\bLLM\b|\bGPT(?:-?\d+)?\b|Claude|Gemini|DeepSeek|Qwen|通义千问|MCP|开源模型|开发者工具|编程|代码生成|芯片|\bGPU\b|英伟达|NVIDIA|网络安全|数据泄露|漏洞|黑客|机器人|自动驾驶/iu.test(text);
@@ -730,6 +806,7 @@ function parseSummary(content: string): Pick<IntelligenceBrief, "title" | "summa
   if (!value.title || !value.summary || !Array.isArray(value.items) || !value.items.length) throw new Error("Intelligence member returned an invalid brief");
   value.items = value.items.slice(0, 8).map((item) => ({
     headline: String(item.headline).slice(0, 180), brief: String(item.brief).slice(0, 400), url: String(item.url),
+    evidence_id: optionalEvidenceId((item as { evidence_id?: unknown }).evidence_id),
     event_key: item.event_key ? String(item.event_key).slice(0, 120) : undefined,
     importance: optionalScore(item.importance), interest: optionalScore(item.interest),
     confidence: optionalScore(item.confidence), novelty: optionalScore(item.novelty),

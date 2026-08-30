@@ -4,10 +4,13 @@ import { api, initializeOperatorSession } from "./shared/operator-session.js";
 import { abilityTemplatesFeature } from "./features/ability-templates.js";
 import { contentStudioFeature } from "./features/content-studio.js";
 import { developmentFeature } from "./features/development.js";
+import { dealsFeature } from "./features/deals.js";
+import { forwardedFeature } from "./features/forwarded.js";
 import { intelligenceFeature } from "./features/intelligence.js";
 import { membersFeature } from "./features/members.js";
 import { notificationsFeature } from "./features/notifications.js";
 import { observatoryFeature } from "./features/observatory.js";
+import { remindersFeature } from "./features/reminders.js";
 import { runsFeature } from "./features/runs.js";
 import { skillsFeature } from "./features/skills.js";
 import "./features/skill-authoring.js";
@@ -21,10 +24,13 @@ document.querySelectorAll("[data-primary-route]").forEach((link) => {
 });
 
 registerFeature("development", developmentFeature);
+registerFeature("deals", dealsFeature);
+registerFeature("forwarded", forwardedFeature);
 registerFeature("intelligence", intelligenceFeature);
 registerFeature("contentStudio", contentStudioFeature);
 registerFeature("notifications", notificationsFeature);
 registerFeature("observatory", observatoryFeature);
+registerFeature("reminders", remindersFeature);
 registerFeature("skills", skillsFeature);
 
 runsFeature.configure({
@@ -65,6 +71,9 @@ async function loadHomeRoute() {
       intelligenceFeature.loadFinancePreferences(),
       contentStudioFeature.load(),
       notificationsFeature.loadBarkTargets(),
+      remindersFeature.loadReminders(),
+      dealsFeature.loadDeals(),
+      forwardedFeature.loadForwarded(),
       skillsFeature.loadCommissions(),
       skillsFeature.loadRegistry(),
       abilityTemplatesFeature.load(),

@@ -39,6 +39,7 @@ import {
 } from "./content-studio-service";
 import { CpaIllustrationService } from "./cpa-illustration-service";
 import { BarkNotificationService } from "./bark-notification-service";
+import { TelegramBotService } from "./telegram-bot-service";
 import { EvidenceObservatory } from "./evidence-observatory";
 import { SkillCommissionConflictError, SkillCommissionService } from "./skill-commission-service";
 import { SkillRegistryService } from "./skill-registry-service";
@@ -49,11 +50,17 @@ import type { RecurringServiceState } from "./recurring-service-runner";
 import { AbilityTemplateStore } from "./ability-template-store";
 import { handleAbilityTemplateRoutes } from "./http/ability-template-routes";
 import { handleContentRoutes } from "./http/content-routes";
+import { handleCodexRoutes, type CodexRouteService } from "./http/codex-routes";
+import { handleCodexScheduledRoutes } from "./http/codex-scheduled-routes";
 import { handleDevelopmentRoutes } from "./http/development-routes";
 import { handleFinanceRoutes } from "./http/finance-routes";
 import { handleIntelligenceRoutes } from "./http/intelligence-routes";
 import { handleMemberRoutes } from "./http/member-routes";
 import { handleNotificationRoutes } from "./http/notification-routes";
+import { handleNotificationPlatformRoutes } from "./http/notification-platform-routes";
+import { handleReminderRoutes } from "./http/reminder-routes";
+import { handleDealsRoutes } from "./http/deals-routes";
+import { handleForwardedRoutes } from "./http/forwarded-routes";
 import { handleOperationsRoutes } from "./http/operations-routes";
 import { handleRunRoutes } from "./http/run-routes";
 import { handleSkillCommissionRoutes } from "./http/skill-commission-routes";
@@ -62,11 +69,23 @@ import { handleWorkplaceRoutes } from "./http/workplace-routes";
 import { HttpError, json } from "./http/http-boundary";
 import type { RunRouteInput } from "./http/run-input-schema";
 import { ContentTaskRunner } from "./application/content-task-runner";
+import { CodexTelegramController } from "./application/codex-telegram-controller";
+import { CodexScheduledDeliveryService } from "./application/codex-scheduled-delivery-service";
 import { DevelopmentTaskRunner } from "./application/development-task-runner";
 import {
   IntelligenceTaskConflictError,
   IntelligenceTaskRunner,
 } from "./application/intelligence-task-runner";
+import {
+  createNotificationPlatform,
+  type NotificationPlatformTargetConfiguration,
+} from "./bootstrap/notification-platform";
+import { ReminderService } from "./application/reminder-service";
+import { DealsService } from "./application/deals-service";
+import { DealsSourceClient } from "./integrations/deals-source-client";
+import { ForwardedRelayService } from "./application/forwarded-relay-service";
+import { NtfyForwardedSourceClient } from "./integrations/ntfy-forwarded-source-client";
+import { ContentNotificationService } from "./application/content-notification-service";
 
 export interface PlaygroundOptions {
   configDir: string;
@@ -77,6 +96,11 @@ export interface PlaygroundOptions {
   fetchImpl?: typeof fetch;
   createIllustrationGenerator?: (config: LocalConfigSet) => ContentIllustrationGenerator | undefined;
   recurringServiceStatus?: () => RecurringServiceState[];
+  codexSupervisor?: CodexRouteService;
+  publicBaseUrl?: string;
+  notificationTargets?: NotificationPlatformTargetConfiguration;
+  dealsSourceUrl?: string;
+  forwardedCredentialsFile?: string;
 }
 
 interface RunJob {
@@ -102,10 +126,48 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
   const jobStore = new JobStore<RunJob, RunRouteInput>(options.dataDir);
   const specialistTasks = new SpecialistTaskRepository(options.dataDir);
   const barkManagement = new BarkNotificationService(options.dataDir, options.fetchImpl ?? fetch);
+  const notificationPlatform = createNotificationPlatform({
+    dataDir: options.dataDir,
+    bark: barkManagement,
+    telegram: new TelegramBotService(options.dataDir, options.fetchImpl ?? fetch),
+    telegramTargets: options.notificationTargets?.telegramTargets ?? [],
+    ntfyTargets: options.notificationTargets?.ntfyTargets ?? [],
+    ntfyFetch: options.fetchImpl,
+  });
+  const reminderService = notificationPlatform.then((platform) => new ReminderService({
+    dataDir: options.dataDir,
+    dispatcher: platform.dispatcher,
+  }));
+  const dealsService = notificationPlatform.then((platform) => new DealsService({
+    dataDir: options.dataDir,
+    dispatcher: platform.dispatcher,
+    source: new DealsSourceClient({ sourceUrl: options.dealsSourceUrl, fetchImpl: options.fetchImpl }),
+  }));
+  const forwardedService = notificationPlatform.then((platform) => new ForwardedRelayService({
+    dataDir: options.dataDir,
+    dispatcher: platform.dispatcher,
+    source: new NtfyForwardedSourceClient({
+      credentialsFile: options.forwardedCredentialsFile,
+      fetchImpl: options.fetchImpl,
+    }),
+  }));
+  const contentNotificationService = notificationPlatform.then((platform) => new ContentNotificationService({
+    dataDir: options.dataDir,
+    dispatcher: platform.dispatcher,
+  }));
   const actionJournal = new ActionJournal(options.dataDir);
   const abilityTemplates = new AbilityTemplateStore(options.dataDir);
   const intelligencePreferences = new IntelligencePreferenceStore(options.dataDir);
   const financePreferences = new FinancePreferenceStore(options.dataDir);
+  const codexTelegram = options.codexSupervisor ? new CodexTelegramController({
+    dataDir: options.dataDir, operations: options.codexSupervisor,
+    fetchImpl: options.fetchImpl, publicBaseUrl: options.publicBaseUrl,
+  }) : undefined;
+  const codexScheduledDelivery = new CodexScheduledDeliveryService({
+    dataDir: options.dataDir,
+    publicBaseUrl: options.publicBaseUrl,
+    fetchImpl: options.fetchImpl,
+  });
   const skillRegistry = new SkillRegistryService(
     options.projectRoot ?? resolve(import.meta.dir, "../../.."), options.dataDir,
   );
@@ -250,11 +312,15 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
     specialistTasks,
     ensureServiceBindings,
     getContentService: async () => (await getMemberServices()).content,
+    listDueScheduledNotifications: async () => (await contentNotificationService).dueWorkIds(),
+    notifyScheduled: async (work) => (await contentNotificationService).notify(work),
   });
   const hydration = Promise.all([
     runHydration,
     developmentTaskRunner.ready,
     intelligenceTaskRunner.ready,
+    notificationPlatform,
+    reminderService,
   ]);
 
   const enqueueRun = async (input: RunRouteInput): Promise<RunJob> => {
@@ -352,13 +418,30 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
 
   return {
     jobs,
+    codexScheduledDelivery,
     runScheduledIntelligence: () => intelligenceTaskRunner.runScheduled("ai"),
     runScheduledFinance: () => intelligenceTaskRunner.runScheduled("finance"),
     runScheduledContent: () => contentTaskRunner.runScheduled(),
+    runScheduledCodexTelegram: async () => codexTelegram?.runScheduled(),
+    runScheduledReminder: async () => (await reminderService).runDue(),
+    runScheduledDeals: async () => (await dealsService).runDue(),
+    runScheduledForwarded: async () => (await forwardedService).runDue(),
     async fetch(request: Request): Promise<Response> {
       const url = new URL(request.url);
       try {
         await hydration;
+        const codexScheduledResponse = await handleCodexScheduledRoutes(request, url, {
+          service: codexScheduledDelivery,
+          requireOperator: (candidate) => requireOperator(candidate, options.operatorToken),
+        });
+        if (codexScheduledResponse) return codexScheduledResponse;
+        if (options.codexSupervisor) {
+          const codexResponse = await handleCodexRoutes(request, url, {
+            service: options.codexSupervisor,
+            requireOperator: (candidate) => requireOperator(candidate, options.operatorToken),
+          });
+          if (codexResponse) return codexResponse;
+        }
         const abilityTemplateResponse = await handleAbilityTemplateRoutes(request, url, {
           store: abilityTemplates,
           requireOperator: (candidate) => requireOperator(candidate, options.operatorToken),
@@ -409,6 +492,9 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
           }),
           enqueueTask: (input) => intelligenceTaskRunner.enqueue(input),
           getTask: (id) => intelligenceTaskRunner.get(id),
+          handleTelegramUpdate: async (update) => codexTelegram?.accepts(update)
+            ? codexTelegram.handleUpdate(update)
+            : (await getMemberServices()).intelligence.handleTelegramUpdate(update),
           requireOperator: (candidate) => requireOperator(candidate, options.operatorToken),
         });
         if (intelligenceResponse) return intelligenceResponse;
@@ -460,6 +546,34 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
           requireOperator: (candidate) => requireOperator(candidate, options.operatorToken),
         });
         if (notificationResponse) return notificationResponse;
+
+        const platform = await notificationPlatform;
+        const notificationPlatformResponse = await handleNotificationPlatformRoutes(request, url, {
+          service: {
+            listTargets: platform.listTargets,
+            dispatch: (input) => platform.dispatcher.dispatch(input),
+          },
+          requireOperator: (candidate) => requireOperator(candidate, options.operatorToken),
+        });
+        if (notificationPlatformResponse) return notificationPlatformResponse;
+
+        const reminderResponse = await handleReminderRoutes(request, url, {
+          service: await reminderService,
+          requireOperator: (candidate) => requireOperator(candidate, options.operatorToken),
+        });
+        if (reminderResponse) return reminderResponse;
+
+        const dealsResponse = await handleDealsRoutes(request, url, {
+          service: await dealsService,
+          requireOperator: (candidate) => requireOperator(candidate, options.operatorToken),
+        });
+        if (dealsResponse) return dealsResponse;
+
+        const forwardedResponse = await handleForwardedRoutes(request, url, {
+          service: await forwardedService,
+          requireOperator: (candidate) => requireOperator(candidate, options.operatorToken),
+        });
+        if (forwardedResponse) return forwardedResponse;
 
         const operationsResponse = await handleOperationsRoutes(request, url, {
           recurringServiceStatus: () => options.recurringServiceStatus?.() ?? [],
@@ -515,7 +629,13 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
               finance_source_ledger: "tiered_health_cache_v1",
               durable_state: "sqlite_wal_v1",
               internal_bark: "self_hosted_multi_target_v3_api",
-              telegram_bot: "group_commands_feedback_v1",
+              telegram_bot: "group_commands_feedback_codex_v2",
+              notification_platform: "bark_telegram_ntfy_envelope_v1",
+              reminders: "scheduled_notification_v1",
+              deals: "hourly_public_source_digest_v1",
+              forwarded_relay: "governed_ntfy_relay_v1",
+              codex_scheduled_telegram: "explicit_subscription_capability_v1",
+              codex_supervisor: options.codexSupervisor?.getStatus().enabled ? "shared_app_server_opt_in_v1" : "disabled",
               content_studio: "three_member_text_visual_evidence_v2",
               specialist_services: "typed_contract_v1",
               evidence_observatory: "cross_domain_funnel_v1",

@@ -3,8 +3,12 @@ import { resolve } from "node:path";
 
 import { StateDatabase } from "./state-database";
 import { readBoundedResponseText } from "./integrations/bounded-response";
+import {
+  NOTIFICATION_DOMAINS,
+  type NotificationDomain,
+} from "./domains/notification/notification-envelope";
 
-export type BarkDomain = "ai" | "finance";
+export type BarkDomain = NotificationDomain;
 
 export interface BarkMessage {
   title: string;
@@ -125,8 +129,8 @@ interface ChannelRow {
   last_error: string | null;
 }
 
-const ALL_DOMAINS: BarkDomain[] = ["ai", "finance"];
-const VALID_DOMAINS = new Set<BarkDomain>(ALL_DOMAINS);
+const DEFAULT_DOMAINS: BarkDomain[] = ["ai", "finance"];
+const VALID_DOMAINS = new Set<BarkDomain>(NOTIFICATION_DOMAINS);
 const LOCALHOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 const managementLocks = new Map<string, Promise<void>>();
 
@@ -197,7 +201,7 @@ export class BarkNotificationService {
       const label = input.label === undefined
         ? priorConfig?.label ?? id
         : validateTargetLabel(input.label, id);
-      const domains = input.domains === undefined ? priorConfig?.domains ?? [...ALL_DOMAINS] : parseDomains(input.domains, id);
+      const domains = input.domains === undefined ? priorConfig?.domains ?? [...DEFAULT_DOMAINS] : parseDomains(input.domains, id);
       if (!domains.length) throw new Error(`Bark target ${id} must receive at least one domain`);
       const enabled = input.enabled === undefined ? priorConfig?.enabled ?? true : input.enabled;
       if (typeof enabled !== "boolean") throw new Error(`Bark target ${id} enabled must be boolean`);
@@ -574,7 +578,7 @@ export class BarkNotificationService {
       label: "现有主设备",
       server_url: validateServerUrl(selectedServer),
       deviceKey,
-      domains: [...ALL_DOMAINS],
+      domains: [...DEFAULT_DOMAINS],
       enabled: true,
       authorization,
       source: "legacy",
@@ -655,7 +659,7 @@ export class BarkNotificationService {
 }
 
 function parseDomains(value: unknown, targetId: string): BarkDomain[] {
-  if (value === undefined) return [...ALL_DOMAINS];
+  if (value === undefined) return [...DEFAULT_DOMAINS];
   if (!Array.isArray(value)) throw new Error(`Bark target ${targetId} domains must be an array`);
   const domains: BarkDomain[] = [];
   for (const valueItem of value) {

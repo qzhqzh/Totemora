@@ -11,6 +11,8 @@ Bot 当前提供：
 - `/news`：查看最近三条候选；
 - `/help`：查看用法。
 
+Codex Scheduled task 的日报/好物摘要也可通过显式订阅投递到同一白名单群，但不会订阅所有对话。创建与撤销入口、一次性 capability 和幂等规则见 [Codex 定时任务定向投递](codex-supervisor.md#定时任务定向投递)。
+
 保持 BotFather 的 Group Privacy Mode 开启即可。Telegram 官方说明，隐私模式下 Bot 仍会
 收到明确发给它的命令、回复和自身按钮回调；Totemora 不需要读取普通群聊，也不会把
 群消息送进模型。命令菜单只是 UI 提示，服务端仍会校验命令和群白名单。
@@ -50,6 +52,12 @@ chmod 600 .totemora/secrets/telegram-chat-ids
 Telegram 的 `getUpdates` 与 Webhook 互斥，所以 `discover` 应在 `setup` 之前执行。官方行为
 见 [Bot API: Getting updates](https://core.telegram.org/bots/api#getting-updates)。
 
+若服务器不能直接访问 Telegram Bot API，可把一个受信任的 HTTP/HTTPS forward proxy 写入
+`.totemora/secrets/telegram-http-proxy`（权限 `0600`），或设置
+`TOTEMORA_TELEGRAM_HTTP_PROXY`。明文 HTTP proxy 只允许绑定在本机；Bun 不直接接受 SOCKS URL，
+需要先在 `127.0.0.1` 上提供 HTTP-to-SOCKS bridge。服务仍会端到端校验 Telegram HTTPS
+证书，不能通过关闭 TLS 校验绕过网络问题。
+
 ## 3. 暴露 HTTPS Webhook
 
 `TOTEMORA_PUBLIC_BASE_URL` 必须是 Telegram 能访问的 HTTPS Gateway 地址。本服务器已有
@@ -70,6 +78,7 @@ curl --fail https://totemora.qzhqzh.com/api/status
 
 ```text
 POST /api/integrations/telegram/webhook
+POST /mcp/codex-scheduled
 ```
 
 然后执行：

@@ -44,4 +44,5 @@ await writeFile(
 );
 
 process.env.TOTEMORA_CONFIG_DIR = configDir;
+process.env.TOTEMORA_OPERATOR_TOKEN = "totemora-e2e-operator-token";
 await import("../../packages/server/src/index");

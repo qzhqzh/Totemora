@@ -3,6 +3,7 @@ import { z } from "zod/v4";
 import { totemoraProductVersion } from "@totemora/core";
 
 import { TotemoraGatewayClient, type DevelopmentProposalSummary } from "./gateway-client";
+import { registerCodexOperatorTools } from "./codex-operator-tools";
 
 const capabilityText = [
   "Totemora exposes one persistent Git Flow capability, not a collection of raw GitHub commands.",
@@ -222,6 +223,7 @@ export function createTotemoraMcpServer(gateway: TotemoraGatewayClient): McpServ
     return gateway.advanceGitFlow(workflow_id, gate);
   }));
 
+  registerCodexOperatorTools(server, gateway);
   return server;
 }
 

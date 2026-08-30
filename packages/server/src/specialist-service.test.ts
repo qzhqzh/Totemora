@@ -3,7 +3,15 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { SpecialistTaskRepository } from "./specialist-service";
+import { requireService, SpecialistTaskRepository } from "./specialist-service";
+
+test("Codex supervisor is registered as a repository-mutation specialist service", () => {
+  expect(requireService("codex.supervisor")).toMatchObject({
+    operations: ["supervise_goal"],
+    risk: "repository_mutation",
+    stages: ["observe", "align", "execute", "verify", "complete"],
+  });
+});
 
 test("specialist task envelope enforces typed operations and optimistic revisions", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "totemora-specialist-task-"));
