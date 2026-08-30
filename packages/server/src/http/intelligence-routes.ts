@@ -14,7 +14,7 @@ const FEEDBACK_SIGNALS = ["valuable", "not_valuable", "duplicate", "too_late"] a
 
 export type IntelligenceRouteService = Pick<IntelligenceService,
   "list" | "listCandidates" | "candidateCounts" | "barkStatus" | "telegramStatus"
-  | "verifyTelegramWebhook" | "handleTelegramUpdate" | "recordFeedback" | "openFeedback" | "run"
+  | "verifyTelegramWebhook" | "handleTelegramUpdate" | "recordFeedback" | "openFeedback" | "run" | "sourceHealth"
 >;
 
 export interface IntelligenceTaskView {
@@ -40,6 +40,9 @@ export async function handleIntelligenceRoutes(
 
   if (request.method === "GET" && url.pathname === "/api/intelligence") {
     return json({ briefs: await (await dependencies.getIntelligence()).list() });
+  }
+  if (request.method === "GET" && url.pathname === "/api/intelligence/sources") {
+    return json({ sources: (await dependencies.getIntelligence()).sourceHealth() });
   }
   if (request.method === "GET" && url.pathname === "/api/intelligence/candidates") {
     const intelligence = await dependencies.getIntelligence();

@@ -5,13 +5,16 @@ import type {
 } from "../content-studio-service";
 import type { SpecialistTaskRepository } from "../specialist-service";
 import { failInterruptedSpecialistTask } from "./specialist-task-recovery";
+import type { ContentNotificationOutcome } from "./content-notification-service";
 
 export type ContentTaskTrigger = "manual" | "scheduled" | "web";
 
 interface ContentTaskRunnerOptions {
   specialistTasks: SpecialistTaskRepository;
   ensureServiceBindings(): Promise<void>;
-  getContentService(): Promise<Pick<ContentStudioService, "createQueued" | "execute" | "dueInput">>;
+  getContentService(): Promise<Pick<ContentStudioService, "createQueued" | "execute" | "dueInput" | "get">>;
+  listDueScheduledNotifications?(): Promise<string[]>;
+  notifyScheduled?(work: ContentWork): Promise<ContentNotificationOutcome>;
 }
 
 const RESTART_ERROR_PREFIX = "Gateway restarted while content members were collaborating";
@@ -44,12 +47,14 @@ export class ContentTaskRunner {
       idempotency_key: work.id,
       input,
     });
-    void this.execute(work, content, serviceTask.revision);
+    void this.execute(work, content, serviceTask.revision, trigger);
     return work;
   }
 
   async runScheduled() {
-    const input = await (await this.options.getContentService()).dueInput();
+    const content = await this.options.getContentService();
+    await this.retryScheduledNotifications(content);
+    const input = await content.dueInput();
     return input ? this.enqueue(input, "scheduled") : undefined;
   }
 
@@ -57,6 +62,7 @@ export class ContentTaskRunner {
     work: ContentWork,
     content: Pick<ContentStudioService, "execute">,
     serviceTaskRevision: number,
+    trigger: ContentTaskTrigger,
   ): Promise<void> {
     try {
       const running = this.options.specialistTasks.update(work.id, serviceTaskRevision, {
@@ -86,8 +92,40 @@ export class ContentTaskRunner {
         error: result.error,
         summary: `内容协作失败：${result.error ?? "unknown error"}`,
       });
+      if (result.status === "ready" && trigger === "scheduled") {
+        await this.notifyScheduled(result);
+      }
     } catch (error) {
       this.persistUnhandledFailure(work.id, error);
+    }
+  }
+
+  private async retryScheduledNotifications(
+    content: Pick<ContentStudioService, "get">,
+  ): Promise<void> {
+    if (!this.options.notifyScheduled || !this.options.listDueScheduledNotifications) return;
+    for (const workId of await this.options.listDueScheduledNotifications()) {
+      const work = content.get(workId);
+      if (work?.status === "ready") await this.notifyScheduled(work);
+    }
+  }
+
+  private async notifyScheduled(work: ContentWork): Promise<void> {
+    if (!this.options.notifyScheduled) return;
+    try {
+      const outcome = await this.options.notifyScheduled(work);
+      if (!outcome.changed) return;
+      this.options.specialistTasks.appendEvent(work.id, {
+        type: "evidence",
+        stage: "dispatch",
+        summary: outcome.record.status === "suppressed"
+          ? "迁移切换前已完成的定时内容已保留，未追溯推送"
+          : `定时内容通知已记录为 ${outcome.record.status}`,
+      });
+    } catch (error) {
+      console.error(
+        `Unable to dispatch scheduled content notification ${work.id}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 

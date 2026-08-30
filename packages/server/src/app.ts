@@ -85,6 +85,7 @@ import { DealsService } from "./application/deals-service";
 import { DealsSourceClient } from "./integrations/deals-source-client";
 import { ForwardedRelayService } from "./application/forwarded-relay-service";
 import { NtfyForwardedSourceClient } from "./integrations/ntfy-forwarded-source-client";
+import { ContentNotificationService } from "./application/content-notification-service";
 
 export interface PlaygroundOptions {
   configDir: string;
@@ -149,6 +150,10 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
       credentialsFile: options.forwardedCredentialsFile,
       fetchImpl: options.fetchImpl,
     }),
+  }));
+  const contentNotificationService = notificationPlatform.then((platform) => new ContentNotificationService({
+    dataDir: options.dataDir,
+    dispatcher: platform.dispatcher,
   }));
   const actionJournal = new ActionJournal(options.dataDir);
   const abilityTemplates = new AbilityTemplateStore(options.dataDir);
@@ -307,6 +312,8 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
     specialistTasks,
     ensureServiceBindings,
     getContentService: async () => (await getMemberServices()).content,
+    listDueScheduledNotifications: async () => (await contentNotificationService).dueWorkIds(),
+    notifyScheduled: async (work) => (await contentNotificationService).notify(work),
   });
   const hydration = Promise.all([
     runHydration,

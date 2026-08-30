@@ -69,6 +69,7 @@ test("state migrations register every version and remain idempotent", () => {
       { version: 12, name: "durable reminder domain and delivery ledger" },
       { version: 13, name: "durable deals collection and delivery ledger" },
       { version: 14, name: "governed forwarded ntfy relay" },
+      { version: 15, name: "legacy intelligence delivery evidence" },
     ]);
   } finally {
     db.close();

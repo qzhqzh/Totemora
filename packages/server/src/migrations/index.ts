@@ -14,6 +14,7 @@ import { applyCodexScheduledSubscriptionsMigration } from "./011-codex-scheduled
 import { applyReminderDomainMigration } from "./012-reminder-domain";
 import { applyDealsDomainMigration } from "./013-deals-domain";
 import { applyForwardedRelayMigration } from "./014-forwarded-relay";
+import { applyLegacyIntelligenceEvidenceMigration } from "./015-legacy-intelligence-evidence";
 import type { StateMigration } from "./migration";
 
 const migrations: readonly StateMigration[] = [
@@ -31,6 +32,7 @@ const migrations: readonly StateMigration[] = [
   applyReminderDomainMigration,
   applyDealsDomainMigration,
   applyForwardedRelayMigration,
+  applyLegacyIntelligenceEvidenceMigration,
 ];
 
 export function runStateMigrations(db: Database): void {

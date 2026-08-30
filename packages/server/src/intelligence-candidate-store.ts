@@ -329,6 +329,12 @@ export class IntelligenceCandidateStore {
       WHERE domain=? AND created_at>=?
       ORDER BY created_at DESC LIMIT 1000
     `).all(input.domain, cutoff) as Array<{ id: string; url: string; headline: string }>;
+    const legacyRows = this.state.db.query(`
+      SELECT 'legacy:' || legacy_ref AS id,url,headline FROM legacy_intelligence_evidence
+      WHERE domain=? AND delivered_at>=?
+      ORDER BY delivered_at DESC LIMIT 2000
+    `).all(input.domain, cutoff) as Array<{ id: string; url: string; headline: string }>;
+    rows.push(...legacyRows);
     const novel: T[] = [];
     const suppressed: Array<{ evidence: T; candidate_id: string }> = [];
     for (const evidence of input.evidence) {

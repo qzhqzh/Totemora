@@ -291,6 +291,46 @@ test("AI watch filters unrelated general news before model evaluation", async ()
   await rm(dataDir, { recursive: true, force: true });
 });
 
+test("AI watch includes recent CISA evidence and exposes an isolated USGS degradation", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-intelligence-authority-"));
+  await new IntelligencePreferenceStore(dataDir).save({
+    interests: ["网络安全", "重大事件"],
+    channels: { rss: true, ai_hot: false, x_trends: false, weibo_hot: false },
+    x_woeid: 1,
+  });
+  const config = await loadLocalConfig({ configDir: resolve(import.meta.dir, "../../../configs/example") });
+  const cisaUrl = "https://www.cisa.gov/known-exploited-vulnerabilities-catalog?search_api_fulltext=CVE-2026-12345";
+  const provider: AgentProvider = { async generate() { return { content: JSON.stringify({
+    title: "权威安全更新", summary: "CISA 增补一项已利用漏洞。",
+    items: [{ headline: "CVE 更新", brief: "需要核对处置要求。", url: cisaUrl }],
+  }) }; } };
+  const fakeFetch = (async (input: string | URL | Request) => {
+    const url = String(input);
+    if (url.includes("known_exploited_vulnerabilities.json")) return Response.json({ vulnerabilities: [{
+      cveID: "CVE-2026-12345", vendorProject: "Example", product: "Gateway",
+      vulnerabilityName: "Remote execution", dateAdded: "2026-08-29",
+      shortDescription: "Observed exploitation.", requiredAction: "Apply mitigations.",
+      dueDate: "2026-09-01", knownRansomwareCampaignUse: "Unknown",
+    }] });
+    if (url.includes("significant_day.geojson")) return new Response("offline", { status: 503 });
+    return new Response("<rss><channel></channel></rss>");
+  }) as unknown as typeof fetch;
+  const service = new IntelligenceService(
+    config, { get: () => provider }, new MemberStateStore(dataDir, config), dataDir,
+    resolve(import.meta.dir, "../../.."), fakeFetch,
+  );
+  const brief = await service.run({ defer_push: true });
+  expect(brief.sources).toContainEqual(expect.objectContaining({
+    link: cisaUrl, source: "cisa.gov", category: "cybersecurity",
+  }));
+  expect(brief.warnings).toContain("USGS significant earthquakes source failed (503)");
+  expect(service.sourceHealth()).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: "cisa-kev", status: "ready", last_item_count: 1 }),
+    expect.objectContaining({ id: "usgs-significant-day", status: "degraded", consecutive_failures: 1 }),
+  ]));
+  await rm(dataDir, { recursive: true, force: true });
+});
+
 test("AI watch treats an all-out-of-scope scan as a healthy no-op", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "totemora-intelligence-empty-scope-"));
   await new IntelligencePreferenceStore(dataDir).save({
@@ -312,7 +352,7 @@ test("AI watch treats an all-out-of-scope scan as a healthy no-op", async () => 
   const brief = await service.run({ defer_push: true });
   expect(brief).toMatchObject({
     status: "completed", title: "听风巡查 · 无新增",
-    source_gate: { collected: 2, out_of_scope: 2, model_evaluated: 0 },
+    source_gate: { collected: 3, out_of_scope: 3, model_evaluated: 0 },
   });
   expect(generations).toBe(0);
   await rm(dataDir, { recursive: true, force: true });

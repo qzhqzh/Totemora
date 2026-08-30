@@ -26,6 +26,7 @@ bun run start:web
 - [事项提醒与旧 memo 迁移](docs/reminders.md)
 - [优惠雷达与旧 deals 迁移](docs/deals.md)
 - [指定 ntfy 消息转发与旧 history 迁移](docs/forwarded-relay.md)
+- [通知项目整合、退役与归档回执](docs/notice-consolidation.md)
 - [当前推进计划](docs/execution-plan.md)
 - [收益基准与稳定性演练](docs/benchmark.md)
 - [JSON 到 SQLite 升级指南](docs/storage-migration.md)

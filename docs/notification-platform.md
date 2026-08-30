@@ -2,7 +2,7 @@
 
 Totemora 使用同一个 `NotificationEnvelope v1` 把已决定外发的内容交给 Bark、Telegram 和 ntfy。通知平台只负责领域路由、逐目标幂等和传输回执，不取代 AI、财经、提醒、优惠等业务领域自己的筛选与状态机。
 
-Gateway 已能加载三通道目标、查看公开目标元数据并由 Operator 发送受限测试通知。2026-08-30 起，Bark 与 ntfy 传输容器统一归 `totemora` Compose 管理；旧 `notice-ntfy` 项目已停止全部容器，不再影子运行。现有 AI / 财经业务继续由 Totemora 服务承担；reminder、deals 与指定上游 forwarded relay 已分别完成 SQLite、Web、Operator API、可重复导入器和周期调度接管，详细契约见[事项提醒](reminders.md)、[优惠雷达](deals.md)与[指定 ntfy 消息转发](forwarded-relay.md)。周期内容尚未完成领域迁移时明确保持不可用，不通过恢复旧 worker 隐式补位。
+Gateway 已能加载三通道目标、查看公开目标元数据并由 Operator 发送受限测试通知。2026-08-30 起，Bark 与 ntfy 传输容器统一归 `totemora` Compose 管理；旧 `notice-ntfy` 项目已停止全部容器，不再影子运行。AI / 财经、reminder、deals、指定上游 forwarded relay 和显式启用的 scheduled content 均由 Totemora 接管；手动内容保持静默，cutover 前的旧 scheduled 作品不会集中补发。能力归宿、去重种子和归档回执见[通知项目整合报告](notice-consolidation.md)。
 
 ## 目标与 Secret
 

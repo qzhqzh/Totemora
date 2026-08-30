@@ -28,9 +28,12 @@ export const intelligenceFeature = {
 };
 
 async function loadIntelligence() {
-  const [{ briefs }, pool] = await Promise.all([api("/api/intelligence"), api("/api/intelligence/candidates")]);
+  const [{ briefs }, pool, { sources }] = await Promise.all([
+    api("/api/intelligence"), api("/api/intelligence/candidates"), api("/api/intelligence/sources"),
+  ]);
   renderCandidatePool(pool, "candidate-summary", "intelligence-candidates");
   renderBriefs(briefs, "intelligence-history", "听风尚未带回情报。");
+  $("intelligence-source-ledger").innerHTML = sources.map((source) => `<div class="source-row"><strong>${externalLink(source.url, source.name)}</strong><span class="source-state ${escapeHtml(source.status)}">${escapeHtml(source.kind)} · ${escapeHtml(source.status)}</span><p>${escapeHtml(source.summary)}</p><small>${source.last_success_at ? `上次成功 ${escapeHtml(source.last_success_at)} · ${source.last_item_count} 条` : escapeHtml(source.error || "等待首次扫描")}</small><small>${source.consecutive_failures ? `连续失败 ${source.consecutive_failures} 次` : "来源正常"}</small></div>`).join("") || '<p class="section-note">完成首次听风扫描后显示来源健康状态。</p>';
   if (operatorSession.authenticated) {
     try {
       renderBarkStatus("bark-status", await operatorApi("/api/intelligence/bark?health=1"), "AI");
