@@ -5,9 +5,10 @@ let reminders = [];
 
 $("refresh-reminders").addEventListener("click", async (event) => {
   if (!operatorSession.authenticated) return openOperatorDialog();
-  event.currentTarget.disabled = true;
+  const button = event.currentTarget;
+  button.disabled = true;
   try { await loadReminders(); }
-  finally { event.currentTarget.disabled = false; }
+  finally { button.disabled = false; }
 });
 $("reminder-filter-status").addEventListener("change", () => void loadReminders());
 $("reminder-create-form").addEventListener("submit", createReminder);
