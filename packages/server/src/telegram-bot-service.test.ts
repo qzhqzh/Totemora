@@ -36,6 +36,35 @@ test("Telegram Bot sends an allowlisted group message with bounded feedback butt
   await rm(dataDir, { recursive: true, force: true });
 });
 
+test("Telegram Bot uses an optional validated HTTP proxy", async () => {
+  const dataDir = await telegramDataDir("totemora-telegram-proxy-");
+  await writeFile(join(dataDir, "secrets", "telegram-http-proxy"), "http://127.0.0.1:19081\n");
+  let proxy: string | undefined;
+  const service = new TelegramBotService(dataDir, (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    proxy = (init as RequestInit & { proxy?: string })?.proxy;
+    return Response.json({ ok: true, result: { message_id: 42 } });
+  }) as unknown as typeof fetch);
+
+  await expect(service.sendText("-100123", "test")).resolves.toMatchObject({ message_id: 42 });
+  expect(proxy).toBe("http://127.0.0.1:19081/");
+  await rm(dataDir, { recursive: true, force: true });
+});
+
+test("Telegram Bot rejects unsupported proxy protocols before sending", async () => {
+  const dataDir = await telegramDataDir("totemora-telegram-proxy-invalid-");
+  await writeFile(join(dataDir, "secrets", "telegram-http-proxy"), "socks5h://127.0.0.1:19080\n");
+  let calls = 0;
+  const service = new TelegramBotService(dataDir, (async () => {
+    calls += 1;
+    return Response.json({ ok: true, result: { message_id: 42 } });
+  }) as unknown as typeof fetch);
+
+  await expect(service.sendText("-100123", "test"))
+    .rejects.toThrow("Telegram HTTP proxy must use HTTP or HTTPS");
+  expect(calls).toBe(0);
+  await rm(dataDir, { recursive: true, force: true });
+});
+
 test("Telegram setup registers a secret webhook and scoped group commands", async () => {
   const dataDir = await telegramDataDir("totemora-telegram-setup-");
   const requests: Array<{ method: string; body: Record<string, any> }> = [];
@@ -55,7 +84,7 @@ test("Telegram setup registers a secret webhook and scoped group commands", asyn
     secret_token: "webhook_secret",
     allowed_updates: ["message", "callback_query"],
   });
-  expect(requests.find((item) => item.method === "setMyCommands")?.body.commands).toHaveLength(3);
+  expect(requests.find((item) => item.method === "setMyCommands")?.body.commands).toHaveLength(6);
   await rm(dataDir, { recursive: true, force: true });
 });
 
@@ -68,7 +97,9 @@ test("Telegram opens its circuit on an API retry_after response", async () => {
       ok: false, error_code: 429, description: "Too Many Requests", parameters: { retry_after: 30 },
     }, { status: 429 });
   }) as unknown as typeof fetch);
-  await expect(service.sendText("-100123", "test")).rejects.toBeInstanceOf(TelegramDeliveryError);
+  const rejection = await service.sendText("-100123", "test").catch((error) => error);
+  expect(rejection).toBeInstanceOf(TelegramDeliveryError);
+  expect(rejection).toMatchObject({ retryable: true, outcomeUncertain: false });
   expect(await service.status()).toMatchObject({ channel_status: "open", consecutive_failures: 1 });
   await expect(service.sendText("-100123", "test")).rejects.toThrow("circuit is open");
   expect(calls).toBe(1);
@@ -99,6 +130,39 @@ test("Telegram success without a receipt becomes uncertain and is not replayed",
   expect(calls).toBe(1);
   expect((await journal.list())[0]).toMatchObject({ status: "uncertain", attempts: 1 });
   await rm(dataDir, { recursive: true, force: true });
+});
+
+test("Telegram gateway and invalid receipts become uncertain and are not replayed", async () => {
+  const cases: Array<{ name: string; response: () => Response }> = [
+    { name: "502", response: () => new Response("Bad Gateway", { status: 502 }) },
+    { name: "504", response: () => Response.json({ ok: true }, { status: 504 }) },
+    { name: "invalid-json", response: () => new Response("not-json", { status: 200 }) },
+  ];
+  for (const scenario of cases) {
+    const dataDir = await telegramDataDir(`totemora-telegram-${scenario.name}-`);
+    let calls = 0;
+    const service = new TelegramBotService(dataDir, (async () => {
+      calls += 1;
+      return scenario.response();
+    }) as unknown as typeof fetch);
+    const journal = new ActionJournal(dataDir);
+    const input = {
+      idempotency_key: `telegram:${scenario.name}`, asset_id: "telegram-bot",
+      member_id: "qwen_intelligence", action: "push_notification",
+      request: { chat_id: "-100123", body: scenario.name },
+    };
+    await expect(journal.executeEffectOnce(input, async () => {
+      const result = await service.sendText("-100123", scenario.name);
+      return `message ${result.message_id}`;
+    })).rejects.toBeInstanceOf(UncertainExternalEffectError);
+    await expect(journal.executeEffectOnce(input, async () => {
+      calls += 1;
+      return "duplicate";
+    })).rejects.toBeInstanceOf(UncertainExternalEffectError);
+    expect(calls).toBe(1);
+    expect((await journal.list())[0]).toMatchObject({ status: "uncertain", attempts: 1 });
+    await rm(dataDir, { recursive: true, force: true });
+  }
 });
 
 test("Telegram rejects a chunked response above its byte budget", async () => {

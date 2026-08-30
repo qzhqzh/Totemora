@@ -35,6 +35,8 @@ bun-debug.log*
 *.jpg
 *.webp
 *.gif
+!docs/design/codex-supervisor-desktop-concept.png
+!docs/design/codex-supervisor-mobile-concept.png
 docs/diagrams/*.visual-check.html
 docs/diagrams/*.visual-check.json
 

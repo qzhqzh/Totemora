@@ -4,6 +4,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "bun build src/app.js --target browser --outdir /tmp/totemora-web-check"
+    "check": "bun build src/app.js src/codex-app.js --target browser --outdir /tmp/totemora-web-check"
   }
 }

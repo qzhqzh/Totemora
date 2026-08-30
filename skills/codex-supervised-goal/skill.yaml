@@ -1,0 +1,8 @@
+schema_version: 1
+id: codex-supervised-goal
+name: Codex Supervised Goal
+version: 1
+status: active
+source:
+  kind: local
+  reference: totemora-codex-supervisor

@@ -34,7 +34,7 @@ Totemora 是一个预算约束下的异构智能部落，不是通用聊天产�
 - **默认只读**：通用 Run 不从自然语言目标推导 Shell、文件写入、Git、通知或发布权限。
 - **单一真源**：Web、MCP、Telegram、Bark 和 Cron 共用常驻 Gateway 与 SQLite 状态，不拥有第二套 Runtime。
 
-当前提供 CLI/TUI、本地 Web Gateway 和 MCP 三个主要入口，并以 Telegram、Bark 承接受控通信与通知。Web 已覆盖任务大厅、证据台、成员营帐、火种与资产、AI / 财经情报、内容工坊、Skill 浏览和审批；`totemora run` 默认调用 Gateway，只有显式 `--offline` 与 `onboarding-exam` 保留直接创建本地 Runtime 的兼容入口。
+当前提供 CLI/TUI、本地 Web Gateway 和 MCP 三个主要入口，并以 Telegram、Bark 承接受控通信与通知。Web 已覆盖任务大厅、证据台、成员营帐、火种与资产、AI / 财经情报、内容工坊、Skill 浏览和审批；Codex 控制台还可为最多 3 个明确的 Scheduled task 创建 Telegram 定向投递订阅。`totemora run` 默认调用 Gateway，只有显式 `--offline` 与 `onboarding-exam` 保留直接创建本地 Runtime 的兼容入口。
 
 当前 npm 语义版本是 `0.12.0`，Gateway 和 MCP 对外暴露的产品发布标识是 `0.12.0-evidence-skill-core`。版本真源位于 `packages/core/src/version.ts`。
 
@@ -46,6 +46,7 @@ Totemora 是一个预算约束下的异构智能部落，不是通用聊天产�
 - [Development guide](development.md)
 - [Configuration model](config-model.md)
 - [Always-on Gateway](always-on-gateway.md)
+- [Codex task supervisor](codex-supervisor.md)
 - [JSON 到 SQLite 升级](storage-migration.md)
 - [MCP Gateway](mcp-gateway.md)
 - [Git Flow specialist](development-commit-steward.md)

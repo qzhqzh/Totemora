@@ -53,6 +53,11 @@ test("exposes living members, intelligence and persistent Git Flow through MCP",
     if (url.pathname === "/api/finance/candidates") return Response.json({ candidates: [], counts: { queued: 0 } });
     if (url.pathname === "/api/finance/sources") return Response.json({ sources: [{ id: "cninfo-disclosures", tier: "S0", status: "ready" }] });
     if (url.pathname === "/api/actions") return Response.json({ actions: [] });
+    if (url.pathname === "/api/codex/status") return Response.json({ enabled: true, connected: true, observed_threads: 3 });
+    if (url.pathname === "/api/codex/threads") return Response.json({ threads: [{ thread_id: "thread-1", mode: "observed", revision: 1 }] });
+    if (url.pathname === "/api/codex/threads/thread-1/manage") return Response.json({ thread_id: "thread-1", mode: "managed", revision: 2 });
+    if (url.pathname === "/api/codex/threads/thread-1") return Response.json({ thread: { thread_id: "thread-1" } });
+    if (url.pathname === "/api/codex/interactions") return Response.json({ interactions: [] });
     if (url.pathname === "/api/intelligence/tasks" && init?.method === "POST") return Response.json({ id: "intel-task-1", kind: "intelligence_brief", status: "queued" });
     if (url.pathname === "/api/intelligence/tasks/intel-task-1") return Response.json({ id: "intel-task-1", kind: "intelligence_brief", status: "completed", result: { id: "brief-1", pushed_messages: 3 } });
     if (url.pathname === "/api/finance/tasks" && init?.method === "POST") return Response.json({ id: "finance-task-1", kind: "finance_watch", status: "queued" });
@@ -109,6 +114,16 @@ test("exposes living members, intelligence and persistent Git Flow through MCP",
     "totemora_list_git_flows",
     "totemora_get_git_flow",
     "totemora_advance_git_flow",
+    "totemora_codex_status",
+    "totemora_codex_list_threads",
+    "totemora_codex_get_thread",
+    "totemora_codex_manage_thread",
+    "totemora_codex_pause_thread",
+    "totemora_codex_resume_thread",
+    "totemora_codex_stop_managing",
+    "totemora_codex_send_instruction",
+    "totemora_codex_list_interactions",
+    "totemora_codex_answer_interaction",
   ]);
   expect(tools.tools.find((tool) => tool.name === "totemora_advance_git_flow")?.annotations?.destructiveHint).toBe(true);
 
@@ -175,6 +190,13 @@ test("exposes living members, intelligence and persistent Git Flow through MCP",
   const resource = await client.readResource({ uri: "totemora://capabilities" });
   const capability = resource.contents[0];
   expect(capability && "text" in capability ? capability.text : "").toContain("persistent Git Flow capability");
+  const codexThreads = await client.callTool({ name: "totemora_codex_list_threads", arguments: { limit: 20 } });
+  expect(codexThreads.structuredContent).toMatchObject({ threads: [{ thread_id: "thread-1", mode: "observed" }] });
+  const managedCodex = await client.callTool({
+    name: "totemora_codex_manage_thread",
+    arguments: { thread_id: "thread-1", expected_revision: 1, objective: "finish", token_budget: 150_000 },
+  });
+  expect(managedCodex.structuredContent).toMatchObject({ thread_id: "thread-1", mode: "managed", revision: 2 });
   await client.close();
   await server.close();
 });

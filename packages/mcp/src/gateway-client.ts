@@ -211,6 +211,70 @@ export class TotemoraGatewayClient {
     }) as Promise<DevelopmentProposalSummary>;
   }
 
+  async codexStatus() {
+    return this.request("/api/codex/status");
+  }
+
+  async listCodexThreads(input: { mode?: string; phase?: string; limit?: number }) {
+    const query = new URLSearchParams();
+    if (input.mode) query.set("mode", input.mode);
+    if (input.phase) query.set("phase", input.phase);
+    if (input.limit) query.set("limit", String(input.limit));
+    return this.request(`/api/codex/threads${query.size ? `?${query}` : ""}`);
+  }
+
+  async getCodexThread(threadId: string) {
+    return this.request(`/api/codex/threads/${encodeURIComponent(threadId)}`);
+  }
+
+  async manageCodexThread(input: {
+    thread_id: string; expected_revision: number; objective: string; token_budget: number; deadline_at?: string;
+  }) {
+    return this.request(`/api/codex/threads/${encodeURIComponent(input.thread_id)}/manage`, {
+      method: "POST", body: JSON.stringify(input),
+    });
+  }
+
+  async pauseCodexThread(threadId: string, expectedRevision: number) {
+    return this.codexThreadAction(threadId, "pause", expectedRevision);
+  }
+
+  async resumeCodexThread(threadId: string, expectedRevision: number) {
+    return this.codexThreadAction(threadId, "resume", expectedRevision);
+  }
+
+  async stopManagingCodexThread(threadId: string, expectedRevision: number) {
+    return this.codexThreadAction(threadId, "stop", expectedRevision);
+  }
+
+  async sendCodexInstruction(input: { thread_id: string; content: string; idempotency_key: string }) {
+    return this.request(`/api/codex/threads/${encodeURIComponent(input.thread_id)}/instructions`, {
+      method: "POST", body: JSON.stringify(input),
+    });
+  }
+
+  async listCodexInteractions(input: { thread_id?: string; status?: string; limit?: number }) {
+    const query = new URLSearchParams();
+    if (input.thread_id) query.set("thread_id", input.thread_id);
+    if (input.status) query.set("status", input.status);
+    if (input.limit) query.set("limit", String(input.limit));
+    return this.request(`/api/codex/interactions${query.size ? `?${query}` : ""}`);
+  }
+
+  async answerCodexInteraction(input: {
+    interaction_id: string; expected_revision: number; selected_option_id?: string; response_text?: string;
+  }) {
+    return this.request(`/api/codex/interactions/${encodeURIComponent(input.interaction_id)}/answer`, {
+      method: "POST", body: JSON.stringify(input),
+    });
+  }
+
+  private codexThreadAction(threadId: string, action: "pause" | "resume" | "stop", expectedRevision: number) {
+    return this.request(`/api/codex/threads/${encodeURIComponent(threadId)}/${action}`, {
+      method: "POST", body: JSON.stringify({ expected_revision: expectedRevision }),
+    });
+  }
+
   private async request(path: string, init: RequestInit = {}): Promise<unknown> {
     const response = await this.requestImpl(`${this.gatewayUrl}${path}`, {
       ...init,

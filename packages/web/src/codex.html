@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Codex 监控台 · Totemora</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/codex-styles.css">
+</head>
+<body class="codex-body" data-codex-tab="detail">
+  <header class="codex-header">
+    <div class="codex-brand">
+      <a class="site-name" href="/" aria-label="返回 Totemora 驻地总览"><h1>Totemora</h1></a>
+      <nav class="primary-nav" aria-label="主导航">
+        <a href="/">部落现场</a>
+        <a href="/skills">Skills</a>
+        <a href="/codex" aria-current="page">Codex 监控台</a>
+      </nav>
+    </div>
+    <button id="operator-login-open" type="button" class="operator-login secondary" aria-haspopup="dialog">
+      <span id="operator-auth-state" class="operator-auth-state">未登录</span>
+      <strong id="operator-login-label">操作员登录</strong>
+    </button>
+    <dialog id="operator-dialog" class="operator-dialog" aria-labelledby="operator-dialog-title">
+      <form id="operator-form" method="dialog">
+        <div class="operator-dialog-head"><h2 id="operator-dialog-title">操作员登录</h2><button id="operator-dialog-close" type="button" class="secondary">关闭</button></div>
+        <p>输入 Totemora 服务器生成的 Operator Token。Token 只保存在当前浏览器标签页。</p>
+        <label>Operator Token<input id="operator-token" type="password" autocomplete="off" spellcheck="false" required></label>
+        <div id="operator-login-status" class="operator-login-status" role="status" aria-live="polite">登录后才能读取或控制 Codex 任务。</div>
+        <div class="operator-dialog-actions"><button id="operator-logout" type="button" class="secondary hidden">退出登录</button><button id="operator-login-submit" type="submit">验证并登录</button></div>
+      </form>
+    </dialog>
+  </header>
+
+  <section class="codex-connection" aria-label="Codex 连接状态">
+    <span id="codex-connection"><i></i>等待操作员登录</span>
+    <span id="codex-running">Codex 正在运行 —</span>
+    <span id="codex-managed">Totemora 托管中 —</span>
+    <span id="codex-socket">Socket —</span>
+    <span id="codex-scan">最后同步 —</span>
+    <button id="codex-refresh" type="button" class="secondary">立即刷新</button>
+  </section>
+
+  <nav class="codex-mobile-tabs" aria-label="Codex 监控台视图">
+    <button type="button" data-codex-tab="tasks">任务 <b id="codex-mobile-task-count">0</b></button>
+    <button type="button" data-codex-tab="detail" aria-pressed="true">详情</button>
+    <button type="button" data-codex-tab="decisions">决策 <b id="codex-mobile-decision-count">0</b></button>
+  </nav>
+
+  <main class="codex-workspace">
+    <aside class="codex-pane codex-task-pane" data-codex-pane="tasks" aria-labelledby="codex-task-title">
+      <div class="codex-pane-head">
+        <div><span class="eyebrow">TASK INDEX</span><h2 id="codex-task-title">全部任务</h2></div>
+        <strong id="codex-task-count">0</strong>
+      </div>
+      <div class="codex-task-filters" role="group" aria-label="任务过滤">
+        <button type="button" data-mode="all" aria-pressed="true">全部</button>
+        <button type="button" data-mode="running">正在运行</button>
+        <button type="button" data-mode="managed">托管中</button>
+        <button type="button" data-mode="attention">需处理</button>
+      </div>
+      <label class="codex-search"><span class="sr-only">搜索任务</span><input id="codex-search" type="search" placeholder="搜索标题、Goal 或工作地…"></label>
+      <div id="codex-task-list" class="codex-task-list" aria-live="polite"><p class="codex-empty">登录后显示共享 App Server 中的全部任务。</p></div>
+    </aside>
+
+    <section class="codex-pane codex-detail-pane" data-codex-pane="detail" aria-labelledby="codex-detail-title">
+      <div id="codex-detail" class="codex-detail">
+        <div class="codex-placeholder"><span>CODEX</span><h2 id="codex-detail-title">选择一个任务</h2><p>观察所有正在运行的 Codex 任务；只有显式托管的任务才会被续跑。</p></div>
+      </div>
+    </section>
+
+    <aside class="codex-pane codex-decision-pane" data-codex-pane="decisions" aria-labelledby="codex-decision-title">
+      <section class="codex-subscription-panel" aria-labelledby="codex-subscription-title">
+        <div class="codex-subscription-head">
+          <div><span class="eyebrow">SCHEDULED DELIVERY</span><h2 id="codex-subscription-title">定时任务订阅</h2></div>
+          <strong id="codex-subscription-count">0/3</strong>
+        </div>
+        <p id="codex-subscription-state" class="codex-subscription-state">登录后管理</p>
+        <div id="codex-subscription-list" class="codex-subscription-list"><p class="codex-subscription-empty">登录后可订阅最多 3 个定时任务。</p></div>
+        <button id="codex-subscription-open" type="button" class="secondary">订阅一个定时任务</button>
+      </section>
+      <div class="codex-pane-head">
+        <div><span class="eyebrow">OWNER INBOX</span><h2 id="codex-decision-title">决策收件箱</h2></div>
+        <strong id="codex-decision-count">0</strong>
+      </div>
+      <div id="codex-interaction-list" class="codex-interaction-list" aria-live="polite"><p class="codex-empty">暂无待处理请求。</p></div>
+    </aside>
+  </main>
+
+  <dialog id="codex-workplace-dialog" class="operator-dialog" aria-labelledby="codex-workplace-title">
+    <form id="codex-workplace-form" method="dialog">
+      <div class="operator-dialog-head"><h2 id="codex-workplace-title">登记任务工作地</h2><button type="button" class="secondary" data-close-dialog="codex-workplace-dialog">关闭</button></div>
+      <p>Totemora 只会在登记的服务器目录内续跑任务。请确认这是当前任务应被允许访问的项目目录。</p>
+      <label>名称<input id="codex-workplace-name" maxlength="120" autocomplete="off" required></label>
+      <label>服务器路径<input id="codex-workplace-path" spellcheck="false" readonly required></label>
+      <div id="codex-workplace-status" class="operator-login-status" role="status" aria-live="polite"></div>
+      <div class="operator-dialog-actions"><button type="button" class="secondary" data-close-dialog="codex-workplace-dialog">取消</button><button type="submit">登记并继续</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="codex-manage-dialog" class="operator-dialog" aria-labelledby="codex-manage-title">
+    <form id="codex-manage-form" method="dialog">
+      <div class="operator-dialog-head"><h2 id="codex-manage-title">开始托管任务</h2><button type="button" class="secondary" data-close-dialog="codex-manage-dialog">关闭</button></div>
+      <p>托管会写入明确 Goal，并在预算、截止时间和审批边界内续跑。系统审批仍只由你在 Web 端处理。</p>
+      <label>目标<textarea id="codex-manage-objective" maxlength="10000" required></textarea></label>
+      <div class="dialog-grid-row">
+        <label>Token 预算<input id="codex-manage-budget" type="number" min="1" max="2000000" value="150000" required></label>
+        <label>截止时间<input id="codex-manage-deadline" type="datetime-local" required></label>
+      </div>
+      <div id="codex-manage-status" class="operator-login-status" role="status" aria-live="polite"></div>
+      <div class="operator-dialog-actions"><button type="button" class="secondary" data-close-dialog="codex-manage-dialog">取消</button><button type="submit">确认托管</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="codex-instruction-dialog" class="operator-dialog" aria-labelledby="codex-instruction-title">
+    <form id="codex-instruction-form" method="dialog">
+      <div class="operator-dialog-head"><h2 id="codex-instruction-title">发送新指令</h2><button type="button" class="secondary" data-close-dialog="codex-instruction-dialog">关闭</button></div>
+      <p>若当前 Turn 正在运行，指令会被 steer；否则会启动新的续跑 Turn。</p>
+      <label>指令<textarea id="codex-instruction-content" maxlength="20000" required></textarea></label>
+      <div id="codex-instruction-status" class="operator-login-status" role="status" aria-live="polite"></div>
+      <div class="operator-dialog-actions"><button type="button" class="secondary" data-close-dialog="codex-instruction-dialog">取消</button><button type="submit">发送</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="codex-subscription-dialog" class="operator-dialog" aria-labelledby="codex-subscription-dialog-title">
+    <form id="codex-subscription-form" method="dialog">
+      <div class="operator-dialog-head"><h2 id="codex-subscription-dialog-title">订阅定时任务</h2><button type="button" class="secondary" data-codex-scheduled-close="codex-subscription-dialog">关闭</button></div>
+      <p>只为指定任务创建一份独立凭证。当前用于本地 Codex Scheduled task：无需打开任务会话，但电脑和桌面应用必须保持运行。</p>
+      <label>任务名称<input id="codex-subscription-name" maxlength="120" placeholder="例如：每日重点新闻" autocomplete="off" required></label>
+      <label>Telegram 目标群<select id="codex-subscription-target" required></select></label>
+      <div id="codex-subscription-form-status" class="operator-login-status" role="status" aria-live="polite"></div>
+      <div class="operator-dialog-actions"><button type="button" class="secondary" data-codex-scheduled-close="codex-subscription-dialog">取消</button><button type="submit">创建专属订阅</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="codex-credential-dialog" class="operator-dialog modal-large" aria-labelledby="codex-credential-title">
+    <form method="dialog">
+      <div class="operator-dialog-head"><h2 id="codex-credential-title">定时任务凭证</h2><button type="button" class="secondary" data-codex-scheduled-close="codex-credential-dialog">关闭并清除</button></div>
+      <p>Bearer Token 只显示这一次。把它放入本地 Codex MCP 使用的环境变量，仅把目标任务指令加入刚订阅的 Scheduled task；不要写进任务正文、仓库或聊天消息。</p>
+      <label>Streamable HTTP Endpoint<textarea id="codex-credential-endpoint" class="codex-credential-field" readonly></textarea></label>
+      <button type="button" class="secondary" data-copy-credential="codex-credential-endpoint">复制 Endpoint</button>
+      <label>Bearer Token<textarea id="codex-credential-token" class="codex-credential-field secret" readonly></textarea></label>
+      <button type="button" class="secondary" data-copy-credential="codex-credential-token">复制 Token</button>
+      <label>目标任务指令<textarea id="codex-credential-prompt" class="codex-credential-field prompt" readonly></textarea></label>
+      <button type="button" class="secondary" data-copy-credential="codex-credential-prompt">复制任务指令</button>
+      <div id="codex-credential-status" class="operator-login-status" role="status" aria-live="polite"></div>
+      <div class="operator-dialog-actions"><button type="button" data-codex-scheduled-close="codex-credential-dialog">我已保存，关闭并清除</button></div>
+    </form>
+  </dialog>
+
+  <div id="codex-live" class="sr-only" role="status" aria-live="polite"></div>
+  <script type="module" src="/codex-app.js"></script>
+</body>
+</html>

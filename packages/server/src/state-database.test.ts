@@ -7,6 +7,29 @@ import { join } from "node:path";
 
 import { StateDatabase } from "./state-database";
 import { runStateMigrations } from "./migrations";
+import { applyInitialStateMigration } from "./migrations/001-initial-state";
+import { applyIntelligenceDomainMigration } from "./migrations/002-intelligence-domain";
+import { applySkillCommissionMigration } from "./migrations/003-skill-commission";
+import { applySkillCommissionRevisionMigration } from "./migrations/004-skill-commission-revision";
+import { applySkillTrialRunLeaseMigration } from "./migrations/005-skill-trial-run-lease";
+import { applySkillTrialLeaseFencingMigration } from "./migrations/006-skill-trial-lease-fencing";
+import { applyGitFlowSkillIdMigration } from "./migrations/007-git-flow-skill-id";
+import { applySkillTrialOutcomeMigration } from "./migrations/008-skill-trial-outcome";
+import { applyCodexSupervisorMigration } from "./migrations/009-codex-supervisor";
+import { applyCodexThreadHistoryModeMigration } from "./migrations/010-codex-thread-history-mode";
+
+const migrationsThroughVersion10 = [
+  applyInitialStateMigration,
+  applyIntelligenceDomainMigration,
+  applySkillCommissionMigration,
+  applySkillCommissionRevisionMigration,
+  applySkillTrialRunLeaseMigration,
+  applySkillTrialLeaseFencingMigration,
+  applyGitFlowSkillIdMigration,
+  applySkillTrialOutcomeMigration,
+  applyCodexSupervisorMigration,
+  applyCodexThreadHistoryModeMigration,
+];
 
 test("state migrations register every version and remain idempotent", () => {
   const db = new Database(":memory:", { create: true, strict: true });
@@ -22,6 +45,141 @@ test("state migrations register every version and remain idempotent", () => {
       { version: 6, name: "skill trial lease fencing" },
       { version: 7, name: "rename git flow Skill canonical id" },
       { version: 8, name: "constrain skill trial outcomes" },
+      { version: 9, name: "durable Codex session supervision" },
+      { version: 10, name: "record Codex thread history mode" },
+      { version: 11, name: "Codex scheduled Telegram subscriptions" },
+    ]);
+  } finally {
+    db.close();
+  }
+});
+
+test("migration 9 upgrades a pre-Codex database without changing existing records", () => {
+  const db = new Database(":memory:", { create: true, strict: true });
+  try {
+    db.exec(`
+      PRAGMA foreign_keys = ON;
+      CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY,name TEXT NOT NULL,applied_at TEXT NOT NULL);
+      CREATE TABLE records(namespace TEXT NOT NULL,id TEXT NOT NULL,payload_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(namespace,id));
+      INSERT INTO records VALUES('fixture','keep','{"value":1}','2026-08-01','2026-08-01');
+    `);
+    for (let version = 1; version <= 8; version += 1) {
+      db.query("INSERT INTO schema_migrations VALUES(?,?,?)").run(version, `existing-${version}`, "2026-08-01");
+    }
+    runStateMigrations(db);
+    runStateMigrations(db);
+
+    expect(db.query("SELECT payload_json FROM records WHERE namespace='fixture' AND id='keep'").get())
+      .toEqual({ payload_json: "{\"value\":1}" });
+    expect(db.query("SELECT name FROM schema_migrations WHERE version=9").get())
+      .toEqual({ name: "durable Codex session supervision" });
+    const tables = db.query(`
+      SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'codex_%' ORDER BY name
+    `).all();
+    expect(tables).toEqual([
+      { name: "codex_agent_capabilities" },
+      { name: "codex_directives" },
+      { name: "codex_interactions" },
+      { name: "codex_leases" },
+      { name: "codex_scheduled_delivery_windows" },
+      { name: "codex_scheduled_subscriptions" },
+      { name: "codex_threads" },
+    ]);
+  } finally {
+    db.close();
+  }
+});
+
+test("migration 10 preserves version 9 thread records and constrains history mode", () => {
+  const db = new Database(":memory:", { create: true, strict: true });
+  try {
+    db.exec(`
+      CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY,name TEXT NOT NULL,applied_at TEXT NOT NULL);
+      CREATE TABLE records(namespace TEXT NOT NULL,id TEXT NOT NULL,payload_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(namespace,id));
+    `);
+    for (let version = 1; version <= 8; version += 1) {
+      db.query("INSERT INTO schema_migrations VALUES(?,?,?)").run(version, `existing-${version}`, "2026-08-01");
+    }
+    applyCodexSupervisorMigration(db);
+    db.query(`
+      INSERT INTO codex_threads(
+        thread_id,cwd,preview,source_json,app_status,last_observed_at,created_at,updated_at
+      ) VALUES(?,?,?,?,?,?,?,?)
+    `).run("thread-1", "/work", "preserve me", "{}", "idle", "2026-08-01", "2026-08-01", "2026-08-01");
+
+    runStateMigrations(db);
+    runStateMigrations(db);
+
+    expect(db.query("SELECT preview,history_mode FROM codex_threads WHERE thread_id='thread-1'").get())
+      .toEqual({ preview: "preserve me", history_mode: null });
+    expect(db.query("SELECT name FROM schema_migrations WHERE version=10").get())
+      .toEqual({ name: "record Codex thread history mode" });
+    db.query("UPDATE codex_threads SET history_mode='legacy' WHERE thread_id='thread-1'").run();
+    expect(() => db.query("UPDATE codex_threads SET history_mode='future' WHERE thread_id='thread-1'").run())
+      .toThrow();
+  } finally {
+    db.close();
+  }
+});
+
+test("migration 11 upgrades a pre-subscription database and enforces the three-subscription cap", () => {
+  const db = new Database(":memory:", { create: true, strict: true });
+  try {
+    for (const migrate of migrationsThroughVersion10) migrate(db);
+    db.query("INSERT INTO records VALUES(?,?,?,?,?)")
+      .run("fixture", "keep", '{"value":11}', "2026-08-01", "2026-08-01");
+    runStateMigrations(db);
+    runStateMigrations(db);
+    expect(db.query("SELECT payload_json FROM records WHERE namespace='fixture'").get())
+      .toEqual({ payload_json: "{\"value\":11}" });
+    expect(db.query("SELECT name FROM schema_migrations WHERE version=11").get())
+      .toEqual({ name: "Codex scheduled Telegram subscriptions" });
+    for (let index = 1; index <= 3; index += 1) {
+      db.query(`
+        INSERT INTO codex_scheduled_subscriptions(
+          id,name,token_hash,target_chat_id,status,last_delivery_status,revision,created_at,updated_at
+        ) VALUES(?,?,?,?,'active','never',1,?,?)
+      `).run(`sub-${index}`, `Task ${index}`, String(index).repeat(64), "-100123", "2026-08-30", "2026-08-30");
+    }
+    expect(() => db.query(`
+      INSERT INTO codex_scheduled_subscriptions(
+        id,name,token_hash,target_chat_id,status,last_delivery_status,revision,created_at,updated_at
+      ) VALUES('sub-4','Task 4',?,'-100123','active','never',1,'2026-08-30','2026-08-30')
+    `).run("4".repeat(64))).toThrow("at most 3 active Codex scheduled subscriptions");
+  } finally {
+    db.close();
+  }
+});
+
+test("migration 11 rolls back every schema object when its version record fails", () => {
+  const db = new Database(":memory:", { create: true, strict: true });
+  try {
+    for (const migrate of migrationsThroughVersion10) migrate(db);
+    db.exec(`
+      CREATE TRIGGER reject_migration_11
+      BEFORE INSERT ON schema_migrations
+      WHEN NEW.version=11
+      BEGIN
+        SELECT RAISE(ABORT,'simulated migration record failure');
+      END;
+    `);
+    expect(() => runStateMigrations(db)).toThrow("simulated migration record failure");
+    expect(db.query("SELECT version FROM schema_migrations WHERE version=11").get()).toBeNull();
+    expect(db.query(`
+      SELECT type,name FROM sqlite_master
+      WHERE name LIKE 'codex_scheduled_%'
+      ORDER BY type,name
+    `).all()).toEqual([]);
+
+    db.exec("DROP TRIGGER reject_migration_11");
+    runStateMigrations(db);
+    expect(db.query(`
+      SELECT name FROM sqlite_master
+      WHERE type='table' AND name LIKE 'codex_scheduled_%'
+      ORDER BY name
+    `).all()).toEqual([
+      { name: "codex_scheduled_delivery_windows" },
+      { name: "codex_scheduled_subscriptions" },
     ]);
   } finally {
     db.close();

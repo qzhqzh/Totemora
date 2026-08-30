@@ -20,6 +20,8 @@ bun run start:web
 - [文档导航与当前产品事实](docs/README.md)
 - [领域架构](docs/architecture-v2.md)
 - [Gateway 架构](docs/gateway-architecture.md)
+- [Codex 任务监督器](docs/codex-supervisor.md)
+- [Codex 定时任务定向投递 Telegram](docs/codex-supervisor.md#定时任务定向投递)
 - [当前推进计划](docs/execution-plan.md)
 - [收益基准与稳定性演练](docs/benchmark.md)
 - [JSON 到 SQLite 升级指南](docs/storage-migration.md)

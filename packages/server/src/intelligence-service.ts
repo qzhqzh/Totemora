@@ -354,8 +354,10 @@ export class IntelligenceService {
           "/tribe — 查看当前在线成员",
           "/news — 查看最近 3 条 AI 情报候选",
           "/finance — 查看最近 3 条财经情报候选",
+          "/codex — 查看 Codex 托管现场",
+          "/decisions — 处理 Codex 建议与决策",
           "情报消息下方按钮可反馈价值、重复或时效。",
-          "涉及执行和修改的任务仍通过 MCP / Web 进入 Chief 门禁。",
+          "Codex 系统审批只在 Web 监控台开放；其他执行与修改仍通过 MCP / Web 进入门禁。",
         ].join("\n");
       } else if (command === "/tribe") {
         const active = this.config.agents.agents.filter((member) => !["inactive", "retired"].includes(member.status ?? "active"));

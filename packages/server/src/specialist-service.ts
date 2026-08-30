@@ -5,7 +5,7 @@ export type SpecialistTaskStatus =
   | "completed" | "failed" | "cancelled";
 
 export interface SpecialistServiceDefinition {
-  id: "git.flow" | "intelligence.watch" | "finance.watch" | "content.studio";
+  id: "git.flow" | "intelligence.watch" | "finance.watch" | "content.studio" | "codex.supervisor";
   version: number;
   title: string;
   summary: string;
@@ -83,6 +83,17 @@ export const SPECIALIST_SERVICES: SpecialistServiceDefinition[] = [
     risk: "external_side_effects",
     acceptance_policy: "至少两名不同成员实际贡献；来源 URL 与事实边界通过独立审校；外部发布始终需要单独授权和幂等回执。",
     stages: ["routing", "research", "draft", "review", "copy_ready", "publish_gate"],
+  },
+  {
+    id: "codex.supervisor", version: 1, title: "Codex 长任务监督",
+    summary: "观察共享 Codex App Server 中的任务，只对显式托管且位于登记工作地的目标续跑，并把决策与审批交还给操作员。",
+    operations: ["supervise_goal"],
+    required_capabilities: ["codex-session-supervision"],
+    required_assets: ["codex-app-server"],
+    allowed_assets: ["codex-app-server", "telegram-bot"],
+    risk: "repository_mutation",
+    acceptance_policy: "必须显式托管、命中登记工作地并通过预算、时限、租约和并发门禁；审批始终由用户处理，完成前必须独立验证。",
+    stages: ["observe", "align", "execute", "verify", "complete"],
   },
 ];
 

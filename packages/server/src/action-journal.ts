@@ -70,12 +70,9 @@ export class ActionJournal {
     const requestHash = createHash("sha256").update(JSON.stringify(input.request)).digest("hex");
     const reservation = this.reserve(input, requestHash, true);
     if (reservation.replayed) return { record: reservation.record, replayed: true };
+    let evidence: string;
     try {
-      const evidence = await operation();
-      return {
-        record: this.finalize(reservation.record.id, reservation.leaseToken, "completed", evidence.slice(0, 4_000)),
-        replayed: false,
-      };
+      evidence = await operation();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (hasUncertainOutcome(error)) {
@@ -84,6 +81,26 @@ export class ActionJournal {
       }
       this.finalize(reservation.record.id, reservation.leaseToken, "failed", message);
       throw error;
+    }
+    try {
+      return {
+        record: this.finalize(reservation.record.id, reservation.leaseToken, "completed", evidence.slice(0, 4_000)),
+        replayed: false,
+      };
+    } catch {
+      const message = "External effect returned a receipt, but its completion record could not be persisted; automatic replay is blocked";
+      try {
+        const record = this.finalize(reservation.record.id, reservation.leaseToken, "uncertain", message);
+        throw new UncertainExternalEffectError(record);
+      } catch (finalizeError) {
+        if (finalizeError instanceof UncertainExternalEffectError) throw finalizeError;
+        throw new UncertainExternalEffectError({
+          ...reservation.record,
+          status: "uncertain",
+          updated_at: new Date().toISOString(),
+          error: message,
+        });
+      }
     }
   }
 

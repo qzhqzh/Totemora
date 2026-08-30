@@ -8,6 +8,9 @@ import { applySkillTrialRunLeaseMigration } from "./005-skill-trial-run-lease";
 import { applySkillTrialLeaseFencingMigration } from "./006-skill-trial-lease-fencing";
 import { applyGitFlowSkillIdMigration } from "./007-git-flow-skill-id";
 import { applySkillTrialOutcomeMigration } from "./008-skill-trial-outcome";
+import { applyCodexSupervisorMigration } from "./009-codex-supervisor";
+import { applyCodexThreadHistoryModeMigration } from "./010-codex-thread-history-mode";
+import { applyCodexScheduledSubscriptionsMigration } from "./011-codex-scheduled-subscriptions";
 import type { StateMigration } from "./migration";
 
 const migrations: readonly StateMigration[] = [
@@ -19,6 +22,9 @@ const migrations: readonly StateMigration[] = [
   applySkillTrialLeaseFencingMigration,
   applyGitFlowSkillIdMigration,
   applySkillTrialOutcomeMigration,
+  applyCodexSupervisorMigration,
+  applyCodexThreadHistoryModeMigration,
+  applyCodexScheduledSubscriptionsMigration,
 ];
 
 export function runStateMigrations(db: Database): void {

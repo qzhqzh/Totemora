@@ -49,6 +49,8 @@ import type { RecurringServiceState } from "./recurring-service-runner";
 import { AbilityTemplateStore } from "./ability-template-store";
 import { handleAbilityTemplateRoutes } from "./http/ability-template-routes";
 import { handleContentRoutes } from "./http/content-routes";
+import { handleCodexRoutes, type CodexRouteService } from "./http/codex-routes";
+import { handleCodexScheduledRoutes } from "./http/codex-scheduled-routes";
 import { handleDevelopmentRoutes } from "./http/development-routes";
 import { handleFinanceRoutes } from "./http/finance-routes";
 import { handleIntelligenceRoutes } from "./http/intelligence-routes";
@@ -62,6 +64,8 @@ import { handleWorkplaceRoutes } from "./http/workplace-routes";
 import { HttpError, json } from "./http/http-boundary";
 import type { RunRouteInput } from "./http/run-input-schema";
 import { ContentTaskRunner } from "./application/content-task-runner";
+import { CodexTelegramController } from "./application/codex-telegram-controller";
+import { CodexScheduledDeliveryService } from "./application/codex-scheduled-delivery-service";
 import { DevelopmentTaskRunner } from "./application/development-task-runner";
 import {
   IntelligenceTaskConflictError,
@@ -77,6 +81,8 @@ export interface PlaygroundOptions {
   fetchImpl?: typeof fetch;
   createIllustrationGenerator?: (config: LocalConfigSet) => ContentIllustrationGenerator | undefined;
   recurringServiceStatus?: () => RecurringServiceState[];
+  codexSupervisor?: CodexRouteService;
+  publicBaseUrl?: string;
 }
 
 interface RunJob {
@@ -106,6 +112,15 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
   const abilityTemplates = new AbilityTemplateStore(options.dataDir);
   const intelligencePreferences = new IntelligencePreferenceStore(options.dataDir);
   const financePreferences = new FinancePreferenceStore(options.dataDir);
+  const codexTelegram = options.codexSupervisor ? new CodexTelegramController({
+    dataDir: options.dataDir, operations: options.codexSupervisor,
+    fetchImpl: options.fetchImpl, publicBaseUrl: options.publicBaseUrl,
+  }) : undefined;
+  const codexScheduledDelivery = new CodexScheduledDeliveryService({
+    dataDir: options.dataDir,
+    publicBaseUrl: options.publicBaseUrl,
+    fetchImpl: options.fetchImpl,
+  });
   const skillRegistry = new SkillRegistryService(
     options.projectRoot ?? resolve(import.meta.dir, "../../.."), options.dataDir,
   );
@@ -352,13 +367,27 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
 
   return {
     jobs,
+    codexScheduledDelivery,
     runScheduledIntelligence: () => intelligenceTaskRunner.runScheduled("ai"),
     runScheduledFinance: () => intelligenceTaskRunner.runScheduled("finance"),
     runScheduledContent: () => contentTaskRunner.runScheduled(),
+    runScheduledCodexTelegram: async () => codexTelegram?.runScheduled(),
     async fetch(request: Request): Promise<Response> {
       const url = new URL(request.url);
       try {
         await hydration;
+        const codexScheduledResponse = await handleCodexScheduledRoutes(request, url, {
+          service: codexScheduledDelivery,
+          requireOperator: (candidate) => requireOperator(candidate, options.operatorToken),
+        });
+        if (codexScheduledResponse) return codexScheduledResponse;
+        if (options.codexSupervisor) {
+          const codexResponse = await handleCodexRoutes(request, url, {
+            service: options.codexSupervisor,
+            requireOperator: (candidate) => requireOperator(candidate, options.operatorToken),
+          });
+          if (codexResponse) return codexResponse;
+        }
         const abilityTemplateResponse = await handleAbilityTemplateRoutes(request, url, {
           store: abilityTemplates,
           requireOperator: (candidate) => requireOperator(candidate, options.operatorToken),
@@ -409,6 +438,9 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
           }),
           enqueueTask: (input) => intelligenceTaskRunner.enqueue(input),
           getTask: (id) => intelligenceTaskRunner.get(id),
+          handleTelegramUpdate: async (update) => codexTelegram?.accepts(update)
+            ? codexTelegram.handleUpdate(update)
+            : (await getMemberServices()).intelligence.handleTelegramUpdate(update),
           requireOperator: (candidate) => requireOperator(candidate, options.operatorToken),
         });
         if (intelligenceResponse) return intelligenceResponse;
@@ -515,7 +547,9 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
               finance_source_ledger: "tiered_health_cache_v1",
               durable_state: "sqlite_wal_v1",
               internal_bark: "self_hosted_multi_target_v3_api",
-              telegram_bot: "group_commands_feedback_v1",
+              telegram_bot: "group_commands_feedback_codex_v2",
+              codex_scheduled_telegram: "explicit_subscription_capability_v1",
+              codex_supervisor: options.codexSupervisor?.getStatus().enabled ? "shared_app_server_opt_in_v1" : "disabled",
               content_studio: "three_member_text_visual_evidence_v2",
               specialist_services: "typed_contract_v1",
               evidence_observatory: "cross_domain_funnel_v1",
