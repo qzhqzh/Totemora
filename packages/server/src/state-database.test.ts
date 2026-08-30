@@ -17,6 +17,7 @@ import { applyGitFlowSkillIdMigration } from "./migrations/007-git-flow-skill-id
 import { applySkillTrialOutcomeMigration } from "./migrations/008-skill-trial-outcome";
 import { applyCodexSupervisorMigration } from "./migrations/009-codex-supervisor";
 import { applyCodexThreadHistoryModeMigration } from "./migrations/010-codex-thread-history-mode";
+import { applyCodexScheduledSubscriptionsMigration } from "./migrations/011-codex-scheduled-subscriptions";
 
 const migrationsThroughVersion10 = [
   applyInitialStateMigration,
@@ -29,6 +30,11 @@ const migrationsThroughVersion10 = [
   applySkillTrialOutcomeMigration,
   applyCodexSupervisorMigration,
   applyCodexThreadHistoryModeMigration,
+];
+
+const migrationsThroughVersion11 = [
+  ...migrationsThroughVersion10,
+  applyCodexScheduledSubscriptionsMigration,
 ];
 
 test("state migrations register every version and remain idempotent", () => {
@@ -48,6 +54,7 @@ test("state migrations register every version and remain idempotent", () => {
       { version: 9, name: "durable Codex session supervision" },
       { version: 10, name: "record Codex thread history mode" },
       { version: 11, name: "Codex scheduled Telegram subscriptions" },
+      { version: 12, name: "durable reminder domain and delivery ledger" },
     ]);
   } finally {
     db.close();
@@ -180,6 +187,79 @@ test("migration 11 rolls back every schema object when its version record fails"
     `).all()).toEqual([
       { name: "codex_scheduled_delivery_windows" },
       { name: "codex_scheduled_subscriptions" },
+    ]);
+  } finally {
+    db.close();
+  }
+});
+
+test("migration 12 preserves pre-reminder state and enforces reminder invariants", () => {
+  const db = new Database(":memory:", { create: true, strict: true });
+  try {
+    for (const migrate of migrationsThroughVersion11) migrate(db);
+    db.query("INSERT INTO records VALUES(?,?,?,?,?)")
+      .run("fixture", "keep", '{"value":12}', "2026-08-01", "2026-08-01");
+    runStateMigrations(db);
+    runStateMigrations(db);
+
+    expect(db.query("SELECT payload_json FROM records WHERE namespace='fixture'").get())
+      .toEqual({ payload_json: "{\"value\":12}" });
+    expect(db.query("SELECT name FROM schema_migrations WHERE version=12").get())
+      .toEqual({ name: "durable reminder domain and delivery ledger" });
+    db.query(`
+      INSERT INTO reminder_items(
+        id,title,deadline_local_date,importance,status,created_at,updated_at
+      ) VALUES('r-1','Keep me','2026-09-01',3,'active','2026-08-30','2026-08-30')
+    `).run();
+    db.query(`
+      INSERT INTO reminder_delivery_windows(
+        delivery_key,reminder_id,kind,local_date,slot,status,attempts,created_at,updated_at
+      ) VALUES('r-1-window','r-1','escalation','2026-08-30',10,'completed',1,'2026-08-30','2026-08-30')
+    `).run();
+    expect(() => db.query(`
+      INSERT INTO reminder_items(
+        id,title,deadline_local_date,importance,status,created_at,updated_at
+      ) VALUES('bad','Bad','2026-09-01',2,'active','2026-08-30','2026-08-30')
+    `).run()).toThrow();
+    expect(() => db.query(`
+      INSERT INTO reminder_delivery_windows(
+        delivery_key,kind,local_date,slot,status,attempts,created_at,updated_at
+      ) VALUES('bad-window','escalation','2026-08-30',10,'completed',1,'2026-08-30','2026-08-30')
+    `).run()).toThrow();
+  } finally {
+    db.close();
+  }
+});
+
+test("migration 12 rolls back its complete schema when the version record fails", () => {
+  const db = new Database(":memory:", { create: true, strict: true });
+  try {
+    for (const migrate of migrationsThroughVersion11) migrate(db);
+    db.exec(`
+      CREATE TRIGGER reject_migration_12
+      BEFORE INSERT ON schema_migrations
+      WHEN NEW.version=12
+      BEGIN
+        SELECT RAISE(ABORT,'simulated reminder migration failure');
+      END;
+    `);
+    expect(() => runStateMigrations(db)).toThrow("simulated reminder migration failure");
+    expect(db.query("SELECT version FROM schema_migrations WHERE version=12").get()).toBeNull();
+    expect(db.query(`
+      SELECT type,name FROM sqlite_master
+      WHERE name LIKE 'reminder_%'
+      ORDER BY type,name
+    `).all()).toEqual([]);
+
+    db.exec("DROP TRIGGER reject_migration_12");
+    runStateMigrations(db);
+    expect(db.query(`
+      SELECT name FROM sqlite_master
+      WHERE type='table' AND name LIKE 'reminder_%'
+      ORDER BY name
+    `).all()).toEqual([
+      { name: "reminder_delivery_windows" },
+      { name: "reminder_items" },
     ]);
   } finally {
     db.close();

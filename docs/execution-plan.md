@@ -9,7 +9,7 @@
 - Workplace、Mission、Run、专业任务、候选、反馈、成员经历和治理状态进入 SQLite WAL 内核。
 - 通用 Run 提供预算派工、结构化 Trace、取消、恢复、失败归因和独立验收骨架。
 - Git Flow、听风、观潮和内容工坊已成为强类型专业服务；Bark、Telegram、Git 状态机和 CPA 生图作为受治理资产留下动作证据。
-- Web 已提供任务大厅、部落证据台、成员营帐、火种、资产、AI / 财经双域情报台、内容工坊和审批入口。
+- Web 已提供任务大厅、部落证据台、成员营帐、火种、资产、AI / 财经双域情报台、事项提醒、内容工坊和审批入口。
 - Web 入口已收敛为薄 bootstrap，各界面领域由独立 Feature 持有状态和事件；Prompt/Workflow 模板由 Gateway + SQLite 提供正式定义，不再以浏览器本地状态作为真源。
 - 成员画像区分正式内核、观察画像、经历、成长 Proposal 与升级后效果窗口。
 - `git-flow-release` 已具备活动版本和经验追加 Proposal，但仍是专用过渡实现。
@@ -76,6 +76,8 @@
 范围：服务注册、任务租约、进度事件、取消、幂等外部副作用、能力/资产断言、验收、经验信用和 MCP 发现。专业状态机仍由各领域拥有。
 
 进展：`finance.watch` 已复用 SpecialistTask、成员绑定、资产断言、候选派发、反馈和经历信用；三个周期值守由同一 `RecurringServiceRunner` 管理，状态持久化并暴露到受保护运维视图，单服务失败和重叠运行互相隔离。Development、Intelligence/Finance 和 Content 的应用任务生命周期已从 App factory 提取；只有新增第五类专业服务时才评估注册式工厂，避免为当前四类服务过度抽象。
+
+通知项目整合进展：Bark、Telegram、ntfy 已共用 `NotificationEnvelope v1` 和逐目标 Action Journal；旧 Compose 已停止。`reminder.watch` 使用独立领域、migration 12、Repository、Operator API、Web 案卷和一致性快照导入器接管旧 memo，既不伪装成 AI/财经，也不建立第二套 Specialist Runtime。deals、forwarded、周期内容与 Codex reset 仍按 ADR-0018 的独立阶段推进。
 
 验证：观潮的来源故障不影响 AI 情报；两域候选和反馈互不串扰；同一候选对多个 Bark 目标按目标幂等；Gateway 重启后任务和来源健康可恢复。
 

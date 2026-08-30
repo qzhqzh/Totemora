@@ -8,6 +8,7 @@ import { intelligenceFeature } from "./features/intelligence.js";
 import { membersFeature } from "./features/members.js";
 import { notificationsFeature } from "./features/notifications.js";
 import { observatoryFeature } from "./features/observatory.js";
+import { remindersFeature } from "./features/reminders.js";
 import { runsFeature } from "./features/runs.js";
 import { skillsFeature } from "./features/skills.js";
 import "./features/skill-authoring.js";
@@ -25,6 +26,7 @@ registerFeature("intelligence", intelligenceFeature);
 registerFeature("contentStudio", contentStudioFeature);
 registerFeature("notifications", notificationsFeature);
 registerFeature("observatory", observatoryFeature);
+registerFeature("reminders", remindersFeature);
 registerFeature("skills", skillsFeature);
 
 runsFeature.configure({
@@ -65,6 +67,7 @@ async function loadHomeRoute() {
       intelligenceFeature.loadFinancePreferences(),
       contentStudioFeature.load(),
       notificationsFeature.loadBarkTargets(),
+      remindersFeature.loadReminders(),
       skillsFeature.loadCommissions(),
       skillsFeature.loadRegistry(),
       abilityTemplatesFeature.load(),

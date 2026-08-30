@@ -81,6 +81,7 @@ scheduler = new RecurringServiceRunner([
   { id: "finance.watch", interval_ms: 60_000, run: app.runScheduledFinance },
   { id: "content.studio", interval_ms: 60_000, run: app.runScheduledContent },
   { id: "codex.telegram", interval_ms: 60_000, run: app.runScheduledCodexTelegram },
+  { id: "reminder.watch", interval_ms: 60_000, run: app.runScheduledReminder },
 ], new RecurringServiceStateRepository(dataDir));
 scheduler.start();
 codexSupervisor.start();

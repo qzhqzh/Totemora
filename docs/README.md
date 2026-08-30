@@ -34,7 +34,7 @@ Totemora 是一个预算约束下的异构智能部落，不是通用聊天产�
 - **默认只读**：通用 Run 不从自然语言目标推导 Shell、文件写入、Git、通知或发布权限。
 - **单一真源**：Web、MCP、Telegram、Bark、ntfy 和 Cron 共用常驻 Gateway 与 SQLite 状态，不拥有第二套 Runtime。
 
-当前提供 CLI/TUI、本地 Web Gateway 和 MCP 三个主要入口，并以 Bark、Telegram、ntfy 三个并列通道承接受控通知。统一通知平台当前完成目标配置、脱敏状态和 Operator 测试入口；旧 ntfy 项目已停止，尚未迁移的 reminder、deals、forwarded 和周期内容领域保持显式不可用。Codex 控制台还可为最多 3 个明确的 Scheduled task 创建 Telegram 定向投递订阅。`totemora run` 默认调用 Gateway，只有显式 `--offline` 与 `onboarding-exam` 保留直接创建本地 Runtime 的兼容入口。
+当前提供 CLI/TUI、本地 Web Gateway 和 MCP 三个主要入口，并以 Bark、Telegram、ntfy 三个并列通道承接受控通知。统一通知平台已完成目标配置、脱敏状态和 Operator 测试入口；旧 ntfy 项目已停止，reminder 已由 Totemora 的 SQLite、Web、Operator API 与周期调度接管，deals、forwarded 和周期内容领域仍保持显式不可用。Codex 控制台还可为最多 3 个明确的 Scheduled task 创建 Telegram 定向投递订阅。`totemora run` 默认调用 Gateway，只有显式 `--offline` 与 `onboarding-exam` 保留直接创建本地 Runtime 的兼容入口。
 
 当前 npm 语义版本是 `0.12.0`，Gateway 和 MCP 对外暴露的产品发布标识是 `0.12.0-evidence-skill-core`。版本真源位于 `packages/core/src/version.ts`。
 
@@ -58,6 +58,7 @@ Totemora 是一个预算约束下的异构智能部落，不是通用聊天产�
 - [Notification transports: Bark and ntfy](internal-bark.md)
 - [Telegram bot](telegram-bot.md)
 - [Unified notification platform](notification-platform.md)
+- [Reminder service and legacy memo migration](reminders.md)
 - [AI HOT source](aihot-source.md)
 - [Benchmark](benchmark.md)
 - [Stability drills](stability-drills.md)

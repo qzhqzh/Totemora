@@ -11,6 +11,7 @@ import { applySkillTrialOutcomeMigration } from "./008-skill-trial-outcome";
 import { applyCodexSupervisorMigration } from "./009-codex-supervisor";
 import { applyCodexThreadHistoryModeMigration } from "./010-codex-thread-history-mode";
 import { applyCodexScheduledSubscriptionsMigration } from "./011-codex-scheduled-subscriptions";
+import { applyReminderDomainMigration } from "./012-reminder-domain";
 import type { StateMigration } from "./migration";
 
 const migrations: readonly StateMigration[] = [
@@ -25,6 +26,7 @@ const migrations: readonly StateMigration[] = [
   applyCodexSupervisorMigration,
   applyCodexThreadHistoryModeMigration,
   applyCodexScheduledSubscriptionsMigration,
+  applyReminderDomainMigration,
 ];
 
 export function runStateMigrations(db: Database): void {

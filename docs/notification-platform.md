@@ -2,7 +2,7 @@
 
 Totemora 使用同一个 `NotificationEnvelope v1` 把已决定外发的内容交给 Bark、Telegram 和 ntfy。通知平台只负责领域路由、逐目标幂等和传输回执，不取代 AI、财经、提醒、优惠等业务领域自己的筛选与状态机。
 
-当前是迁移基础层检查点：Gateway 已能加载三通道目标、查看公开目标元数据并由 Operator 发送受限测试通知。2026-08-30 起，Bark 与 ntfy 传输容器统一归 `totemora` Compose 管理；旧 `notice-ntfy` 项目已停止全部容器，不再影子运行。现有 AI / 财经业务继续由 Totemora 服务承担；reminder、deals、forwarded 和周期内容尚未完成领域迁移时明确保持不可用，不通过恢复旧 worker 隐式补位。
+Gateway 已能加载三通道目标、查看公开目标元数据并由 Operator 发送受限测试通知。2026-08-30 起，Bark 与 ntfy 传输容器统一归 `totemora` Compose 管理；旧 `notice-ntfy` 项目已停止全部容器，不再影子运行。现有 AI / 财经业务继续由 Totemora 服务承担；reminder 已完成 SQLite、Web、Operator API、导入器和周期调度接管，详细契约见[事项提醒](reminders.md)。deals、forwarded 和周期内容尚未完成领域迁移时明确保持不可用，不通过恢复旧 worker 隐式补位。
 
 ## 目标与 Secret
 
@@ -84,3 +84,12 @@ chmod 600 .totemora/secrets/notification-targets.json
 旧 `notice-ntfy` Compose 已经停止并移除容器，源仓库、SQLite/WAL、凭据和 bind mount 均未删除。后续只在 Totemora 内开发和修复，不恢复生产影子项目；各领域通过离线一致性快照、dry-run importer、去重种子和验收环境证明行为后再启用。`https://ntfy.qzhqzh.com` 与现有 Topic 继续由 Totemora 管理的 ntfy 传输容器提供。
 
 停止公网入口、删除旧数据、撤销/轮换凭据仍是独立授权操作。
+
+旧六 Topic 可以从 owner-only 凭据文件安全生成目标配置；命令只输出公开 target id、领域与 Topic，不打印 authorization：
+
+```bash
+bun run notification:setup-legacy-ntfy \
+  --credentials-file /absolute/path/to/worker-auth.md
+```
+
+命令会保留已有 Telegram 和自定义 ntfy 目标，以原子写入更新 `.totemora/secrets/notification-targets.json`，权限固定为 `0600`。修改后需要重启 Gateway。

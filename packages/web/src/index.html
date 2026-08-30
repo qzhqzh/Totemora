@@ -16,6 +16,7 @@
         <a href="/codex">Codex 监控台</a>
         <a href="/#task-hall">任务大厅</a>
         <a href="/#intelligence-hall">情报台</a>
+        <a href="/#reminders">事项</a>
       </nav>
     </div>
     <div class="header-actions">
@@ -430,6 +431,27 @@ secrets/</textarea></label>
           <h4>扫描记录</h4>
           <div id="finance-history" class="intelligence-history"></div>
         </article>
+      </div>
+    </section>
+    <section class="panel reminder-panel" id="reminders" aria-labelledby="reminder-title-heading">
+      <header class="reminder-head">
+        <div><h2 id="reminder-title-heading">事项提醒</h2><p>个人事项由 Totemora 持久化和调度；旧 memo 数据只迁移 active 项与当天防重复账本。</p></div>
+        <button id="refresh-reminders" type="button" class="secondary">刷新事项</button>
+      </header>
+      <div id="reminder-summary" class="notification-summary" role="status" aria-live="polite">输入操作员 Token 后可管理个人事项。</div>
+      <div class="reminder-workspace">
+        <form id="reminder-create-form" class="reminder-editor">
+          <div><h3>新增事项</h3><p>重要度决定截止前三天内的提醒频率；不会自动删除过期或已完成记录。</p></div>
+          <label>事项标题<input id="reminder-title" maxlength="240" required placeholder="例如：完成通知系统切流验收"></label>
+          <label>截止日期<input id="reminder-deadline" type="date" required></label>
+          <label>重要度<select id="reminder-importance"><option value="1">1 · 普通</option><option value="3" selected>3 · 重要</option><option value="5">5 · 高优先</option></select></label>
+          <button type="submit">保存事项</button>
+          <small id="reminder-form-status" class="form-status" role="status" aria-live="polite"></small>
+        </form>
+        <div class="reminder-board">
+          <header><div><h3>事项案卷</h3><p>完成与恢复都有明确状态；外发结果按时间窗和目标通道留痕。</p></div><label>状态<select id="reminder-filter-status"><option value="active">进行中</option><option value="all">全部</option><option value="completed">已完成</option><option value="expired">已过期</option></select></label></header>
+          <div id="reminder-list" class="reminder-list" aria-live="polite"></div>
+        </div>
       </div>
     </section>
     <section class="panel content-panel" id="content-studio">

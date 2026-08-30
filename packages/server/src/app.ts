@@ -58,6 +58,7 @@ import { handleIntelligenceRoutes } from "./http/intelligence-routes";
 import { handleMemberRoutes } from "./http/member-routes";
 import { handleNotificationRoutes } from "./http/notification-routes";
 import { handleNotificationPlatformRoutes } from "./http/notification-platform-routes";
+import { handleReminderRoutes } from "./http/reminder-routes";
 import { handleOperationsRoutes } from "./http/operations-routes";
 import { handleRunRoutes } from "./http/run-routes";
 import { handleSkillCommissionRoutes } from "./http/skill-commission-routes";
@@ -77,6 +78,7 @@ import {
   createNotificationPlatform,
   type NotificationPlatformTargetConfiguration,
 } from "./bootstrap/notification-platform";
+import { ReminderService } from "./application/reminder-service";
 
 export interface PlaygroundOptions {
   configDir: string;
@@ -123,6 +125,10 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
     ntfyTargets: options.notificationTargets?.ntfyTargets ?? [],
     ntfyFetch: options.fetchImpl,
   });
+  const reminderService = notificationPlatform.then((platform) => new ReminderService({
+    dataDir: options.dataDir,
+    dispatcher: platform.dispatcher,
+  }));
   const actionJournal = new ActionJournal(options.dataDir);
   const abilityTemplates = new AbilityTemplateStore(options.dataDir);
   const intelligencePreferences = new IntelligencePreferenceStore(options.dataDir);
@@ -286,6 +292,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
     developmentTaskRunner.ready,
     intelligenceTaskRunner.ready,
     notificationPlatform,
+    reminderService,
   ]);
 
   const enqueueRun = async (input: RunRouteInput): Promise<RunJob> => {
@@ -388,6 +395,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
     runScheduledFinance: () => intelligenceTaskRunner.runScheduled("finance"),
     runScheduledContent: () => contentTaskRunner.runScheduled(),
     runScheduledCodexTelegram: async () => codexTelegram?.runScheduled(),
+    runScheduledReminder: async () => (await reminderService).runDue(),
     async fetch(request: Request): Promise<Response> {
       const url = new URL(request.url);
       try {
@@ -519,6 +527,12 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
         });
         if (notificationPlatformResponse) return notificationPlatformResponse;
 
+        const reminderResponse = await handleReminderRoutes(request, url, {
+          service: await reminderService,
+          requireOperator: (candidate) => requireOperator(candidate, options.operatorToken),
+        });
+        if (reminderResponse) return reminderResponse;
+
         const operationsResponse = await handleOperationsRoutes(request, url, {
           recurringServiceStatus: () => options.recurringServiceStatus?.() ?? [],
           listTasks: (limit) => specialistTasks.list(limit),
@@ -575,6 +589,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
               internal_bark: "self_hosted_multi_target_v3_api",
               telegram_bot: "group_commands_feedback_codex_v2",
               notification_platform: "bark_telegram_ntfy_envelope_v1",
+              reminders: "scheduled_notification_v1",
               codex_scheduled_telegram: "explicit_subscription_capability_v1",
               codex_supervisor: options.codexSupervisor?.getStatus().enabled ? "shared_app_server_opt_in_v1" : "disabled",
               content_studio: "three_member_text_visual_evidence_v2",
