@@ -21,3 +21,4 @@ ADR 记录架构决策当时的背景、选择和后果。已接受 ADR 作为�
 | [0015](0015-cpa-article-illustration.md) | Accepted | CPA 文章配图与“绘影”成员 |
 | [0016](0016-conversational-skill-governance.md) | Accepted | 通过部落对话治理 Skill |
 | [0017](0017-finance-intelligence-vertical.md) | Accepted | 独立财经情报垂直与按领域通知路由 |
+| [0018](0018-unified-notification-platform.md) | Accepted | 统一通知平台、三通道与 ntfy 增量迁移边界 |
