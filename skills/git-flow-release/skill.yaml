@@ -24,7 +24,9 @@ capabilities:
   - conventional-commit
   - secret-path-screening
   - detect-branch-model
+  - execute-authorized-workflow
 trigger_examples:
   - 提交当前工作区的已有改动
   - 为已有改动创建并评审 Pull Request
   - 按门禁把已评审 PR 合并到目标分支
+  - 一次授权完成 Commit、Push、PR、Merge、清理并同步 main

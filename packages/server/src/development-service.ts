@@ -88,6 +88,14 @@ export interface DevelopmentProposal {
   activities: Array<{ phase: string; message: string; at: string }>;
   validation_results?: Array<{ command: string; exit_code: number; output: string }>;
   commit_sha?: string;
+  workflow_authorization?: {
+    mode: "commit" | "pull_request" | "merge";
+    snapshot_hash: string;
+    commit_message: string;
+    files: string[];
+    target_branch?: string;
+    approved_at: string;
+  };
   error?: string;
 }
 
@@ -417,6 +425,31 @@ export class DevelopmentCommitService {
     }
   }
 
+  async complete(proposalId: string): Promise<DevelopmentProposal> {
+    let proposal = await this.getProposal(proposalId);
+    if (proposal.status === "completed") return proposal;
+
+    if (proposal.status === "awaiting_approval") {
+      proposal.workflow_authorization = {
+        mode: proposal.mode,
+        snapshot_hash: proposal.snapshot_hash,
+        commit_message: proposal.commit_message,
+        files: [...proposal.files],
+        target_branch: proposal.remote_plan?.target_branch,
+        approved_at: new Date().toISOString(),
+      };
+      recordActivity(proposal, "workflow_authorized", `已一次授权执行到 ${workflowEndpoint(proposal.mode)}`);
+      await this.saveProposal(proposal);
+    } else {
+      assertWorkflowAuthorization(proposal);
+    }
+
+    if (proposal.status === "awaiting_approval") proposal = await this.approve(proposalId);
+    if (proposal.status === "awaiting_remote_approval") proposal = await this.publish(proposalId);
+    if (proposal.status === "awaiting_merge_approval") proposal = await this.merge(proposalId);
+    return proposal;
+  }
+
   async publish(proposalId: string): Promise<DevelopmentProposal> {
     const proposal = await this.getProposal(proposalId);
     if (proposal.status !== "awaiting_remote_approval") {
@@ -580,10 +613,22 @@ export class DevelopmentCommitService {
       if (state.state !== "MERGED") {
         await this.github.mergePullRequest(workplace.path, proposal.pr_number);
       }
-      await git(workplace.path, ["checkout", proposal.remote_plan.target_branch]);
-      const syncTransport = await this.github.syncTargetBranch(workplace.path, proposal.remote_plan.target_branch);
       const merged = await this.github.mergedPullRequest(workplace.path, proposal.pr_number);
       if (merged.state !== "MERGED") throw new Error("GitHub did not report the Pull Request as merged");
+      const remoteCleanup = await this.github.deleteRemoteBranchIfPresent(
+        workplace.path, proposal.git_context.branch,
+      );
+      await git(workplace.path, ["checkout", proposal.remote_plan.target_branch]);
+      const syncTransport = await this.github.syncTargetBranch(workplace.path, proposal.remote_plan.target_branch);
+      const localBranch = (await git(workplace.path, ["branch", "--list", proposal.git_context.branch])).stdout.trim();
+      if (localBranch && proposal.git_context.branch !== proposal.remote_plan.target_branch) {
+        await git(workplace.path, ["branch", "-D", proposal.git_context.branch]);
+      }
+      recordActivity(
+        proposal,
+        "branch_cleaned",
+        `工作分支 ${proposal.git_context.branch} 已清理（远端：${remoteCleanup}；本地：${localBranch ? "deleted" : "already absent"}）`,
+      );
       const chief = requireMember(this.config, proposal.chief_member_id);
       proposal.chief_report = await this.callJson(chief, [
         "你是 Totemora Chief。Git 流程专员已完成工作，请根据真实结果向调用方形成最终验收报告。",
@@ -754,6 +799,27 @@ export class DevelopmentCommitService {
 function requirePolicy(workplace: Workplace): WorkplacePolicy {
   if (!workplace.policy) throw new Error("工作地尚未安装开发提交规范");
   return workplace.policy;
+}
+
+function assertWorkflowAuthorization(proposal: DevelopmentProposal): void {
+  const authorization = proposal.workflow_authorization;
+  if (!authorization) {
+    throw new Error(`Git Flow workflow cannot execute from ${proposal.status} without prior workflow authorization`);
+  }
+  if (authorization.mode !== proposal.mode
+    || authorization.snapshot_hash !== proposal.snapshot_hash
+    || authorization.commit_message !== proposal.commit_message
+    || JSON.stringify(authorization.files) !== JSON.stringify(proposal.files)
+    || authorization.target_branch !== proposal.remote_plan?.target_branch) {
+    throw new Error("Git Flow workflow authorization no longer matches the approved proposal");
+  }
+  if (!["awaiting_remote_approval", "awaiting_merge_approval"].includes(proposal.status)) {
+    throw new Error(`Git Flow workflow cannot execute from ${proposal.status}`);
+  }
+}
+
+function workflowEndpoint(mode: DevelopmentProposal["mode"]): string {
+  return mode === "commit" ? "本地 Commit" : mode === "pull_request" ? "Pull Request" : "main";
 }
 
 function requireMember(config: LocalConfigSet, id: string): AgentConfig {

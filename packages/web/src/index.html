@@ -211,11 +211,11 @@
 credentials/
 secrets/</textarea></label>
           <div class="grid-two">
-            <label>Git Flow 目标<select id="git-flow-mode"><option value="commit">本地 Commit</option><option value="pull_request">Issue + PR</option><option value="merge">Issue + PR + Merge</option></select></label>
+            <label>Git Flow 目标<select id="git-flow-mode"><option value="commit">本地 Commit</option><option value="pull_request">一次完成到 Issue + PR</option><option value="merge">一次完成到 main</option></select></label>
             <label>目标分支<input id="policy-target-branch" value="main"></label>
           </div>
           <label><input id="policy-remote-enabled" type="checkbox">允许 GitHub Issue、Push 和 PR</label>
-          <label><input id="policy-merge-enabled" type="checkbox">允许经过独立门禁后 Merge</label>
+          <label><input id="policy-merge-enabled" type="checkbox">允许一次工作流授权内 Merge 并清理分支</label>
           <label><input id="policy-opencode-enabled" type="checkbox">验证失败时允许受限 OpenCode 修复</label>
           <button id="save-policy" type="button" class="secondary">保存规范</button>
           <small id="policy-status"></small>

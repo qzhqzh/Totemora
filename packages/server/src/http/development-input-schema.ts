@@ -3,7 +3,7 @@ import { inputObject, optionalEnum, optionalString, requiredString } from "./inp
 
 const DEVELOPMENT_MODES = ["commit", "pull_request", "merge"] as const;
 const ISSUE_MODES = ["auto", "none"] as const;
-const DEVELOPMENT_GATES = ["local", "remote", "merge"] as const;
+const DEVELOPMENT_GATES = ["workflow", "local", "remote", "merge"] as const;
 
 export interface DevelopmentRequestInput {
   workplace_id: string;
@@ -13,7 +13,7 @@ export interface DevelopmentRequestInput {
   trial_commission_id?: string;
 }
 
-export type DevelopmentGate = "local" | "remote" | "merge";
+export type DevelopmentGate = "workflow" | "local" | "remote" | "merge";
 
 export function developmentRequestInput(value: unknown): DevelopmentRequestInput {
   const input = inputObject(value);

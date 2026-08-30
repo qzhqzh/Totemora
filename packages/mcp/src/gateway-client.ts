@@ -41,6 +41,14 @@ export interface DevelopmentProposalSummary {
   pr_url?: string;
   pr_review?: { outcome: string; rationale: string; issues: string[] };
   chief_report?: { summary: string; acceptance: string; evidence: string[] };
+  workflow_authorization?: {
+    mode: "commit" | "pull_request" | "merge";
+    snapshot_hash: string;
+    commit_message: string;
+    files: string[];
+    target_branch?: string;
+    approved_at: string;
+  };
   error?: string;
 }
 
@@ -196,7 +204,7 @@ export class TotemoraGatewayClient {
     return this.request(`/api/development/proposals/${encodeURIComponent(proposalId)}`) as Promise<DevelopmentProposalSummary>;
   }
 
-  async advanceGitFlow(proposalId: string, gate: "local" | "remote" | "merge"): Promise<DevelopmentProposalSummary> {
+  async advanceGitFlow(proposalId: string, gate: "workflow" | "local" | "remote" | "merge"): Promise<DevelopmentProposalSummary> {
     return this.request(`/api/development/proposals/${encodeURIComponent(proposalId)}/advance`, {
       method: "POST",
       body: JSON.stringify({ gate }),

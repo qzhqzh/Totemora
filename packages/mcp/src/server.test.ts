@@ -163,11 +163,11 @@ test("exposes living members, intelligence and persistent Git Flow through MCP",
     name: "totemora_advance_git_flow",
     arguments: {
       workflow_id: "proposal-1",
-      gate: "local",
+      gate: "workflow",
       expected_status: "awaiting_approval",
       expected_snapshot_hash: "snapshot-1",
       expected_commit_message: "feat: add demo",
-      confirmation: "APPROVE_GIT_FLOW_STAGE",
+      confirmation: "APPROVE_GIT_FLOW_WORKFLOW",
     },
   });
   expect(approved.structuredContent).toMatchObject({ status: "completed", commit_sha: "a".repeat(40) });

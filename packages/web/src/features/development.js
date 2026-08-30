@@ -248,6 +248,7 @@ async function checkTask(taskId, button, statusNode) {
 }
 
 function renderProposal(proposal) {
+  const action = developmentAction(proposal);
   $("phase").textContent = proposal.status.toUpperCase();
   $("progress-bar").style.width = proposal.status === "completed" ? "100%" : "70%";
   $("development-proposal").innerHTML = `<article class="proposal">
@@ -264,9 +265,8 @@ function renderProposal(proposal) {
     <p>批准后验证：</p><ul>${proposal.validation_commands.map((command) => `<li>${escapeHtml(command)}</li>`).join("") || "<li>无验证命令</li>"}</ul>
     <p class="${proposal.self_check.outcome === "accepted" ? "approved" : "error"}">专员自检：${escapeHtml(proposal.self_check.outcome)} · ${escapeHtml(proposal.self_check.rationale)}</p>
     <p class="${proposal.chief_acceptance.outcome === "accepted" ? "approved" : "error"}">Chief 验收：${escapeHtml(proposal.chief_acceptance.outcome)} · ${escapeHtml(proposal.chief_acceptance.rationale)}</p>
-    ${proposal.status === "awaiting_approval" ? '<button class="advance-development" data-gate="local" type="button">批准验证并提交</button>' : ""}
-    ${proposal.status === "awaiting_remote_approval" ? '<button class="advance-development" data-gate="remote" type="button">批准创建 Issue、Push 和 PR</button>' : ""}
-    ${proposal.status === "awaiting_merge_approval" ? '<button class="advance-development" data-gate="merge" type="button">批准 Merge</button>' : ""}
+    ${proposal.workflow_authorization ? `<p class="approved">已一次授权：执行到 ${escapeHtml(workflowEndpointLabel(proposal.workflow_authorization.mode))}</p>` : ""}
+    ${action ? `<button class="advance-development" data-gate="${escapeHtml(action.gate)}" type="button">${escapeHtml(action.label)}</button>` : ""}
     ${proposal.validation_results ? `<pre>${escapeHtml(JSON.stringify(proposal.validation_results, null, 2))}</pre>` : ""}
     ${proposal.commit_sha ? `<p class="approved">Commit: ${escapeHtml(proposal.commit_sha)}</p>` : ""}
     ${proposal.issue_url ? `<p>Issue: <a href="${escapeHtml(proposal.issue_url)}" target="_blank">${escapeHtml(proposal.issue_url)}</a></p>` : ""}
@@ -280,10 +280,34 @@ function renderProposal(proposal) {
   });
 }
 
+function developmentAction(proposal) {
+  if (proposal.status === "awaiting_approval") {
+    const label = proposal.mode === "commit"
+      ? "批准并完成本地 Commit"
+      : `批准并完成到 ${workflowEndpointLabel(proposal.mode)}`;
+    return { gate: "workflow", label };
+  }
+  if (proposal.workflow_authorization
+    && ["awaiting_remote_approval", "awaiting_merge_approval"].includes(proposal.status)) {
+    return { gate: "workflow", label: "重试已授权流程" };
+  }
+  if (proposal.status === "awaiting_remote_approval") {
+    return { gate: "remote", label: "批准创建 Issue、Push 和 PR" };
+  }
+  if (proposal.status === "awaiting_merge_approval") return { gate: "merge", label: "批准 Merge" };
+  return undefined;
+}
+
+function workflowEndpointLabel(mode) {
+  return mode === "commit" ? "本地 Commit" : mode === "pull_request" ? "PR" : "main";
+}
+
 async function advanceDevelopment(gate) {
   if (!activeProposalId) return;
   $("phase").textContent = "EXECUTING";
-  $("run-message").textContent = `正在推进 ${gate} 门禁`;
+  $("run-message").textContent = gate === "workflow"
+    ? "正在连续执行到已选择终点；遇到真实阻塞时才会停下"
+    : `正在推进 ${gate} 门禁`;
   const proposal = await operatorApi(`/api/development/proposals/${activeProposalId}/advance`, {
     method: "POST",
     body: JSON.stringify({ gate }),

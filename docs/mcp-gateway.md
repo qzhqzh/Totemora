@@ -27,7 +27,7 @@ MCP 对外发布的是一个持久的“部落 Git Flow 能力”。调用方 AI
 | `totemora_get_task` | 查询 Chief 路由和规划任务 |
 | `totemora_list_git_flows` | 查看历史工作流及当前门禁 |
 | `totemora_get_git_flow` | 核对文件、Snapshot、计划、自检、Chief 验收、PR 评审和结果 |
-| `totemora_advance_git_flow` | 批准同一工作流的 `local`、`remote` 或 `merge` 门禁 |
+| `totemora_advance_git_flow` | 默认用 `workflow` 一次批准到所选终点；也可人工推进 `local`、`remote` 或 `merge` 单阶段门禁 |
 
 这不是把 Git 命令拆成 MCP 微工具。调用方只启动一次工作流并持有 `workflow_id`；阶段划分属于
 部落内部状态机。模型调用或客户端断开不会丢失 `.totemora/development-tasks/` 中的任务。
@@ -60,17 +60,21 @@ approval_mode = "prompt"
 
 ```text
 查找 Totemora 中当前项目的 Workplace，把现有改动委托给部落 Git Flow 能力，
-终点是 reviewed pull request。先启动并查询工作流，不要越过当前门禁。
+终点是 reviewed pull request。先启动并查询工作流，再一次授权执行到该终点。
 ```
 
-调用方检查工作流后，在用户授权范围内使用 `totemora_advance_git_flow`。工具要求同时提交当前
-status、Snapshot Hash、Commit message 和固定 confirmation，防止批准未查看或已经过期的计划。
+调用方检查工作流后，在用户授权范围内使用 `totemora_advance_git_flow`。默认传
+`gate=workflow` 与 `confirmation=APPROVE_GIT_FLOW_WORKFLOW`，一次执行到已选的 `commit`、
+`pull_request` 或 `merge` 终点。工具同时要求当前 status、Snapshot Hash 和 Commit message，
+防止批准未查看或已经过期的计划。单阶段人工接管继续使用 `APPROVE_GIT_FLOW_STAGE`。
 
-## 门禁与 Policy
+## 工作流授权、门禁与 Policy
 
+- `workflow`：把一次授权绑定到模式、Snapshot 和 Commit message，连续执行到所选终点；可调和失败后沿用同一授权重试。
 - `local`：验证、创建批准分支、精确 stage、Commit。
 - `remote`：按 Policy 创建 Issue、Push、PR；专员读取真实 PR Diff 自审；Chief 验收。
-- `merge`：检查 PR 状态，squash merge，更新目标分支，Chief 输出最终报告。
+- `merge`：检查 PR 状态，squash merge，更新目标分支，清理工作分支，Chief 输出最终报告。
+- 冲突、Snapshot 漂移、外部结果未知、发布/部署或数据安全风险仍是硬停止点，不会被一次授权绕过。
 - GitHub 远端权限默认全部关闭，必须在 Workplace Policy 显式开启。
 - OpenCode 修复默认关闭，且永远不能执行 Git 远端操作。
 

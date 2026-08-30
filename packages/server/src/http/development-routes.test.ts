@@ -64,11 +64,11 @@ test("development advance validates gates, maps conflicts, and synchronizes prop
   ));
 
   await expect(advance("proposal-1", "deploy")).rejects.toMatchObject({ status: 400 });
-  for (const gate of ["local", "remote", "merge"] as const) {
+  for (const gate of ["workflow", "local", "remote", "merge"] as const) {
     const response = await advance("proposal-1", gate);
     expect(response?.status).toBe(200);
   }
-  expect(calls.filter((call) => call[0] === "sync")).toHaveLength(3);
+  expect(calls.filter((call) => call[0] === "sync")).toHaveLength(4);
   await expect(advance("conflict", "local")).rejects.toMatchObject({ status: 409 });
 });
 
@@ -104,6 +104,7 @@ function developmentService(calls: unknown[][]): DevelopmentRouteService {
       if (id === "missing") throw new Error(`Development proposal not found: ${id}`);
       return proposal("awaiting_approval");
     },
+    async complete() { calls.push(["advance", "workflow"]); return proposal("completed"); },
     async approve(id) {
       if (id === "conflict") throw new Error("Proposal cannot execute from status completed");
       calls.push(["advance", "local"]); return proposal("awaiting_remote_approval");

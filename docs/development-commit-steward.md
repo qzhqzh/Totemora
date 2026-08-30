@@ -8,7 +8,16 @@
 
 - `commit`：验证、精确 stage、本地 Commit。
 - `pull_request`：继续创建 Issue、Push、PR，读取真实 PR Diff 自审并由 Chief 验收。
-- `merge`：继续检查 PR 状态、squash merge 到 Policy 目标分支并输出 Chief 最终报告。
+- `merge`：继续检查 PR 状态、squash merge 到 Policy 目标分支、清理工作分支并输出 Chief 最终报告。
+
+## 一次授权连续执行
+
+界面和 MCP 默认使用 `workflow` 门禁。用户选定 `commit`、`pull_request` 或 `merge` 终点并检查
+计划后，只批准一次；授权会持久绑定模式、Snapshot、Commit message、文件与目标分支，执行器随后连续推进
+该终点需要的 local、remote 和 merge 阶段，不在每个阶段重复询问。
+
+原有 `local`、`remote`、`merge` 单阶段门禁仍保留，供旧案卷和人工接管使用。一次授权不包含
+版本发布或部署，也不会覆盖 Snapshot、Commit message 或目标模式的变化。
 
 ## 成员协作
 
@@ -20,6 +29,7 @@ Chief 收到 MCP 目标后按 `git-flow-safety` 能力路由。只有一个合�
 
 - 模型输出允许从 fenced JSON 或带说明文本中的平衡 JSON 对象恢复；无法恢复时记录成员 ID 和摘要。
 - 远端 Issue/PR 编号在每次副作用后立即保存，重试不会重复创建。
+- 已授权流程在可调和失败后可从当前阶段继续，无需再次批准相同内容；外部结果未知时仍停止自动重放。
 - Snapshot 或 Policy 改变后旧批准失效。
 - 验证失败默认停止；`allow_opencode_fix` 开启时，可以在批准文件和验证命令白名单内启动 OpenCode。
   修复后必须重新审阅，不能沿用旧批准。

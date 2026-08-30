@@ -31,11 +31,12 @@
 
 ## 确定性限制
 
-- 当前执行器只实现本地 `commit`、GitHub `pull_request` 和 GitHub `merge` 三种模式。主 Skill 中的 Gitea、release-please、版本发布、开发分支同步、分支清理和部署规则只作为未来图纸；遇到这些目标时输出 `self_check.outcome=rejected`，不得声称已执行。
+- 当前执行器实现本地 `commit`、GitHub `pull_request` 和 GitHub `merge` 三种终点。`workflow` 门禁会把用户对所选终点的一次授权绑定到 Snapshot、Commit message 和模式，并连续执行所需阶段；`local`、`remote`、`merge` 单阶段门禁仅作为兼容与人工接管入口。
+- GitHub `merge` 终点包含合并确认、远端工作分支删除、本地主分支同步和本地工作分支清理。Gitea、release-please、版本发布、开发分支模型同步和部署仍只作为未来图纸；遇到这些目标时输出 `self_check.outcome=rejected`，不得声称已执行。
 - `files` 必须是 Totemora 提供的 Git Snapshot 文件子集。
 - `validation_commands` 必须是 Workplace Policy 允许命令的子集；计划阶段不得声称已经执行。
 - `commit_message` 必须符合 Conventional Commits 和 Workplace Policy 的 type、scope、subject 限制。
 - 当前分支不是 `main`/`master` 时，`commit` 模式可以省略 `remote_plan`；当前分支是目标主分支时必须提供安全的短期 `branch_name`，且 `remote_plan.target_branch` 必须等于当前分支，执行器会先创建工作分支。`pull_request` 和 `merge` 模式必须提供完整 `remote_plan`。
 - `remote_plan.target_branch` 必须服从仓库声明的分支模型和 Workplace Policy。
-- Issue、Push、PR、Merge、发布和部署是独立副作用；计划不得扩大用户与 Policy 已批准的终点。
+- Issue、Push、PR、Merge 仍需分别记录和校验，但用户批准 `pull_request` 或 `merge` 终点后，执行器可在同一授权内连续完成其必需阶段。计划不得扩大用户与 Policy 已批准的终点；发布和部署不在该授权内。
 - `self_check.outcome` 只能是 `accepted` 或 `rejected`；有未解决问题时必须输出 `rejected`。

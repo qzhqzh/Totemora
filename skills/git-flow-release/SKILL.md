@@ -1,293 +1,169 @@
 ---
 name: git-flow-release
-description: Govern existing repository changes with the user's git-flow-release rules while preserving Totemora's approval boundaries. In the current Totemora adapter, use for local commits and GitHub Pull Request or merge plans; treat Gitea publishing, releases, branch synchronization, cleanup, and deployment as guidance-only until a deterministic executor is available.
+description: Coordinate Git commit, push, pull request, merge, branch synchronization, and release workflows on GitHub or Gitea while respecting the repository's branch model and the user's authorized stopping point. Use when the user explicitly asks for Git submission, PR, merge, mainline cleanup, release, branch-strategy migration, or synchronization; do not use for ordinary code changes with no requested Git operation.
 ---
 
 # Git Flow Release
 
-> Totemora 内部标识与用户维护的 Skill 统一为 `git-flow-release`。
-> 当本 Skill 由 Totemora `git.flow` 专员调用时，必须同时读取并遵守
-> [Totemora 计划输出契约](references/totemora-plan-contract.md)，以便确定性执行引擎验收计划。
+Coordinate repository state transitions; do not teach Git from first principles. Assume the agent can
+choose ordinary commands. Preserve permission boundaries, branch invariants, and provider-specific
+fallbacks that prevent irreversible or mis-scoped actions.
 
-Use the repository's declared branch model. Keep PR review, branch protection, versioning, and
-deployment as separate safety boundaries even when the repository has only one long-lived branch.
+When Totemora's `git.flow` specialist invokes this Skill, also read
+[the Totemora plan contract](references/totemora-plan-contract.md). Other hosts can ignore that adapter.
 
-## Core rules
+## Authorize an outcome, not every internal click
 
-- Never develop or push directly on `main`/`master`.
-- Preserve unrelated workspace changes.
-- Use Conventional Commits and one independently reviewable PR per repository.
-- Treat commit, push, PR creation, merge, version release, and deployment as distinct permissions
-  unless the user explicitly authorizes the full flow.
-- Read repository instructions and actual CI/release workflows before acting.
+Resolve the user's requested endpoint once:
 
-## Determine the branch model
+- **Inspect or organize:** read-only Git checks; no commit or external mutation.
+- **Commit / 提交:** create a short-lived branch when needed, validate, stage explicit files, and
+  create local commit(s). Stop before Push.
+- **Open PR / 提 PR / 提交到 PR:** complete the Commit work, push the short-lived branch, create or
+  reconcile the Issue/PR, publish the proportional review, and stop before Merge.
+- **Merge / 合并 / 推进到 main / 收回主线 / 完整提交:** complete the Commit and PR work, merge the
+  reviewed PR, remove the merged short-lived branch, and synchronize the local stable branch.
+- **Release / 发布 / 更新版本:** complete only the named code, version, tag, artifact, image, or
+  deployment endpoint. Deployment remains a separate explicit scope unless the user names it.
 
-Resolve the model once before creating a branch:
+The selected endpoint is one workflow authorization for all required internal stages. Once the user
+has approved the exact plan or clearly requested that endpoint, continue through its Commit, Push,
+PR, review, Merge, cleanup, and synchronization steps without repeatedly asking whether to perform
+the next ordinary step.
 
-1. An explicit repository rule in `AGENTS.md` or equivalent wins.
-2. Without an explicit rule, an existing remote `develop` or `dev` indicates the legacy
-   development-branch model.
-3. Without either development branch, use mainline mode.
+Ask again only when the requested endpoint expands, the reviewed files/Commit message/target branch
+materially change, or a hard stop below requires a new decision. A tool or platform may still require
+one native approval for the bundled external mutation; do not manufacture additional conversational
+gates around it.
 
-Do not create `dev` or `develop` merely because a generic workflow mentions it. Do not treat a
-stale branch as active when the repository explicitly declares mainline mode.
+## Invariants
+
+- Current user instructions and repository rules override generic conventions.
+- Never develop on or push feature work directly to `main`/`master`.
+- Preserve unrelated workspace changes; stage explicit paths rather than the whole dirty tree.
+- Use Conventional Commits. Keep type/scope in English; follow repository language for the subject.
+- Do not force-push, delete a branch with unique work, bypass protection, or invent credentials.
+- Code merge, version release, image build, and deployment are separate outcomes and must be reported
+  separately.
+- Read actual repository workflows before acting on CI, release, or deployment.
+
+## Select the branch model once
+
+Use this precedence:
+
+1. An explicit rule in `AGENTS.md`, `CONTRIBUTING.md`, or equivalent.
+2. An active remote `develop` or `dev` used by current PR or release workflows.
+3. Otherwise, mainline mode.
+
+Do not create `dev` or `develop` from a generic example, and do not treat a stale branch as policy.
 
 ### Mainline mode
 
-- `main` is the only long-lived branch.
-- Create `feat/*`, `fix/*`, or `chore/*` from the latest `main`.
-- Open the feature PR directly into `main`.
-- After merge, remove the short-lived branch. Do not create a second release PR or synchronize a
-  development branch.
+`main` is the only long-lived branch. Start `feat/*`, `fix/*`, or `chore/*` from the latest
+`main`; merge its PR directly into `main`; delete the merged short-lived branch; then leave the
+working repository on a clean, synchronized `main`.
 
-### Development-branch mode
+### Legacy development-branch mode
 
-- Discover the actual development branch; do not assume its name.
-- Create short-lived branches from it and merge feature PRs back into it.
-- Use a separate PR from the development branch into `main` for the business release.
-- After the final release state is on `main`, fast-forward the development branch to `main` once.
+Create short-lived branches from the discovered development branch and merge feature PRs back into
+it. Use a separate development-to-`main` PR only for the repository's business release. After that
+release reaches `main`, fast-forward the development branch to the final `main` once.
 
-## Review before merge
+## Preflight and proportional review
 
-Use the `code-review` skill to classify the final diff as lightweight, standard, or high-risk.
-Review lightweight and standard changes directly in the main agent. Use parallel reviewers only
-for high-risk changes or an explicitly requested deep review.
+Perform one bounded preflight before the first mutation:
 
-Complete proportional tests and review when each functional change finishes, before it is treated
-as merge-ready. Keep the review record scoped by function:
+- current branch and dirty state;
+- remote provider and branch model;
+- candidate SHA, target-base SHA, and divergence;
+- open PRs for the same head/base;
+- actual CI/release configuration relevant to the requested scope.
 
-- For later changes within the same function, test and review only the delta, then append the
-  result to that function's existing review record.
-- Treat a materially distinct new function as a new review unit with its own scope, checks,
-  findings, and conclusion, even when it is added to an existing active PR.
-- Keep different functions visibly separated in the PR review so one passing conclusion cannot
-  implicitly cover unrelated later work.
+Use the review depth selected by the current user or repository. Git flow does not require a
+particular review Skill. Never ignore concrete blockers involving credentials, destructive data or
+migrations, authorization, incompatible contracts, failed required checks, or material deployment
+risk.
 
-Run focused regression checks. Run a broad suite only when repository rules or the integration
-surface justify it. Record:
+Record candidate/base SHAs and checks. If both remain unchanged at submission time, reuse the result;
+do not repeat architecture inspection, tests, builds, or reviews. If the candidate changes, review
+its delta. If the target base advances, inspect the integration delta and run proportional checks.
+Publish the completed review at most once unless a later material delta requires an update.
 
-- review tier;
-- candidate SHA;
-- target-branch base SHA;
-- completed checks.
+## Execute the authorized path
 
-If both SHAs remain unchanged, reuse the review during publishing. If the candidate changes,
-review only its delta. If the target base advances, inspect the integration delta and run
-proportional checks. Reclassify only when the delta introduces materially different risk.
+### Mainline change
 
-## Interpret release words
+1. Ensure work is on a short-lived branch based on current `origin/main`.
+2. Commit only intended changes in independently useful batches.
+3. For a PR or Merge endpoint, push and create or reconcile one PR into `main`.
+4. Confirm the PR still points at the reviewed candidate/base and required checks permit the selected
+   merge method.
+5. For a Merge endpoint, merge, confirm the merge SHA, remove the short-lived branch, fetch/prune,
+   switch to local `main`, and fast-forward it to `origin/main`.
 
-- `提交`: create only the explicitly authorized local commit. It does not authorize Push, Issue,
-  Pull Request, Merge, release, or deployment.
-- `Push`、`创建 Issue`、`创建 PR`、`合并 PR`: each authorizes only the named remote side effect.
-- `更新` or `发布`: do not infer the complete release chain. Identify the required Commit, Push,
-  PR, Merge, version/tag/release, image, and deployment stages, then execute only stages explicitly
-  authorized by the user and repository policy.
-- `完整提交并发布` or an equally explicit full-flow instruction can authorize the named stages as
-  one workflow, but deployment still requires separate explicit authorization.
-- If reviewed code is already on `main`, report that fact and request/verify authorization for the
-  remaining version, tag, image, or deployment stage instead of manufacturing another code PR.
+### Legacy change
 
-Report `代码已合并到 main` separately from `镜像构建已触发/完成`.
+Use the same feature-branch path, targeting the active development branch. A normal Merge endpoint
+stops after that feature PR unless the user also requests the business release into `main`. After a
+release PR, synchronize the development branch once rather than manufacturing a reverse PR.
 
-## Fast-path classification
+### Release
 
-Classify each repository once:
+Run release stages only for explicit release/update scope:
 
-- `candidate-ready`: candidate SHA and reviewed target-base SHA are unchanged and checks passed;
-- `needs-review`: candidate or integration base changed, or no review exists;
-- `main-ready`: reviewed code is already on `main`;
-- `no-release`: no releasable commit exists after the last component version.
+1. Confirm a real releasable change exists; never create an empty trigger commit.
+2. Identify the workflow that owns versions, tags/releases, images, and deployment.
+3. Follow exact PR, run, and SHA relationships; do not infer success from a similarly named run.
+4. Never duplicate a dispatch already owned by repository automation.
+5. For trigger-only publishing, stop once the exact run exists and report “release in progress.”
+   Report completion only when the requested artifact or deployment has succeeded.
 
-For `candidate-ready`, run one status/base check and only missing checks. Do not repeat architecture
-inspection, review, tests, or a local production build. For `main-ready`, skip code PR creation.
+If the repository has no declared release mechanism, report that fact rather than inventing one.
 
-Before `更新/发布`, confirm a real releasable Conventional Commit exists (`feat`, `fix`, `perf`,
-or breaking). Do not use empty trigger commits. Classify a real user-visible correction as `fix`
-when accurate.
+## Command routing
 
-## Mainline publish workflow
+Use native authenticated provider tools when they directly cover the operation. Otherwise use the
+installed authenticated CLI. Read [references/commands.md](references/commands.md) only when:
 
-Use this workflow only when the user has explicitly authorized every required Commit, Push, Pull
-Request, and Merge stage. Stop at the last authorized stage.
+- exact GitHub/Gitea syntax or tool mapping is unclear;
+- the native tool does not cover the required action;
+- the first provider-specific attempt fails because of authentication or command-version mismatch;
+- multiline PR/comment Markdown must be passed safely.
 
-1. Verify the candidate and target-base SHAs.
-2. Commit and push the short-lived branch.
-3. Create a PR directly into `main` and publish the completed review once.
-4. Merge the PR and delete the feature branch.
-5. After an explicitly authorized Merge, update local `main`, verify it matches `origin/main`, and stop.
-6. For `更新/发布`, identify the feature-merge push run, wait only for that exact run, then query
-   the newest matching version PR.
-7. Verify and merge the expected release-please version PR.
-8. Confirm tag/release and the production image workflow dispatched for the release SHA. Report
-   completion only after the image is successfully pushed; if the user requested trigger-only
-   publishing, stop as soon as the dispatch exists and report release in progress.
+Do not load the command reference for ordinary Git operations whose syntax is already known. For
+Gitea multiline Markdown, reuse `scripts/tea_markdown.py` instead of rebuilding shell escaping.
 
-## Development-branch publish workflow
+## Mainline migration
 
-Use this workflow only when the user has explicitly authorized every required Commit, Push, Pull
-Request, and Merge stage. Stop at the last authorized stage.
+Migrate a legacy repository only when explicitly requested. Before deleting `dev`/`develop`, prove
+that it has no unique commits, no open PR targets, is not the default branch, and is no longer
+referenced by release automation. Declare the new model in repository instructions, migrate through
+the existing protected workflow, then delete obsolete branches and verify local/remote alignment.
 
-1. Verify the candidate and target-base SHAs.
-2. Commit/push the feature branch, open its PR into the development branch, and publish review.
-3. Merge the feature PR and update the local development branch.
-4. Open and merge the development-branch PR into `main`, referencing the feature PR review.
-5. After an explicitly authorized Merge, fast-forward development to `main`, verify alignment, and stop.
-6. For `更新/发布`, process the version PR/tag/image first, then synchronize development to the
-   final `main` once.
+## Completion contract
 
-## Publish the review
+Report the authorized endpoint, active branch, local/remote relationship, Commit or PR URL, checks
+reused or run, branches removed or preserved, and release/deployment state.
 
-Post one review on the feature PR:
+For a completed mainline Merge, all of these must be true:
 
-```markdown
-## Code Review
+- the PR is merged and its merge SHA is known;
+- the remote short-lived branch is absent unless explicitly preserved;
+- the active local branch is `main`;
+- local `HEAD` equals `origin/main`;
+- the working tree is clean.
 
-### Standards
-- Findings or `No blocking findings`.
+If Merge was not authorized, say that the candidate remains on a short-lived branch and that `main`
+has not changed.
 
-### Spec
-- Findings or `Implementation matches the agreed scope`.
+## Hard stops
 
-### Specialist supplement
-- Only for triggered high-risk topics.
+Stop before the risky stage for merge conflicts, stale approval snapshots, unknown external mutation
+outcomes that cannot be reconciled, missing credentials, required force-push, unrelated commits on
+the target, unique work on a branch scheduled for deletion, failed required checks, ambiguous release
+ownership, or material production/data/security risk. Report the exact blocker and last completed
+safe stage.
 
-### Verification
-- Commands and results.
-
-**Conclusion:** pass/block; review tier; finding counts; candidate/base SHAs.
-```
-
-Fix blockers before posting a passing conclusion. Review only the fix delta. In legacy mode, the
-release PR references this review instead of duplicating it.
-
-When a PR contains more than one reviewed function, repeat the review sections per function or add
-clearly titled incremental review comments. Publishing reuses these completed records and reviews
-only changes made after the last recorded candidate SHA.
-
-## Submission latency budget
-
-Keep submission and publishing work staged so release time is coordination, not a second development
-cycle:
-
-1. At functional completion, run focused tests and complete the proportional review immediately.
-   Fix findings then, not after the user says `更新/发布`.
-2. Record the reviewed candidate SHA, target-base SHA, checks, and review conclusion in the PR or
-   current task. Later edits to the same function require only delta checks; distinct functions get
-   separate review records.
-3. At submission time, do one preflight per repository: dirty state, current branch, candidate SHA,
-   target-base SHA, and remote divergence. If these match the record, do not reread architecture,
-   rerun unchanged tests, or repeat review.
-4. Run independent repositories in parallel at each stage: preflight, push, feature PR, merge,
-   version PR, and dispatch confirmation. Preserve ordering only inside each repository.
-5. Do not run local production image builds during a normal remote release. After merging the version
-   PR, confirm the matching `workflow_dispatch` run once and stop when the user accepts trigger-only
-   publishing.
-
-### Trigger-only hard stop
-
-Treat trigger-only publishing as an event-confirmation workflow, not a build-monitoring workflow:
-
-1. Read the repository release workflow once and identify which workflow owns image dispatch. If the
-   release workflow dispatches the image workflow, never send a second manual dispatch.
-2. After the feature merge, query only the exact release run for that merge SHA. When it succeeds,
-   inspect only the newest open version PR needed to verify and merge the expected release.
-3. After the version PR merge, query image runs with the exact workflow, event, and release merge SHA;
-   keep the result set small. The first matching queued/running/completed run proves dispatch.
-4. Stop immediately after that proof when trigger-only publishing is accepted. Do not wait for image
-   completion, inspect jobs/logs, query tags/releases, repeat fetch/pull, or synchronize local `main`
-   unless a concrete failure makes one of those actions necessary.
-5. Manually dispatch only when the declared owner workflow completed successfully, no matching image
-   run exists after one bounded follow-up query, and repository rules explicitly permit recovery.
-
-Use one preflight, one exact release-run lookup, and one exact image-dispatch lookup as the normal
-remote query budget. Broader history queries and repeated polling require a concrete ambiguity or
-failure, not general caution.
-
-For a reviewed single-repository hotfix, target 3-5 minutes to image dispatch. For two independent
-repositories, target 5-8 minutes. Exceeding the target should be explained by an actual finding,
-failed check, remote conflict, or CI delay rather than repeated safety work.
-
-## Preserve Markdown formatting
-
-PR descriptions and comments must contain real newline characters. Never pass visible `\\n`, use
-`JSON.stringify` output, or interpolate Markdown through a shell command where backticks and
-`$()` can execute.
-
-Use the bundled helper with a single-quoted heredoc:
-
-```bash
-python <totemora-root>/skills/git-flow-release/scripts/tea_markdown.py \
-  comment --repo owner/repo --pr 123 <<'MARKDOWN'
-## Code Review
-
-### Standards
-- No blocking findings.
-MARKDOWN
-```
-
-Use `create-pr` with `--head`, `--base`, and `--title` for PR descriptions. Read the created PR or
-comment back once. Visible `\\n`, collapsed headings/lists, or shell-expanded content is a
-publication defect that must be fixed before merge.
-
-For automation, prefer `--body-file` over interactive stdin:
-
-```bash
-mkdir -p /tmp/totemora-git-flow
-# Write the body with the available file editing tool, then keep it owner-controlled.
-chmod 600 /tmp/totemora-git-flow/pr-body.md
-python <totemora-root>/skills/git-flow-release/scripts/tea_markdown.py \
-  --body-file /tmp/totemora-git-flow/pr-body.md \
-  create-pr --repo owner/repo --head fix/example --base main \
-  --title "fix: example"
-```
-
-Create the body file with the editing tool available in the current environment. Never start the
-helper without a body, and never retry a failed body submission through an interactive PTY.
-
-## Migrate a repository to mainline
-
-Migrate incrementally per repository:
-
-1. Confirm `main` and every active development branch contain the same commits and no open PR
-   still targets the development branch.
-2. Confirm merging to `main` does not unintentionally bypass or trigger an unsafe legacy release.
-3. Declare mainline mode in repository instructions and update developer documentation.
-4. Remove CI scripts that push `main` into `dev`/`develop`.
-5. Merge these changes through the repository's currently active workflow.
-6. Delete remote `dev`/`develop` only after the migration PR reaches `main` and rechecking
-   alignment/open PRs.
-7. Switch local tracking to `main` and verify no workflow/config still references the removed
-   branch.
-
-Do not delete a development branch with unique commits, open target PRs, or unresolved release
-dependencies.
-
-## Gitea and timing notes
-
-- Put `tea pr merge` options before the PR number.
-- Use the broadly compatible merge form `tea pr merge --repo <owner/repo> --style merge <number>`.
-  Do not pass `--delete`: some deployed `tea` versions reject it. Gitea commonly deletes the head
-  branch automatically; after merge, run `git fetch --prune` and only issue an explicit remote delete
-  when the ref still exists.
-- Parallelize independent repositories and same-stage operations; preserve order inside each repo.
-- Query exact action run/job state by run ID or release SHA instead of fixed sleeps.
-- Query only open PRs or the newest expected release PR. Do not fetch full PR history merely to
-  discover the current version PR.
-- Use one bounded wait followed by one exact query. If automation is still running, use short,
-  bounded follow-up checks; never use an unbounded poll loop.
-- Do not call `--help` during a normal release when the compatible command is documented here.
-- Do not rerun unchanged review or checks during publishing. Reuse recorded candidate/base SHAs.
-- For trigger-only publishing, stop when the release SHA has a `workflow_dispatch` image run;
-  do not wait for image completion or perform optional local synchronization.
-- Inspect a failed completed job log before speculative corrective commits.
-- A dispatched image means `发布进行中`; only a successfully pushed production image means release
-  completion.
-
-## Stop conditions
-
-Stop for destructive/unauthorized migrations, unrelated commits entering the target branch,
-merge conflicts, unique commits on a branch scheduled for deletion, material production risk, or
-missing permission. For `tumor_api`, database migrations remain user-operated unless explicitly
-authorized for the current task.
+After a retryable failure, reuse the original workflow authorization only when its endpoint, snapshot,
+Commit message, files, and target branch still match. Do not ask for the same permission again; do not
+silently replay an external mutation whose result is unknown.

@@ -185,7 +185,7 @@ test("does not commit or leave staged files when policy validation fails", async
   await rm(dataDir, { recursive: true, force: true });
 });
 
-test("one durable workflow reaches Issue, reviewed PR, merge and Chief report", async () => {
+test("one authorization reaches Issue, reviewed PR, merge, cleanup and Chief report", async () => {
   const root = await createRepository();
   const remote = await mkdtemp(join(tmpdir(), "totemora-development-remote-"));
   await command(remote, ["init", "--bare", "-q"]);
@@ -260,36 +260,39 @@ test("one durable workflow reaches Issue, reviewed PR, merge and Chief report", 
     status: "awaiting_approval", mode: "merge", issue_mode: "auto",
     specialist_member_id: "deepseek_git_steward", chief_acceptance: { outcome: "accepted" },
   });
-  const committed = await service.approve(workflow.id);
-  expect(committed.status).toBe("awaiting_remote_approval");
-  const uncertainPublish = await service.publish(workflow.id);
+  const uncertainPublish = await service.complete(workflow.id);
   expect(uncertainPublish).toMatchObject({
     status: "awaiting_remote_approval",
     error: "connection closed after GitHub accepted the Issue",
     issue_creation_unknown: true,
+    workflow_authorization: {
+      mode: "merge", snapshot_hash: workflow.snapshot_hash,
+      commit_message: workflow.commit_message,
+      files: workflow.files, target_branch: "main",
+      approved_at: expect.any(String),
+    },
   });
-  const hiddenPublish = await service.publish(workflow.id);
+  const hiddenPublish = await service.complete(workflow.id);
   expect(hiddenPublish).toMatchObject({
     status: "awaiting_remote_approval",
     error: expect.stringContaining("outcome is unknown"),
     issue_creation_unknown: true,
   });
   expect(issueCreateCalls).toBe(1);
-  const published = await service.publish(workflow.id);
-  expect(published).toMatchObject({
-    status: "awaiting_merge_approval", issue_number: 7, pr_number: 9,
+  const completed = await service.complete(workflow.id);
+  expect(completed).toMatchObject({
+    status: "completed", issue_number: 7, pr_number: 9,
     pr_review: { outcome: "accepted" }, chief_acceptance: { outcome: "accepted" },
+    chief_report: { acceptance: "passed" },
   });
   expect(issueCreateCalls).toBe(1);
-  const completed = await service.merge(workflow.id);
-  expect(completed).toMatchObject({
-    status: "completed", chief_report: { acceptance: "passed" },
-  });
   expect((await command(root, ["branch", "--show-current"])).trim()).toBe("main");
+  expect((await command(root, ["branch", "--list", "test/tribe-git-flow"])).trim()).toBe("");
+  expect((await command(root, ["ls-remote", "--heads", "origin", "refs/heads/test/tribe-git-flow"])).trim()).toBe("");
   expect(completed.activities.map((item) => item.phase)).toEqual([
-    "assigned", "planned", "chief_accepted", "committed", "issue_creation_unknown",
+    "assigned", "planned", "chief_accepted", "workflow_authorized", "committed", "issue_creation_unknown",
     "remote_failed", "remote_failed", "issue_reused", "pushed",
-    "pr_created", "merge_ready", "merged",
+    "pr_created", "merge_ready", "branch_cleaned", "merged",
   ]);
   await rm(root, { recursive: true, force: true });
   await rm(remote, { recursive: true, force: true });
