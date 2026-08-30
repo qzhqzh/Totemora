@@ -10,6 +10,7 @@ import { IntelligenceCandidateStore, type CandidateEvaluation, type CandidateFee
 import { IntelligenceDispatcher } from "./intelligence-dispatcher";
 import { IntelligencePreferenceStore } from "./intelligence-preference-store";
 import { MemberStateStore } from "./member-state-store";
+import { groundEvidenceUrls, optionalEvidenceId } from "./model-evidence-grounding";
 import { StateDatabase } from "./state-database";
 import { readBoundedResponseText } from "./integrations/bounded-response";
 import { SpecialistTaskRepository } from "./specialist-service";
@@ -39,6 +40,7 @@ interface AiHotCache {
 }
 interface IntelligenceItem {
   headline: string; brief: string; url: string;
+  evidence_id?: number;
   event_key?: string; importance?: number; interest?: number; confidence?: number; novelty?: number;
   push_worthy?: boolean; rationale?: string; is_update?: boolean;
 }
@@ -182,7 +184,7 @@ export class IntelligenceService {
       let rejectedOutput = "";
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const response = await this.providers.get(member.provider).generate({
-          memberId: member.id, model: member.model, responseFormat: "json", maxTokens: 3_000,
+          memberId: member.id, model: member.model, responseFormat: "json", maxTokens: 1_800,
           messages: [
             { role: "system", content: [
               member.persona ?? "",
@@ -196,16 +198,19 @@ export class IntelligenceService {
               `用户关注方向：${JSON.stringify(preferences.interests)}`,
               `最近 ${preferences.novelty_history_hours} 小时已推送事件：${JSON.stringify(recentPushed)}`,
               `来源证据：${JSON.stringify(sourceEvidence)}`,
-              "输出严格 JSON：{title,summary,items:[{headline,brief,url,event_key,importance,interest,confidence,novelty,push_worthy,rationale,is_update}]}。items 取 3-8 条并合并同一事件；四项分数为 0-1；event_key 使用稳定的短语；与已推送事件相比只有出现可陈述的新事实时 is_update 才为 true；优先用户关注方向，同时保留真正重大的突发变化；summary 不超过 180 字。",
+              "输出严格 JSON：{title,summary,items:[{evidence_id,headline,brief,url,event_key,importance,interest,confidence,novelty,push_worthy,rationale,is_update}]}。evidence_id 必须复制来源证据中的数字 id，url 必须与该 id 的 url 完全一致。items 取 3-8 条并合并同一事件；四项分数为 0-1；event_key 使用稳定的短语；与已推送事件相比只有出现可陈述的新事实时 is_update 才为 true；优先用户关注方向，同时保留真正重大的突发变化；summary 不超过 180 字。",
               attempt === 1
-                ? `上一次输出因包含证据集之外的 URL 被拒绝。只修正 URL 并重新输出完整 JSON。被拒绝的输出：${rejectedOutput.slice(0, 6_000)}`
+                ? `上一次输出因证据 ID 或 URL 不合法被拒绝。逐项补全正确 evidence_id，并复制对应来源 url 后重新输出完整 JSON。被拒绝的输出：${rejectedOutput.slice(0, 6_000)}`
                 : "",
             ].filter(Boolean).join("\n") },
           ],
         });
         const candidate = parseSummary(response.content);
-        if (candidate.items.every((item) => allowedLinks.has(item.url))) {
+        const grounded = groundEvidenceUrls(candidate.items, sourceEvidence, allowedLinks);
+        if (!grounded.invalid.length) {
+          candidate.items = grounded.items;
           summary = candidate;
+          if (grounded.corrected) brief.warnings.push(`按 evidence_id 纠正 ${grounded.corrected} 条来源 URL`);
           if (attempt === 1) brief.warnings.push("情报员经过一次证据边界纠正后完成摘要");
           break;
         }
@@ -732,6 +737,7 @@ function parseSummary(content: string): Pick<IntelligenceBrief, "title" | "summa
   if (!value.title || !value.summary || !Array.isArray(value.items) || !value.items.length) throw new Error("Intelligence member returned an invalid brief");
   value.items = value.items.slice(0, 8).map((item) => ({
     headline: String(item.headline).slice(0, 180), brief: String(item.brief).slice(0, 400), url: String(item.url),
+    evidence_id: optionalEvidenceId((item as { evidence_id?: unknown }).evidence_id),
     event_key: item.event_key ? String(item.event_key).slice(0, 120) : undefined,
     importance: optionalScore(item.importance), interest: optionalScore(item.interest),
     confidence: optionalScore(item.confidence), novelty: optionalScore(item.novelty),
