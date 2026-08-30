@@ -17,6 +17,7 @@
         <a href="/#task-hall">任务大厅</a>
         <a href="/#intelligence-hall">情报台</a>
         <a href="/#reminders">事项</a>
+        <a href="/#deals">优惠</a>
       </nav>
     </div>
     <div class="header-actions">
@@ -453,6 +454,19 @@ secrets/</textarea></label>
           <div id="reminder-list" class="reminder-list" aria-live="polite"></div>
         </div>
       </div>
+    </section>
+    <section class="panel deals-panel" id="deals" aria-labelledby="deals-title-heading">
+      <header class="deals-head">
+        <div><h2 id="deals-title-heading">优惠雷达</h2><p>公开来源由 Totemora 每小时采集；最多投递 5 条，其余只作为去重证据，不混入财经判断。</p></div>
+        <button id="refresh-deals" type="button" class="secondary">刷新优惠</button>
+      </header>
+      <div id="deal-summary" class="notification-summary" role="status" aria-live="polite">输入操作员 Token 后可查看优惠案卷。</div>
+      <div id="deal-health" class="deal-health"></div>
+      <div class="deal-board-head">
+        <div><h3>优惠案卷</h3><p>投递成功、未知结果和跳过去重都有独立状态，不把“服务接受”表述为“用户已读”。</p></div>
+        <label>状态<select id="deal-filter-status"><option value="all">全部</option><option value="delivered">已投递</option><option value="skipped">去重留档</option><option value="pending">待处理</option><option value="uncertain">结果未知</option></select></label>
+      </div>
+      <div id="deal-list" class="deal-list" aria-live="polite"></div>
     </section>
     <section class="panel content-panel" id="content-studio">
       <div class="section-title"><h2>创作工坊</h2></div>

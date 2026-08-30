@@ -4,6 +4,7 @@ import { api, initializeOperatorSession } from "./shared/operator-session.js";
 import { abilityTemplatesFeature } from "./features/ability-templates.js";
 import { contentStudioFeature } from "./features/content-studio.js";
 import { developmentFeature } from "./features/development.js";
+import { dealsFeature } from "./features/deals.js";
 import { intelligenceFeature } from "./features/intelligence.js";
 import { membersFeature } from "./features/members.js";
 import { notificationsFeature } from "./features/notifications.js";
@@ -22,6 +23,7 @@ document.querySelectorAll("[data-primary-route]").forEach((link) => {
 });
 
 registerFeature("development", developmentFeature);
+registerFeature("deals", dealsFeature);
 registerFeature("intelligence", intelligenceFeature);
 registerFeature("contentStudio", contentStudioFeature);
 registerFeature("notifications", notificationsFeature);
@@ -68,6 +70,7 @@ async function loadHomeRoute() {
       contentStudioFeature.load(),
       notificationsFeature.loadBarkTargets(),
       remindersFeature.loadReminders(),
+      dealsFeature.loadDeals(),
       skillsFeature.loadCommissions(),
       skillsFeature.loadRegistry(),
       abilityTemplatesFeature.load(),

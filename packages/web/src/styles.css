@@ -399,6 +399,18 @@ main { padding:24px; display:grid; grid-template-columns:1fr 1.3fr; gap:20px; }
 .reminder-card footer { display:flex; justify-content:space-between; align-items:center; gap:16px; padding-top:12px; border-top:1px solid var(--line); }
 .reminder-card footer button { min-height:44px; }
 .reminder-card footer small { color:var(--muted); text-align:right; }
+.deals-panel{padding:0}.deals-head{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:24px;border-bottom:1px solid var(--line)}
+.deals-head h2,.deal-board-head h3{margin:0}.deals-head p,.deal-board-head p{margin:7px 0 0;color:var(--muted)}
+.deals-panel>.notification-summary{border-left:0;border-right:0}.deal-health{display:grid;grid-template-columns:repeat(3,1fr);border-bottom:1px solid var(--line)}
+.deal-health>div{display:grid;gap:5px;padding:18px 24px;border-right:1px solid var(--line)}.deal-health>div:last-child{border-right:0}
+.deal-health small,.deal-card small{color:var(--muted)}.deal-health strong{font:600 18px/1.2 Georgia,serif}.deal-health span{font-size:11px;color:var(--muted)}
+.deal-board-head{display:flex;justify-content:space-between;align-items:end;gap:20px;padding:24px}.deal-board-head label{min-width:180px}
+.deal-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:0 24px 24px}
+.deal-card{display:grid;gap:14px;padding:18px;border:1px solid var(--line);border-left:3px solid var(--amber);background:#111411}
+.deal-card.skipped{border-left-color:var(--muted)}.deal-card.uncertain{border-left-color:#e87968}
+.deal-card header,.deal-card footer{display:flex;justify-content:space-between;align-items:start;gap:16px}.deal-card h3{margin:5px 0 0;font:600 17px/1.4 Georgia,serif;overflow-wrap:anywhere}
+.deal-card header>span{flex:none;color:var(--muted);font-size:11px}.deal-price{margin:0;color:var(--amber)}.deal-card footer{align-items:center;padding-top:12px;border-top:1px solid var(--line)}
+.deal-card .button{display:inline-grid;min-height:42px;place-items:center;padding:9px 16px;background:#2b312b;color:var(--ink);border:1px solid var(--line);font-weight:700;text-decoration:none}.deal-empty{grid-column:1/-1;padding:28px;border:1px dashed var(--line);color:var(--muted)}.deal-empty p{margin:6px 0 0}
 .reminder-empty { padding:28px 0; color:var(--muted); }
 .reminder-empty p { margin:4px 0 0; }
 .intelligence-domains { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:24px; align-items:start; }
@@ -545,4 +557,5 @@ pre { max-height:420px; overflow:auto; background:#0c0e0c; padding:14px; font-si
 @media(max-width:760px){.header-actions{width:100%;justify-items:stretch}.operator-login{width:100%}.operator-dialog-actions{display:grid}.operator-dialog-actions button{width:100%}}
 @media(max-width:760px){.ability-type-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}.ability-tab-btn{justify-content:center;padding:10px 6px;font-size:0}.ability-tab-btn .tab-badge{font-size:10px}.prompt-workbench,.workflow-workbench{grid-template-columns:1fr}.prompt-index,.workflow-index{border-right:0;border-bottom:1px solid var(--line)}.prompt-detail,.workflow-detail{padding:16px}.skill-detail-head>.skill-detail-actions{display:grid}.skill-detail-head>.skill-detail-actions button{width:100%}}
 @media(max-width:760px){.reminder-workspace{grid-template-columns:1fr}.reminder-head,.reminder-board>header,.reminder-card footer{align-items:stretch;flex-direction:column}.reminder-editor{border-right:0;border-bottom:1px solid var(--line)}.reminder-card footer small{text-align:left}}
+@media(max-width:760px){.deals-head,.deal-board-head,.deal-card footer{align-items:stretch;flex-direction:column}.deal-health,.deal-list{grid-template-columns:1fr}.deal-health>div{border-right:0;border-bottom:1px solid var(--line)}.deal-health>div:last-child{border-bottom:0}.deal-board-head label{min-width:0}.deal-list{padding:0 16px 16px}}
 @media(min-width:761px) and (max-width:960px){.reminder-workspace{grid-template-columns:1fr}.reminder-editor{border-right:0;border-bottom:1px solid var(--line)}}

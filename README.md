@@ -24,6 +24,7 @@ bun run start:web
 - [Codex 定时任务定向投递 Telegram](docs/codex-supervisor.md#定时任务定向投递)
 - [Bark / Telegram / ntfy 统一通知平台](docs/notification-platform.md)
 - [事项提醒与旧 memo 迁移](docs/reminders.md)
+- [优惠雷达与旧 deals 迁移](docs/deals.md)
 - [当前推进计划](docs/execution-plan.md)
 - [收益基准与稳定性演练](docs/benchmark.md)
 - [JSON 到 SQLite 升级指南](docs/storage-migration.md)

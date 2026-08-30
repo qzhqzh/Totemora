@@ -1,7 +1,4 @@
 import { Database } from "bun:sqlite";
-import { createHash } from "node:crypto";
-import { constants } from "node:fs";
-import { open, stat } from "node:fs/promises";
 
 import {
   assertLocalDate,
@@ -14,6 +11,7 @@ import {
   ReminderRepository,
   type LegacyReminderImportBundle,
 } from "../repositories/reminder-repository";
+import { sha256FrozenSqliteSnapshot } from "./frozen-sqlite-snapshot";
 
 const MAX_SNAPSHOT_BYTES = 32 * 1_024 * 1_024;
 const MAX_ACTIVE_ITEMS = 1_000;
@@ -71,7 +69,11 @@ export async function importLegacyMemoSnapshot(input: {
   apply: boolean;
 }): Promise<LegacyMemoImportReport> {
   const localDate = assertLocalDate(input.localDate);
-  const sha256 = await readFrozenSnapshot(input.sourcePath);
+  const sha256 = await sha256FrozenSqliteSnapshot({
+    sourcePath: input.sourcePath,
+    label: "Legacy memo import",
+    maximumBytes: MAX_SNAPSHOT_BYTES,
+  });
   const bundle = buildImportBundle(input.sourcePath, input.sourceRef, localDate, sha256);
   const applied = input.apply
     ? new ReminderRepository(input.dataDir).importLegacy(bundle).applied
@@ -87,28 +89,6 @@ export async function importLegacyMemoSnapshot(input: {
     apply_requested: input.apply,
     applied,
   };
-}
-
-async function readFrozenSnapshot(sourcePath: string): Promise<string> {
-  const activeWal = await stat(`${sourcePath}-wal`).catch((error: unknown) => {
-    if (isNodeError(error, "ENOENT")) return undefined;
-    throw error;
-  });
-  if (activeWal?.size) throw new Error("Legacy memo import requires a frozen SQLite backup without an active WAL");
-  let handle: Awaited<ReturnType<typeof open>>;
-  try { handle = await open(sourcePath, constants.O_RDONLY | constants.O_NOFOLLOW); }
-  catch (error) { throw new Error(`Unable to open legacy memo snapshot (${nodeCode(error)})`); }
-  try {
-    const metadata = await handle.stat();
-    if (!metadata.isFile()) throw new Error("Legacy memo snapshot must be a regular file");
-    if (metadata.size < 1 || metadata.size > MAX_SNAPSHOT_BYTES) {
-      throw new Error(`Legacy memo snapshot must contain 1-${MAX_SNAPSHOT_BYTES} bytes`);
-    }
-    const bytes = await handle.readFile();
-    return createHash("sha256").update(bytes).digest("hex");
-  } finally {
-    await handle.close();
-  }
 }
 
 function buildImportBundle(
@@ -253,12 +233,4 @@ function boundedSlot(value: number): number {
 
 function safeError(value: string): string {
   return value.replace(/[\u0000-\u001F\u007F]/g, " ").slice(0, 500);
-}
-
-function isNodeError(error: unknown, code: string): boolean {
-  return error instanceof Error && "code" in error && error.code === code;
-}
-
-function nodeCode(error: unknown): string {
-  return error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : "unknown";
 }

@@ -18,6 +18,7 @@ import { applySkillTrialOutcomeMigration } from "./migrations/008-skill-trial-ou
 import { applyCodexSupervisorMigration } from "./migrations/009-codex-supervisor";
 import { applyCodexThreadHistoryModeMigration } from "./migrations/010-codex-thread-history-mode";
 import { applyCodexScheduledSubscriptionsMigration } from "./migrations/011-codex-scheduled-subscriptions";
+import { applyReminderDomainMigration } from "./migrations/012-reminder-domain";
 
 const migrationsThroughVersion10 = [
   applyInitialStateMigration,
@@ -35,6 +36,11 @@ const migrationsThroughVersion10 = [
 const migrationsThroughVersion11 = [
   ...migrationsThroughVersion10,
   applyCodexScheduledSubscriptionsMigration,
+];
+
+const migrationsThroughVersion12 = [
+  ...migrationsThroughVersion11,
+  applyReminderDomainMigration,
 ];
 
 test("state migrations register every version and remain idempotent", () => {
@@ -55,6 +61,7 @@ test("state migrations register every version and remain idempotent", () => {
       { version: 10, name: "record Codex thread history mode" },
       { version: 11, name: "Codex scheduled Telegram subscriptions" },
       { version: 12, name: "durable reminder domain and delivery ledger" },
+      { version: 13, name: "durable deals collection and delivery ledger" },
     ]);
   } finally {
     db.close();
@@ -260,6 +267,75 @@ test("migration 12 rolls back its complete schema when the version record fails"
     `).all()).toEqual([
       { name: "reminder_delivery_windows" },
       { name: "reminder_items" },
+    ]);
+  } finally {
+    db.close();
+  }
+});
+
+test("migration 13 preserves pre-deals state and enforces delivery invariants", () => {
+  const db = new Database(":memory:", { create: true, strict: true });
+  try {
+    for (const migrate of migrationsThroughVersion12) migrate(db);
+    db.query("INSERT INTO records VALUES(?,?,?,?,?)")
+      .run("fixture", "keep", '{"value":13}', "2026-08-01", "2026-08-01");
+    runStateMigrations(db);
+    runStateMigrations(db);
+
+    expect(db.query("SELECT payload_json FROM records WHERE namespace='fixture'").get())
+      .toEqual({ payload_json: "{\"value\":13}" });
+    expect(db.query("SELECT name FROM schema_migrations WHERE version=13").get())
+      .toEqual({ name: "durable deals collection and delivery ledger" });
+    db.query(`
+      INSERT INTO deal_items(
+        id,source_id,title,deal_text,merchant,source_url,source_rank,status,
+        discovered_at,updated_at
+      ) VALUES('deal-1','1','Deal','9.9','Mall','https://example.com/1',1,'pending','2026-08-30','2026-08-30')
+    `).run();
+    db.query(`
+      INSERT INTO deal_delivery_windows(
+        window_key,local_hour,status,attempts,created_at,updated_at
+      ) VALUES('deals:digest:2026-08-30:18','2026-08-30T18','pending',0,'2026-08-30','2026-08-30')
+    `).run();
+    db.query("INSERT INTO deal_delivery_items VALUES(?,?,?)")
+      .run("deals:digest:2026-08-30:18", "deal-1", 1);
+    expect(() => db.query("UPDATE deal_items SET status='delivered' WHERE id='deal-1'").run()).toThrow();
+    expect(() => db.query(`
+      INSERT INTO deal_delivery_windows(
+        window_key,local_hour,status,attempts,created_at,updated_at
+      ) VALUES('bad','2026-08-30T99','pending',0,'2026-08-30','2026-08-30')
+    `).run()).toThrow();
+  } finally {
+    db.close();
+  }
+});
+
+test("migration 13 rolls back its complete schema when the version record fails", () => {
+  const db = new Database(":memory:", { create: true, strict: true });
+  try {
+    for (const migrate of migrationsThroughVersion12) migrate(db);
+    db.exec(`
+      CREATE TRIGGER reject_migration_13
+      BEFORE INSERT ON schema_migrations
+      WHEN NEW.version=13
+      BEGIN
+        SELECT RAISE(ABORT,'simulated deals migration failure');
+      END;
+    `);
+    expect(() => runStateMigrations(db)).toThrow("simulated deals migration failure");
+    expect(db.query("SELECT version FROM schema_migrations WHERE version=13").get()).toBeNull();
+    expect(db.query(`
+      SELECT type,name FROM sqlite_master WHERE name LIKE 'deal_%' ORDER BY type,name
+    `).all()).toEqual([]);
+    db.exec("DROP TRIGGER reject_migration_13");
+    runStateMigrations(db);
+    expect(db.query(`
+      SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'deal_%' ORDER BY name
+    `).all()).toEqual([
+      { name: "deal_delivery_items" },
+      { name: "deal_delivery_windows" },
+      { name: "deal_items" },
+      { name: "deal_source_runs" },
     ]);
   } finally {
     db.close();

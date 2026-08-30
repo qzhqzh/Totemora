@@ -23,7 +23,10 @@ test("exposes tribe and completes a playground run", async () => {
   expect((await tribe.json()).members.length).toBeGreaterThan(1);
   expect(await (await app.fetch(new Request("http://local/api/status"))).json()).toMatchObject({
     version: "0.12.0-evidence-skill-core", active_members: 7,
-    capabilities: { inspect: "enabled", change: "git_flow_existing_changes", specialist_self_review: "enabled", member_chat: "mentor_escalation_v1" },
+    capabilities: {
+      inspect: "enabled", change: "git_flow_existing_changes", specialist_self_review: "enabled",
+      member_chat: "mentor_escalation_v1", deals: "hourly_public_source_digest_v1",
+    },
   });
   expect((await app.fetch(new Request("http://local/api/operator/session"))).status).toBe(401);
   const operatorSession = await app.fetch(new Request("http://local/api/operator/session", { headers: authorized() }));
