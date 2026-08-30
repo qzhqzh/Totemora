@@ -50,3 +50,23 @@ test("operator can explicitly remember this device and revoke the stored token",
   }))).toEqual({ persistent: false, perTab: false });
   await expect(page.locator("#operator-auth-state")).toHaveText("未登录");
 });
+
+test("operator can inspect the governed forwarded relay without source secrets", async ({ page }) => {
+  const runtimeErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") runtimeErrors.push(message.text());
+  });
+  page.on("pageerror", (error) => runtimeErrors.push(error.message));
+
+  await page.goto("/#forwarded");
+  await page.getByRole("button", { name: /操作员登录/ }).click();
+  await page.locator("#operator-token").fill("totemora-e2e-operator-token");
+  await page.getByRole("button", { name: "验证并登录" }).click();
+
+  await expect(page.getByRole("heading", { name: "指定消息转发" })).toBeVisible();
+  await expect(page.locator("#forwarded-summary")).toContainText("当前案卷");
+  await expect(page.locator("#forwarded-health")).toContainText("未配置");
+  await expect(page.locator("#forwarded-list")).toContainText("当前筛选下没有记录");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  expect(runtimeErrors).toEqual([]);
+});

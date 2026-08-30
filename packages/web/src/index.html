@@ -18,6 +18,7 @@
         <a href="/#intelligence-hall">情报台</a>
         <a href="/#reminders">事项</a>
         <a href="/#deals">优惠</a>
+        <a href="/#forwarded">转发</a>
       </nav>
     </div>
     <div class="header-actions">
@@ -467,6 +468,19 @@ secrets/</textarea></label>
         <label>状态<select id="deal-filter-status"><option value="all">全部</option><option value="delivered">已投递</option><option value="skipped">去重留档</option><option value="pending">待处理</option><option value="uncertain">结果未知</option></select></label>
       </div>
       <div id="deal-list" class="deal-list" aria-live="polite"></div>
+    </section>
+    <section class="panel forwarded-panel" id="forwarded" aria-labelledby="forwarded-title-heading">
+      <header class="forwarded-head">
+        <div><h2 id="forwarded-title-heading">指定消息转发</h2><p>Totemora 直接订阅唯一获准的上游 ntfy Topic，再按统一信封投递到指定通道；旧转发 worker 不再运行。</p></div>
+        <button id="refresh-forwarded" type="button" class="secondary">刷新转发</button>
+      </header>
+      <div id="forwarded-summary" class="notification-summary" role="status" aria-live="polite">输入操作员 Token 后可查看转发案卷。</div>
+      <div id="forwarded-health" class="forwarded-health"></div>
+      <div class="forwarded-board-head">
+        <div><h3>转发案卷</h3><p>每条上游消息、每个目标独立幂等；“通道已接受”不代表用户已读。</p></div>
+        <label>状态<select id="forwarded-filter-status"><option value="all">全部</option><option value="completed">已接受</option><option value="deduped">重叠去重</option><option value="pending">待转发</option><option value="failed">可重试失败</option><option value="uncertain">结果未知</option></select></label>
+      </div>
+      <div id="forwarded-list" class="forwarded-list" aria-live="polite"></div>
     </section>
     <section class="panel content-panel" id="content-studio">
       <div class="section-title"><h2>创作工坊</h2></div>

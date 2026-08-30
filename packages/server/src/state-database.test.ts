@@ -19,6 +19,7 @@ import { applyCodexSupervisorMigration } from "./migrations/009-codex-supervisor
 import { applyCodexThreadHistoryModeMigration } from "./migrations/010-codex-thread-history-mode";
 import { applyCodexScheduledSubscriptionsMigration } from "./migrations/011-codex-scheduled-subscriptions";
 import { applyReminderDomainMigration } from "./migrations/012-reminder-domain";
+import { applyDealsDomainMigration } from "./migrations/013-deals-domain";
 
 const migrationsThroughVersion10 = [
   applyInitialStateMigration,
@@ -43,6 +44,11 @@ const migrationsThroughVersion12 = [
   applyReminderDomainMigration,
 ];
 
+const migrationsThroughVersion13 = [
+  ...migrationsThroughVersion12,
+  applyDealsDomainMigration,
+];
+
 test("state migrations register every version and remain idempotent", () => {
   const db = new Database(":memory:", { create: true, strict: true });
   try {
@@ -62,6 +68,7 @@ test("state migrations register every version and remain idempotent", () => {
       { version: 11, name: "Codex scheduled Telegram subscriptions" },
       { version: 12, name: "durable reminder domain and delivery ledger" },
       { version: 13, name: "durable deals collection and delivery ledger" },
+      { version: 14, name: "governed forwarded ntfy relay" },
     ]);
   } finally {
     db.close();
@@ -340,6 +347,55 @@ test("migration 13 rolls back its complete schema when the version record fails"
   } finally {
     db.close();
   }
+});
+
+test("migration 14 preserves pre-relay state and constrains forwarded events", () => {
+  const db = new Database(":memory:", { create: true, strict: true });
+  try {
+    for (const migrate of migrationsThroughVersion13) migrate(db);
+    db.query("INSERT INTO records VALUES(?,?,?,?,?)")
+      .run("fixture", "keep", '{"value":14}', "2026-08-01", "2026-08-01");
+    runStateMigrations(db);
+    runStateMigrations(db);
+    expect(db.query("SELECT payload_json FROM records WHERE namespace='fixture'").get())
+      .toEqual({ payload_json: "{\"value\":14}" });
+    expect(db.query("SELECT name FROM schema_migrations WHERE version=14").get())
+      .toEqual({ name: "governed forwarded ntfy relay" });
+    db.query(`
+      INSERT INTO forwarded_events(
+        id,source_id,source_message_id,content_hash,occurred_at,title,body,priority,
+        tags_json,status,attempts,created_at,updated_at
+      ) VALUES('f-1','legacy-forwarded','m-1',?,'2026-08-30','Title','Body',3,'[]','pending',0,'2026-08-30','2026-08-30')
+    `).run("a".repeat(64));
+    expect(() => db.query(`
+      INSERT INTO forwarded_events(
+        id,source_id,source_message_id,content_hash,occurred_at,title,body,priority,
+        tags_json,status,attempts,created_at,updated_at
+      ) VALUES('f-2','legacy-forwarded','m-2',?,'2026-08-30','','',3,'[]','pending',0,'2026-08-30','2026-08-30')
+    `).run("b".repeat(64))).toThrow();
+    expect(() => db.query("UPDATE forwarded_events SET priority=9 WHERE id='f-1'").run()).toThrow();
+  } finally { db.close(); }
+});
+
+test("migration 14 rolls back all relay schema when its version record fails", () => {
+  const db = new Database(":memory:", { create: true, strict: true });
+  try {
+    for (const migrate of migrationsThroughVersion13) migrate(db);
+    db.exec(`
+      CREATE TRIGGER reject_migration_14 BEFORE INSERT ON schema_migrations
+      WHEN NEW.version=14 BEGIN SELECT RAISE(ABORT,'simulated relay migration failure'); END;
+    `);
+    expect(() => runStateMigrations(db)).toThrow("simulated relay migration failure");
+    expect(db.query("SELECT version FROM schema_migrations WHERE version=14").get()).toBeNull();
+    expect(db.query(`
+      SELECT type,name FROM sqlite_master WHERE name LIKE 'forwarded_%' ORDER BY type,name
+    `).all()).toEqual([]);
+    db.exec("DROP TRIGGER reject_migration_14");
+    runStateMigrations(db);
+    expect(db.query(`
+      SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'forwarded_%' ORDER BY name
+    `).all()).toEqual([{ name: "forwarded_events" }, { name: "forwarded_source_state" }]);
+  } finally { db.close(); }
 });
 
 test("legacy JSON import is idempotent and refuses silent post-cutover changes", async () => {

@@ -77,7 +77,7 @@
 
 进展：`finance.watch` 已复用 SpecialistTask、成员绑定、资产断言、候选派发、反馈和经历信用；三个周期值守由同一 `RecurringServiceRunner` 管理，状态持久化并暴露到受保护运维视图，单服务失败和重叠运行互相隔离。Development、Intelligence/Finance 和 Content 的应用任务生命周期已从 App factory 提取；只有新增第五类专业服务时才评估注册式工厂，避免为当前四类服务过度抽象。
 
-通知项目整合进展：Bark、Telegram、ntfy 已共用 `NotificationEnvelope v1` 和逐目标 Action Journal；旧 Compose 已停止。`reminder.watch` 使用独立领域、migration 12、Repository、Operator API、Web 案卷和一致性快照导入器接管旧 memo。`deals.watch` 使用 migration 13、受限 HTTPS source client、冻结的每小时派发窗口、来源健康账本和旧商品去重种子接管优惠能力。两者均不伪装成 AI/财经，也不建立第二套 Specialist Runtime；forwarded、周期内容与 Codex reset 仍按 ADR-0018 的独立阶段推进。
+通知项目整合进展：Bark、Telegram、ntfy 已共用 `NotificationEnvelope v1` 和逐目标 Action Journal；旧 Compose 已停止。`reminder.watch` 使用独立领域、migration 12、Repository、Operator API、Web 案卷和一致性快照导入器接管旧 memo。`deals.watch` 使用 migration 13、受限 HTTPS source client、冻结的每小时派发窗口、来源健康账本和旧商品去重种子接管优惠能力。`forwarded.relay` 使用 migration 14、owner-only 单源 Secret、有界 ntfy NDJSON client、持久游标、重叠内容去重和只读 Web 案卷接管旧转发 worker。三者均不伪装成 AI/财经，也不建立第二套 Specialist Runtime；周期内容与 Codex reset 仍按 ADR-0018 的独立阶段推进。
 
 验证：观潮的来源故障不影响 AI 情报；两域候选和反馈互不串扰；同一候选对多个 Bark 目标按目标幂等；Gateway 重启后任务和来源健康可恢复。
 

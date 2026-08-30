@@ -25,6 +25,7 @@
     "telegram:test": "bun run packages/server/src/telegram-cli.ts test",
     "reminder": "bun run packages/server/src/reminder-cli.ts",
     "deals": "bun run packages/server/src/deals-cli.ts",
+    "forwarded": "bun run packages/server/src/forwarded-cli.ts",
     "notification:setup-legacy-ntfy": "bun run packages/server/src/notification-targets-cli.ts",
     "lint": "bun run scripts/check-workspace.mjs lint",
     "totemora": "bun run packages/tui/src/cli.ts",

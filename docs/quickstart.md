@@ -54,6 +54,8 @@ http://127.0.0.1:4310
 
 优惠雷达每小时从受限 HTTPS 公开来源采集一次，最多投递 5 条；Web 展示来源健康和去重案卷，旧 deals 快照的 dry-run / apply 步骤见[优惠雷达](deals.md)。
 
+指定消息转发由 `forwarded.relay` 每分钟轮询唯一获准的上游 ntfy Topic；真实地址和凭据只从 owner-only Secret 读取，Web 只显示脱敏健康和投递案卷。配置、状态语义与旧 history 快照导入步骤见[指定 ntfy 消息转发](forwarded-relay.md)。
+
 任务大厅会在提交前显示 Task Analyzer 判断的模式。通用 Run 当前执行 `inspect` 和绑定工作地的 `continue`；`change`、`operate` 和无工作地 `answer` 不会伪装成只读执行。受控变更、通知和内容生产由强类型专业服务承接。运行中的模型请求可以点击“取消 Run”中止。
 
 Provider、预算、派工等临时错误被标记为可重试时，Web 会显示“重试 Run”。重试会创建新的 Run 并继续归入原 Mission。Job 与重试规格已持久化，服务重启后仍可重试；被重启中断的 Job 会转换成可重试失败。

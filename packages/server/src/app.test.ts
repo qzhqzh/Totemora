@@ -26,6 +26,7 @@ test("exposes tribe and completes a playground run", async () => {
     capabilities: {
       inspect: "enabled", change: "git_flow_existing_changes", specialist_self_review: "enabled",
       member_chat: "mentor_escalation_v1", deals: "hourly_public_source_digest_v1",
+      forwarded_relay: "governed_ntfy_relay_v1",
     },
   });
   expect((await app.fetch(new Request("http://local/api/operator/session"))).status).toBe(401);

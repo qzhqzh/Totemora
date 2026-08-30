@@ -70,7 +70,7 @@ ntfy 目标只允许 HTTPS，或服务器本机 loopback HTTP；认证头只在�
 - `GET /api/notifications/platform` 只返回公开目标别名与配置状态；`POST /api/notifications/platform/test` 只接受领域、通道和幂等键，并发送服务器生成的固定测试文本。
 - Gateway 启动会验证目标文件、Telegram 白名单和 Adapter 配置；没有目标时保持 `unconfigured`，不会隐式连接旧 ntfy 或发送消息。
 - `compose.bark.yaml` 现在由同一个 `totemora` Compose 项目管理 Bark 与 ntfy 传输容器；旧 `notice-ntfy` 的 workers、history、ntfy 及可选 `codex-reset` 容器已经全部停止并移除，源数据未删除。
-- AI、财经继续由 Totemora 现有服务承担。reminder 已由 migration 12、独立 Repository/Application Service、Operator API、Web 案卷、周期 Runner 与可重复 SQLite 快照导入器接管。deals 已由 migration 13、受限 HTTPS source client、冻结小时窗口、来源健康账本、Web 案卷和全量历史去重种子接管；旧运行日志不导入主业务表。forwarded 和周期内容在各自领域实现完成前保持显式未提供，不通过恢复旧项目填补空档。
+- AI、财经继续由 Totemora 现有服务承担。reminder 已由 migration 12、独立 Repository/Application Service、Operator API、Web 案卷、周期 Runner 与可重复 SQLite 快照导入器接管。deals 已由 migration 13、受限 HTTPS source client、冻结小时窗口、来源健康账本、Web 案卷和全量历史去重种子接管；旧运行日志不导入主业务表。forwarded 已由 migration 14、owner-only 单源 Secret、有界 ntfy client、持久游标、重叠内容去重、Operator API/Web 案卷和可重复 history 快照导入器接管。周期内容在领域实现完成前保持显式未提供，不通过恢复旧项目填补空档。
 
 运维格式和测试入口见 [统一通知平台](../notification-platform.md)。
 

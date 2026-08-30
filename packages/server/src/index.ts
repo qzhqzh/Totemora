@@ -44,6 +44,7 @@ const app = createPlaygroundApp({
   publicBaseUrl: process.env.TOTEMORA_PUBLIC_BASE_URL,
   notificationTargets,
   dealsSourceUrl: process.env.TOTEMORA_DEALS_SOURCE_URL,
+  forwardedCredentialsFile: process.env.TOTEMORA_FORWARDED_SOURCE_CREDENTIALS,
 });
 const mcpHandler = createTotemoraMcpHttpHandler({
   gatewayUrl: `http://127.0.0.1:${port}`,
@@ -84,6 +85,7 @@ scheduler = new RecurringServiceRunner([
   { id: "codex.telegram", interval_ms: 60_000, run: app.runScheduledCodexTelegram },
   { id: "reminder.watch", interval_ms: 60_000, run: app.runScheduledReminder },
   { id: "deals.watch", interval_ms: 60_000, run: app.runScheduledDeals },
+  { id: "forwarded.relay", interval_ms: 60_000, run: app.runScheduledForwarded },
 ], new RecurringServiceStateRepository(dataDir));
 scheduler.start();
 codexSupervisor.start();
