@@ -70,3 +70,35 @@ test("operator can inspect the governed forwarded relay without source secrets",
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   expect(runtimeErrors).toEqual([]);
 });
+
+test("operator deals dossier requests only the latest five records", async ({ page }) => {
+  const runtimeErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") runtimeErrors.push(message.text());
+  });
+  page.on("pageerror", (error) => runtimeErrors.push(error.message));
+
+  await page.goto("/#deals");
+  await page.getByRole("button", { name: /操作员登录/ }).click();
+  await page.locator("#operator-token").fill("totemora-e2e-operator-token");
+  const initialRequest = page.waitForRequest((request) => {
+    const url = new URL(request.url());
+    return url.pathname === "/api/deals" && url.searchParams.get("limit") === "5";
+  });
+  await page.getByRole("button", { name: "验证并登录" }).click();
+  await initialRequest;
+
+  await expect(page.getByRole("heading", { name: "优惠雷达" })).toBeVisible();
+  await expect(page.locator("#deal-summary")).toContainText("最新 0 条案卷");
+  const filteredRequest = page.waitForRequest((request) => {
+    const url = new URL(request.url());
+    return url.pathname === "/api/deals"
+      && url.searchParams.get("status") === "delivered"
+      && url.searchParams.get("limit") === "5";
+  });
+  await page.locator("#deal-filter-status").selectOption("delivered");
+  await filteredRequest;
+
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  expect(runtimeErrors).toEqual([]);
+});

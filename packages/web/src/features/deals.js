@@ -29,7 +29,7 @@ async function loadDeals() {
   try {
     const status = $("deal-filter-status").value;
     const [listed, current] = await Promise.all([
-      operatorApi(`/api/deals?status=${encodeURIComponent(status)}&limit=30`),
+      operatorApi(`/api/deals?status=${encodeURIComponent(status)}&limit=5`),
       operatorApi("/api/deals/status"),
     ]);
     deals = listed.deals || [];
@@ -55,7 +55,7 @@ function renderDeals() {
   const run = health?.latest_source_run;
   const window = health?.latest_delivery_window;
   setSummary(
-    `${deals.length} 条当前案卷 · ${counts.delivered || 0} 条已投递 · ${counts.skipped || 0} 条去重留档`,
+    `最新 ${deals.length} 条案卷 · ${counts.delivered || 0} 条已投递 · ${counts.skipped || 0} 条去重留档`,
     run?.status === "error" ? "error" : "ready",
   );
   $("deal-health").innerHTML = `
