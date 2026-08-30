@@ -2,7 +2,7 @@
 
 Totemora 使用同一个 `NotificationEnvelope v1` 把已决定外发的内容交给 Bark、Telegram 和 ntfy。通知平台只负责领域路由、逐目标幂等和传输回执，不取代 AI、财经、提醒、优惠等业务领域自己的筛选与状态机。
 
-当前是迁移基础层检查点：Gateway 已能加载三通道目标、查看公开目标元数据并由 Operator 发送受限测试通知；现有 AI / 财经业务仍沿用兼容入口，旧 ntfy workers 也继续负责真实业务外发。完成影子运行和逐域切流前，不应把本检查点描述为旧通知项目已退役。
+当前是迁移基础层检查点：Gateway 已能加载三通道目标、查看公开目标元数据并由 Operator 发送受限测试通知。2026-08-30 起，Bark 与 ntfy 传输容器统一归 `totemora` Compose 管理；旧 `notice-ntfy` 项目已停止全部容器，不再影子运行。现有 AI / 财经业务继续由 Totemora 服务承担；reminder、deals、forwarded 和周期内容尚未完成领域迁移时明确保持不可用，不通过恢复旧 worker 隐式补位。
 
 ## 目标与 Secret
 
@@ -79,6 +79,8 @@ chmod 600 .totemora/secrets/notification-targets.json
 
 相同幂等键、相同目标会返回已保存回执，不会再次发送。明确失败的目标可以用同一键重试；结果不确定时 Action Journal 会阻止自动重放。测试接口不接受自定义标题或正文，避免把控制面变成任意消息代理。
 
-## 迁移门禁
+## 单项目迁移门禁
 
-旧 ntfy 项目仍在运行时，统一平台只用于配置验收和后续影子运行。逐域切流必须遵守：先关闭旧 worker 外发，再启用 Totemora 对应领域；任何时刻只能有一边真实发送。停止旧 Compose、撤销公网域名、迁移数据库或轮换凭据仍需单独授权。
+旧 `notice-ntfy` Compose 已经停止并移除容器，源仓库、SQLite/WAL、凭据和 bind mount 均未删除。后续只在 Totemora 内开发和修复，不恢复生产影子项目；各领域通过离线一致性快照、dry-run importer、去重种子和验收环境证明行为后再启用。`https://ntfy.qzhqzh.com` 与现有 Topic 继续由 Totemora 管理的 ntfy 传输容器提供。
+
+停止公网入口、删除旧数据、撤销/轮换凭据仍是独立授权操作。

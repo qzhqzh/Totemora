@@ -4,7 +4,7 @@
 
 ## 背景
 
-Totemora 已有 Bark 与 Telegram 通知，封存的 `notice-ntfy` 项目仍运行 ntfy 服务、六类 Topic、多个 Python worker 和独立历史面板。两套项目同时采集热点、财经并维护各自的调度、去重、健康和历史，会产生重复状态真源、双发风险和持续维护成本；但 ntfy 仍是已配置 iOS 客户端正在使用的有效传输通道，不能把“退役独立项目”误解为“删除 ntfy 通知能力”。
+Totemora 已有 Bark 与 Telegram 通知，封存的 `notice-ntfy` 项目曾运行 ntfy 服务、六类 Topic、多个 Python worker 和独立历史面板。两套项目同时采集热点、财经并维护各自的调度、去重、健康和历史，会产生重复状态真源、双发风险和持续维护成本；但 ntfy 仍是已配置 iOS 客户端正在使用的有效传输通道，不能把“退役独立项目”误解为“删除 ntfy 通知能力”。
 
 现有 `IntelligenceDomain` 只表达 AI 与财经候选，不能承载提醒、优惠、转发、内容草稿和运维状态。Bark 的目标配置也不应成为所有通知通道的公共领域模型。迁移需要先建立领域无关的通知契约，再逐项接管业务能力和数据。
 
@@ -40,7 +40,7 @@ Totemora 已有 Bark 与 Telegram 通知，封存的 `notice-ntfy` 项目仍运�
 
 `ops` 使用独立可选 Topic，不混入 `memo`。ntfy Adapter 保留标题、正文、优先级、tags、click 和 icon；通道限制导致无法传输的完整内容仍由 Totemora 历史与 Web Observatory 保存，不静默截断。
 
-ntfy 目标只允许 HTTPS，或服务器本机 loopback HTTP；认证头只在请求时注入。网络失败和无法验证的成功响应采用不确定结果语义。旧公网入口在迁移观察期继续运行，停止、撤销域名或轮换凭据需要独立授权。
+ntfy 目标只允许 HTTPS，或服务器本机 loopback HTTP；认证头只在请求时注入。网络失败和无法验证的成功响应采用不确定结果语义。稳定公网入口与 iOS 订阅继续保留，但其传输容器、认证数据库和运行声明已经归 Totemora Compose 管理；撤销域名或轮换凭据仍需要独立授权。
 
 ### 增量迁移，不复制第二套 Runtime
 
@@ -50,8 +50,8 @@ ntfy 目标只允许 HTTPS，或服务器本机 loopback HTTP；认证头只在�
 2. 可恢复调度窗口、领域偏好 Store 和可重复执行的 legacy importer。
 3. 由 Totemora 现有财经、热点服务接管重叠能力，并补齐必要来源。
 4. 新增 reminder、deals、forwarded relay 和周期内容任务等独有领域能力。
-5. 使用 SQLite online backup 制作一致性源快照，先 dry-run 导入，再关闭外发影子运行 24–48 小时。
-6. 每次只切一个领域，旧、新两边任何时刻只能有一方真实发送；稳定后将旧数据库保留为只读档案。
+5. 使用 SQLite online backup 制作一致性源快照并先 dry-run 导入；通过离线 fixture、去重种子和验收环境比较结果，不恢复生产影子服务。
+6. 每个领域完成后只启用 Totemora 外发；尚未迁移的领域明确保持不可用，不以重启旧 worker 作为长期回退。旧数据库只作为恢复档案保留。
 
 独立 ntfy 仓库最终只作为可恢复封存证据。若继续保留 ntfy 传输服务，其运行声明和集成所有权归 Totemora 治理，但不得把旧 workers 和历史面板整体塞进 Totemora 形成第二套应用。
 
@@ -63,23 +63,25 @@ ntfy 目标只允许 HTTPS，或服务器本机 loopback HTTP；认证头只在�
 
 ## Gateway 运行时接入检查点
 
-后续增量已经把第一批基础层接入 Gateway，但仍未开始业务切流：
+后续增量已经把第一批基础层接入 Gateway；2026-08-30 又完成了运行归属切换：
 
 - Bark 管理目标可显式声明七个通知领域；没有声明领域的既有目标继续默认 `ai`、`finance`，避免升级后突然扩大外发范围。
 - Telegram 与 ntfy 目标从 owner-only Secret 文件加载。Telegram Chat ID 必须同时命中 Bot 白名单；Secret、Chat ID 和 device key 不进入状态响应或 Action Journal 请求。
 - `GET /api/notifications/platform` 只返回公开目标别名与配置状态；`POST /api/notifications/platform/test` 只接受领域、通道和幂等键，并发送服务器生成的固定测试文本。
 - Gateway 启动会验证目标文件、Telegram 白名单和 Adapter 配置；没有目标时保持 `unconfigured`，不会隐式连接旧 ntfy 或发送消息。
+- `compose.bark.yaml` 现在由同一个 `totemora` Compose 项目管理 Bark 与 ntfy 传输容器；旧 `notice-ntfy` 的 workers、history、ntfy 及可选 `codex-reset` 容器已经全部停止并移除，源数据未删除。
+- AI、财经继续由 Totemora 现有服务承担；reminder、deals、forwarded 和周期内容在各自领域实现完成前保持显式未提供，不通过恢复旧项目填补空档。
 
 运维格式和测试入口见 [统一通知平台](../notification-platform.md)。
 
 ## 未选择
 
-- 不直接关闭 ntfy：现有 iOS 客户端和 Topic 仍依赖它，会造成通知中断。
+- 不删除 ntfy 通道：保留公网入口、认证数据和现有 iOS Topic，但将传输运行时迁入 Totemora。
 - 不把提醒和优惠伪装成 AI/财经：会污染领域偏好、反馈和历史语义。
 - 不整体复制旧 Compose、workers 和 History Web：会把双系统永久化。
-- 不在双跑阶段同时外发：即使各自内部幂等，也无法防止跨系统双发。
+- 不运行生产影子项目：离线验证新实现；发现故障时修复 Totemora，不恢复旧 worker 形成双系统。
 - 不只复制正在使用 WAL 的 `.db` 文件：可能得到不一致或缺失最近事务的数据。
 
 ## 结果
 
-Totemora 成为通知内容、领域路由、派发结果和后续业务状态的唯一继续开发主线，同时保留 Bark、Telegram 与 ntfy 的用户选择。代价是切流前需要目标注册、数据快照、去重种子、影子比较和逐域回滚门禁；在这些验收完成前，旧服务必须继续运行，不能宣称迁移完成。
+Totemora 是通知内容、领域路由、派发结果、传输运行声明和后续业务状态的唯一继续开发主线，同时保留 Bark、Telegram 与 ntfy 的用户选择。旧仓库仅保留源码、数据库与凭据位置作为恢复证据，不再运行容器。后续能力迁移使用离线快照、dry-run importer、去重种子和验收环境完成；生产故障在 Totemora 内修复，不再以旧项目双跑作为回退。
