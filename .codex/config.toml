@@ -1,0 +1,7 @@
+[mcp_servers.totemora_scheduled_news]
+command = "bun"
+args = ["run", "packages/mcp/src/codex-scheduled-stdio-proxy.ts"]
+enabled_tools = ["publish_scheduled_digest"]
+default_tools_approval_mode = "auto"
+enabled = true
+required = false
