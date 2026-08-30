@@ -71,7 +71,7 @@ test("Bark routes multiple configured targets by domain and returns target recei
   await mkdir(join(dataDir, "secrets"), { recursive: true });
   await writeFile(join(dataDir, "secrets", "bark-targets.json"), JSON.stringify([
     { id: "ai-phone", device_key: "ai-device-secret", domains: ["ai"], enabled: true, server_url: "https://ai.example.test" },
-    { id: "finance-phone", device_key: "finance-device-secret", domains: ["finance"], enabled: true, server_url: "https://finance.example.test" },
+    { id: "finance-phone", device_key: "finance-device-secret", domains: ["finance", "reminder"], enabled: true, server_url: "https://finance.example.test" },
     { id: "disabled-phone", device_key: "disabled-device-secret", domains: ["ai", "finance"], enabled: false, server_url: "https://disabled.example.test" },
   ]));
   const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
@@ -83,6 +83,7 @@ test("Bark routes multiple configured targets by domain and returns target recei
   expect(await service.targetIds()).toEqual(["ai-phone", "finance-phone"]);
   expect(await service.targetIds("ai")).toEqual(["ai-phone"]);
   expect(await service.targetIds("finance")).toEqual(["finance-phone"]);
+  expect(await service.targetIds("reminder")).toEqual(["finance-phone"]);
   expect((await service.status(false, "ai")).targets.map((target) => target.id)).toEqual(["ai-phone", "disabled-phone"]);
 
   const receipt = await service.push({ domain: "finance", title: "财务", body: "正文" });

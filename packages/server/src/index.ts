@@ -8,6 +8,7 @@ import {
 } from "@totemora/mcp";
 import { createPlaygroundApp } from "./app";
 import { CodexSupervisorRunner } from "./application/codex-supervisor-runner";
+import { loadNotificationRuntimeTargets } from "./bootstrap/notification-runtime-config";
 import { RecurringServiceRunner } from "./recurring-service-runner";
 import { RecurringServiceStateRepository } from "./recurring-service-state-repository";
 import { resolveWebAsset } from "./web-assets";
@@ -28,6 +29,10 @@ const codexSupervisor = new CodexSupervisorRunner({
   enabled: codexSupervisorEnabled,
   agentMcpUrl: `http://127.0.0.1:${port}/mcp/codex-agent`,
 });
+const notificationTargets = await loadNotificationRuntimeTargets({
+  dataDir,
+  filePath: process.env.TOTEMORA_NOTIFICATION_TARGETS_FILE,
+});
 let scheduler: RecurringServiceRunner | undefined;
 const app = createPlaygroundApp({
   configDir: process.env.TOTEMORA_CONFIG_DIR ?? resolve(root, "configs/example"),
@@ -37,6 +42,7 @@ const app = createPlaygroundApp({
   recurringServiceStatus: () => scheduler?.status() ?? [],
   codexSupervisor: codexSupervisor.service,
   publicBaseUrl: process.env.TOTEMORA_PUBLIC_BASE_URL,
+  notificationTargets,
 });
 const mcpHandler = createTotemoraMcpHttpHandler({
   gatewayUrl: `http://127.0.0.1:${port}`,

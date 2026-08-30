@@ -61,6 +61,17 @@ ntfy 目标只允许 HTTPS，或服务器本机 loopback HTTP；认证头只在�
 
 后续把现有 Bark/Telegram 实现接入统一 Adapter 时，应从 legacy hotspot 局部提取，保持旧 API 兼容；不得继续向超长服务追加 reminder、deals 或 relay 职责。
 
+## Gateway 运行时接入检查点
+
+后续增量已经把第一批基础层接入 Gateway，但仍未开始业务切流：
+
+- Bark 管理目标可显式声明七个通知领域；没有声明领域的既有目标继续默认 `ai`、`finance`，避免升级后突然扩大外发范围。
+- Telegram 与 ntfy 目标从 owner-only Secret 文件加载。Telegram Chat ID 必须同时命中 Bot 白名单；Secret、Chat ID 和 device key 不进入状态响应或 Action Journal 请求。
+- `GET /api/notifications/platform` 只返回公开目标别名与配置状态；`POST /api/notifications/platform/test` 只接受领域、通道和幂等键，并发送服务器生成的固定测试文本。
+- Gateway 启动会验证目标文件、Telegram 白名单和 Adapter 配置；没有目标时保持 `unconfigured`，不会隐式连接旧 ntfy 或发送消息。
+
+运维格式和测试入口见 [统一通知平台](../notification-platform.md)。
+
 ## 未选择
 
 - 不直接关闭 ntfy：现有 iOS 客户端和 Topic 仍依赖它，会造成通知中断。

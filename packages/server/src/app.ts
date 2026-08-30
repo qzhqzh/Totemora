@@ -39,6 +39,7 @@ import {
 } from "./content-studio-service";
 import { CpaIllustrationService } from "./cpa-illustration-service";
 import { BarkNotificationService } from "./bark-notification-service";
+import { TelegramBotService } from "./telegram-bot-service";
 import { EvidenceObservatory } from "./evidence-observatory";
 import { SkillCommissionConflictError, SkillCommissionService } from "./skill-commission-service";
 import { SkillRegistryService } from "./skill-registry-service";
@@ -56,6 +57,7 @@ import { handleFinanceRoutes } from "./http/finance-routes";
 import { handleIntelligenceRoutes } from "./http/intelligence-routes";
 import { handleMemberRoutes } from "./http/member-routes";
 import { handleNotificationRoutes } from "./http/notification-routes";
+import { handleNotificationPlatformRoutes } from "./http/notification-platform-routes";
 import { handleOperationsRoutes } from "./http/operations-routes";
 import { handleRunRoutes } from "./http/run-routes";
 import { handleSkillCommissionRoutes } from "./http/skill-commission-routes";
@@ -71,6 +73,10 @@ import {
   IntelligenceTaskConflictError,
   IntelligenceTaskRunner,
 } from "./application/intelligence-task-runner";
+import {
+  createNotificationPlatform,
+  type NotificationPlatformTargetConfiguration,
+} from "./bootstrap/notification-platform";
 
 export interface PlaygroundOptions {
   configDir: string;
@@ -83,6 +89,7 @@ export interface PlaygroundOptions {
   recurringServiceStatus?: () => RecurringServiceState[];
   codexSupervisor?: CodexRouteService;
   publicBaseUrl?: string;
+  notificationTargets?: NotificationPlatformTargetConfiguration;
 }
 
 interface RunJob {
@@ -108,6 +115,14 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
   const jobStore = new JobStore<RunJob, RunRouteInput>(options.dataDir);
   const specialistTasks = new SpecialistTaskRepository(options.dataDir);
   const barkManagement = new BarkNotificationService(options.dataDir, options.fetchImpl ?? fetch);
+  const notificationPlatform = createNotificationPlatform({
+    dataDir: options.dataDir,
+    bark: barkManagement,
+    telegram: new TelegramBotService(options.dataDir, options.fetchImpl ?? fetch),
+    telegramTargets: options.notificationTargets?.telegramTargets ?? [],
+    ntfyTargets: options.notificationTargets?.ntfyTargets ?? [],
+    ntfyFetch: options.fetchImpl,
+  });
   const actionJournal = new ActionJournal(options.dataDir);
   const abilityTemplates = new AbilityTemplateStore(options.dataDir);
   const intelligencePreferences = new IntelligencePreferenceStore(options.dataDir);
@@ -270,6 +285,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
     runHydration,
     developmentTaskRunner.ready,
     intelligenceTaskRunner.ready,
+    notificationPlatform,
   ]);
 
   const enqueueRun = async (input: RunRouteInput): Promise<RunJob> => {
@@ -493,6 +509,16 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
         });
         if (notificationResponse) return notificationResponse;
 
+        const platform = await notificationPlatform;
+        const notificationPlatformResponse = await handleNotificationPlatformRoutes(request, url, {
+          service: {
+            listTargets: platform.listTargets,
+            dispatch: (input) => platform.dispatcher.dispatch(input),
+          },
+          requireOperator: (candidate) => requireOperator(candidate, options.operatorToken),
+        });
+        if (notificationPlatformResponse) return notificationPlatformResponse;
+
         const operationsResponse = await handleOperationsRoutes(request, url, {
           recurringServiceStatus: () => options.recurringServiceStatus?.() ?? [],
           listTasks: (limit) => specialistTasks.list(limit),
@@ -548,6 +574,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
               durable_state: "sqlite_wal_v1",
               internal_bark: "self_hosted_multi_target_v3_api",
               telegram_bot: "group_commands_feedback_codex_v2",
+              notification_platform: "bark_telegram_ntfy_envelope_v1",
               codex_scheduled_telegram: "explicit_subscription_capability_v1",
               codex_supervisor: options.codexSupervisor?.getStatus().enabled ? "shared_app_server_opt_in_v1" : "disabled",
               content_studio: "three_member_text_visual_evidence_v2",

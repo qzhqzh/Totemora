@@ -42,6 +42,15 @@ export interface NtfyPlatformTarget extends NtfyTargetConfig {
   enabled: boolean;
 }
 
+export interface NotificationPlatformTargetConfiguration {
+  telegramTargets: TelegramPlatformTarget[];
+  ntfyTargets: NtfyPlatformTarget[];
+}
+
+export interface TelegramNotificationCatalog extends TelegramTextSender {
+  chatIds(): Promise<string[]>;
+}
+
 export interface NotificationPlatformRuntime {
   dispatcher: NotificationDispatcher;
   listTargets(): Promise<NotificationTargetRef[]>;
@@ -50,11 +59,16 @@ export interface NotificationPlatformRuntime {
 export async function createNotificationPlatform(input: {
   dataDir: string;
   bark: BarkNotificationCatalog;
-  telegram: TelegramTextSender;
+  telegram: TelegramNotificationCatalog;
   telegramTargets: TelegramPlatformTarget[];
   ntfyTargets: NtfyPlatformTarget[];
   ntfyFetch?: typeof fetch;
 }): Promise<NotificationPlatformRuntime> {
+  const allowedTelegramChats = new Set(await input.telegram.chatIds());
+  const untrustedTelegramTarget = input.telegramTargets.find((target) => !allowedTelegramChats.has(target.chat_id));
+  if (untrustedTelegramTarget) {
+    throw new Error(`Telegram notification target ${untrustedTelegramTarget.id} is not allowlisted`);
+  }
   const configuredTargets = [
     ...input.telegramTargets.map((target): NotificationTargetRef => ({
       id: target.id,

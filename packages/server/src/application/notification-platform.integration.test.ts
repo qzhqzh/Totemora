@@ -76,6 +76,15 @@ test("existing Bark and Telegram services share one idempotent dispatcher with n
   expect(publicResult).not.toContain("test-ntfy-token");
   expect(publicResult).not.toContain("-1001234567890");
   expect(JSON.stringify(await platform.listTargets())).not.toContain("-1001234567890");
+  await expect(createNotificationPlatform({
+    dataDir,
+    bark,
+    telegram,
+    telegramTargets: [{
+      id: "untrusted-group", chat_id: "-1009999999999", domains: ["ai"], enabled: true,
+    }],
+    ntfyTargets: [],
+  })).rejects.toThrow("not allowlisted");
   await writeFile(join(secretsDir, "bark-targets.json"), JSON.stringify([{
     id: "second-phone",
     device_key: "second-device-key",
