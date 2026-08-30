@@ -9,7 +9,7 @@ import { requiredString } from "./input-schema";
 
 export type DevelopmentRouteService = Pick<DevelopmentCommitService,
   "prepare" | "listProposals" | "listSkillProposals" | "approveSkillProposal"
-  | "getProposal" | "approve" | "publish" | "merge"
+  | "getProposal" | "complete" | "approve" | "publish" | "merge"
 >;
 
 export interface DevelopmentTaskView {
@@ -103,7 +103,8 @@ export async function handleDevelopmentRoutes(
     const proposalId = decodePathSegment(advanceMatch[1]!, "proposal id");
     const gate = developmentGateInput(await readJson(request, 8_000));
     const service = await dependencies.getDevelopment();
-    const proposal = await translate(() => gate === "local" ? service.approve(proposalId)
+    const proposal = await translate(() => gate === "workflow" ? service.complete(proposalId)
+      : gate === "local" ? service.approve(proposalId)
       : gate === "remote" ? service.publish(proposalId) : service.merge(proposalId));
     dependencies.syncSpecialistTask(proposal);
     return json(proposal);
@@ -131,6 +132,8 @@ async function translate<T>(operation: () => Promise<T>): Promise<T> {
     if (detail.startsWith("Proposal cannot execute from status")
       || detail.startsWith("Git Flow remote stage cannot execute from")
       || detail.startsWith("Git Flow merge stage cannot execute from")
+      || detail.startsWith("Git Flow workflow cannot execute from")
+      || detail.startsWith("Git Flow workflow authorization no longer matches")
       || detail.startsWith("Skill proposal cannot be approved from")
       || detail.startsWith("Skill changed after this proposal")
       || detail.startsWith("Workplace Policy changed")

@@ -205,20 +205,20 @@ export function createTotemoraMcpServer(gateway: TotemoraGatewayClient): McpServ
   }, async ({ workflow_id }) => toolCall(() => gateway.getGitCommitProposal(workflow_id)));
 
   server.registerTool("totemora_advance_git_flow", {
-    title: "Approve the current Git Flow gate",
-    description: "Advances the same workflow through its local, remote, or merge gate. The expected status, snapshot and Commit message prevent approving stale or unseen work.",
+    title: "Approve a Git Flow workflow or stage",
+    description: "Use workflow for one approval that continues to the selected endpoint (Commit, PR, or main). Stage gates remain available for exceptional manual control. The expected status, snapshot and Commit message prevent approving stale or unseen work.",
     inputSchema: {
       workflow_id: z.string().min(1),
-      gate: z.enum(["local", "remote", "merge"]),
+      gate: z.enum(["workflow", "local", "remote", "merge"]),
       expected_status: z.string().min(1),
       expected_snapshot_hash: z.string().min(1),
       expected_commit_message: z.string().min(1),
-      confirmation: z.literal("APPROVE_GIT_FLOW_STAGE"),
+      confirmation: z.enum(["APPROVE_GIT_FLOW_WORKFLOW", "APPROVE_GIT_FLOW_STAGE"]),
     },
-    annotations: { title: "Approve Git Flow gate", readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
-  }, async ({ workflow_id, gate, expected_status, expected_snapshot_hash, expected_commit_message }) => toolCall(async () => {
+    annotations: { title: "Approve Git Flow workflow", readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, async ({ workflow_id, gate, expected_status, expected_snapshot_hash, expected_commit_message, confirmation }) => toolCall(async () => {
     const workflow = await gateway.getGitCommitProposal(workflow_id);
-    assertGateMatches(workflow, gate, expected_status, expected_snapshot_hash, expected_commit_message);
+    assertGateMatches(workflow, gate, expected_status, expected_snapshot_hash, expected_commit_message, confirmation);
     return gateway.advanceGitFlow(workflow_id, gate);
   }));
 
@@ -231,17 +231,37 @@ function readOnlyAnnotations(title: string) {
 
 function assertGateMatches(
   workflow: DevelopmentProposalSummary,
-  gate: "local" | "remote" | "merge",
+  gate: "workflow" | "local" | "remote" | "merge",
   status: string,
   snapshotHash: string,
   commitMessage: string,
+  confirmation: "APPROVE_GIT_FLOW_WORKFLOW" | "APPROVE_GIT_FLOW_STAGE",
 ): void {
+  const expectedConfirmation = gate === "workflow" ? "APPROVE_GIT_FLOW_WORKFLOW" : "APPROVE_GIT_FLOW_STAGE";
+  if (confirmation !== expectedConfirmation) throw new Error("Confirmation does not match the requested Git Flow authorization scope");
   const expectedByGate = {
     local: "awaiting_approval",
     remote: "awaiting_remote_approval",
     merge: "awaiting_merge_approval",
   } as const;
-  if (workflow.status !== status || status !== expectedByGate[gate]) throw new Error("Workflow is not at the approved gate");
+  if (workflow.status !== status) throw new Error("Workflow is not at the approved gate");
+  if (gate === "workflow") {
+    if (!["awaiting_approval", "awaiting_remote_approval", "awaiting_merge_approval"].includes(status)) {
+      throw new Error("Workflow is not at a resumable workflow gate");
+    }
+    if (status !== "awaiting_approval") {
+      const authorization = workflow.workflow_authorization;
+      if (!authorization || authorization.mode !== workflow.mode
+        || authorization.snapshot_hash !== snapshotHash
+        || authorization.commit_message !== commitMessage
+        || JSON.stringify(authorization.files) !== JSON.stringify(workflow.files)
+        || authorization.target_branch !== workflow.remote_plan?.target_branch) {
+        throw new Error("Workflow does not have a matching prior workflow authorization");
+      }
+    }
+  } else if (status !== expectedByGate[gate]) {
+    throw new Error("Workflow is not at the approved gate");
+  }
   if (workflow.snapshot_hash !== snapshotHash) throw new Error("Expected snapshot hash does not match the inspected workflow");
   if (workflow.commit_message !== commitMessage) throw new Error("Expected Commit message does not match the inspected workflow");
   if (workflow.self_check.outcome !== "accepted" || workflow.chief_acceptance.outcome !== "accepted") {

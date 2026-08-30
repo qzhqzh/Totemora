@@ -107,6 +107,19 @@ export class DevelopmentGitHubClient {
     await this.externalCommand(cwd, "gh", ["pr", "merge", String(number), "--squash", "--delete-branch"]);
   }
 
+  async deleteRemoteBranchIfPresent(cwd: string, branch: string): Promise<GitTransport | "already absent"> {
+    try {
+      return await this.deleteRemoteBranch(cwd, "origin", branch, []);
+    } catch (error) {
+      if (!isSshTransportFailure(error)) throw error;
+      const repositoryUrl = await this.repositoryUrl(cwd, error);
+      return this.deleteRemoteBranch(
+        cwd, `${repositoryUrl}.git`, branch,
+        ["-c", "credential.helper=!gh auth git-credential"],
+      );
+    }
+  }
+
   async mergedPullRequest(cwd: string, number: number): Promise<GitHubMergedPullRequest> {
     const value = object(await this.json(cwd, [
       "pr", "view", String(number), "--json", "state,mergedAt,mergeCommit,url",
@@ -159,6 +172,19 @@ export class DevelopmentGitHubClient {
       throw new Error("GitHub HTTPS fallback could not resolve a safe repository URL", { cause });
     }
     return url;
+  }
+
+  private async deleteRemoteBranch(
+    cwd: string,
+    remote: string,
+    branch: string,
+    prefix: string[],
+  ): Promise<GitTransport | "already absent"> {
+    const reference = `refs/heads/${branch}`;
+    const existing = await this.gitCommand(cwd, [...prefix, "ls-remote", "--heads", remote, reference]);
+    if (!existing.stdout.trim()) return "already absent";
+    await this.gitCommand(cwd, [...prefix, "push", remote, "--delete", branch]);
+    return remote === "origin" ? "configured origin" : "GitHub HTTPS fallback";
   }
 
   private async json(cwd: string, args: string[]): Promise<unknown> {
