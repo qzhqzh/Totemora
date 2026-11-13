@@ -1,6 +1,6 @@
 ---
 name: codex-supervised-goal
-description: Use when Totemora explicitly manages this Codex task as a long-running goal and asks the agent to continue, checkpoint, or request owner input.
+description: "Use when Totemora explicitly supervises the current Codex goal and requests continued work, a checkpoint, or owner input."
 ---
 
 # Codex Supervised Goal

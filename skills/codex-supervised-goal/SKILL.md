@@ -1,6 +1,6 @@
 ---
 name: codex-supervised-goal
-description: Use when a Codex task is explicitly managed by Totemora's long-running goal supervisor. Keep work moving within the registered Workplace, report durable checkpoints, and raise bounded choices when owner input is genuinely required.
+description: "Use when Totemora explicitly supervises the current Codex goal and requests continued work, a checkpoint, or owner input."
 ---
 
 # Codex Supervised Goal
