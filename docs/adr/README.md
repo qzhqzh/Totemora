@@ -23,3 +23,7 @@ ADR 记录架构决策当时的背景、选择和后果。已接受 ADR 作为�
 | [0017](0017-finance-intelligence-vertical.md) | Accepted | 独立财经情报垂直与按领域通知路由 |
 | [0018](0018-unified-notification-platform.md) | Accepted | 统一通知平台、三通道与 ntfy 增量迁移边界 |
 | [0019](0019-notice-consolidation-cutover.md) | Accepted | 通知项目单运行时切流、能力归宿与旧证据收口 |
+| [0020](0020-cross-project-notification-ingress.md) | Superseded by 0021 (deployment) | 跨项目事件收件箱、SMTP 通道与初期部署边界 |
+| [0021](0021-independent-notifier-service.md) | Accepted | 同仓独立 Notifier、单一发件运行时与离线切流（取代 0020 部署方向） |
+| [0022](0022-project-radar-decisions.md) | Accepted | 项目情报的类型化决策、观察模式与每日精选 |
+| [0023](0023-specialist-assistant-and-communication.md) | Accepted | 常驻专业助手、多渠道沟通、规则基线与行动采纳 |

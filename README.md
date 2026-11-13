@@ -1,8 +1,8 @@
 # Totemora
 
-Totemora 是一个受预算和证据约束的异构多 Agent 组织系统。它把基础模型、人格、Skill、资产授权和经历组合成可持续验证的成员，由 Chief 在质量、成本和时延边界内组队、验收并保留运行证据。
+Totemora 是个人 AI 生态中的常驻专业助手与消息沟通服务。它持续关注明确委托的事项，把项目情报转为有来源的行动建议，通过多种渠道传递结果、接收反馈，并保存采纳决定与运行证据。
 
-项目采用 `TUI-first + Web Observatory`：CLI/TUI 是开发者控制入口，Web 承载观测、案卷和显式审批，MCP 向外部 Agent 暴露受治理的专业服务。
+项目保留预算、成员、Skill、资产授权和验收内核。CLI/TUI 承载开发者控制，Web 承载观测、建议与审批，Telegram 提供受限双向交互；Bark、ntfy、Telegram 和邮件由独立 Notifier 承接受控投递。各通道必须实际配置后才可用。
 
 [查看交互式架构图](https://qzhqzh.github.io/Totemora/) · [仓库内当前版本（v2.15-r2）](docs/diagrams/totemora-architecture.html)
 
@@ -18,6 +18,8 @@ bun run start:web
 ## Documentation
 
 - [文档导航与当前产品事实](docs/README.md)
+- [服务定位、能力清单与重启边界](docs/service-relaunch.md)
+- [项目情报、行动建议与采纳流程](docs/project-radar.md)
 - [领域架构](docs/architecture-v2.md)
 - [Gateway 架构](docs/gateway-architecture.md)
 - [Codex 任务监督器](docs/codex-supervisor.md)

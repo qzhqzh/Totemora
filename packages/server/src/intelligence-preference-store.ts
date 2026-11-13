@@ -6,6 +6,7 @@ export interface IntelligencePreferences {
   channels: {
     rss: boolean;
     ai_hot: boolean;
+    research: boolean;
     x_trends: boolean;
     weibo_hot: boolean;
   };
@@ -19,7 +20,7 @@ export interface IntelligencePreferences {
 
 const DEFAULT_PREFERENCES: IntelligencePreferences = {
   interests: ["人工智能", "开发工具", "开源项目", "网络安全", "重要科技与国际变化"],
-  channels: { rss: true, ai_hot: true, x_trends: false, weibo_hot: false },
+  channels: { rss: true, ai_hot: true, research: false, x_trends: false, weibo_hot: false },
   x_woeid: 1,
   scan_interval_minutes: 10,
   push_interval_seconds: 60,
@@ -71,6 +72,7 @@ function validate(input: unknown): IntelligencePreferences {
     channels: {
       rss: value?.channels?.rss !== false,
       ai_hot: value?.channels?.ai_hot !== false,
+      research: value?.channels?.research === true,
       x_trends: value?.channels?.x_trends === true,
       weibo_hot: value?.channels?.weibo_hot === true,
     },

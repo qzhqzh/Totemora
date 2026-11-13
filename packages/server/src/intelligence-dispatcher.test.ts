@@ -11,6 +11,57 @@ import { IntelligenceDispatcher } from "./intelligence-dispatcher";
 import { MemberStateStore } from "./member-state-store";
 import { StateDatabase } from "./state-database";
 
+test("Gateway AI/finance candidate delivery uses Notifier and never touches its legacy Bark sender", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-dispatch-remote-"));
+  try {
+    await configureTargets(dataDir, [{ id: "old-phone", device_key: "legacy", domains: ["finance"],
+      enabled: true, server_url: "https://old-bark.example.test" }]);
+    const config = await loadLocalConfig({ configDir: resolve(import.meta.dir, "../../../configs/example") });
+    const candidates = new IntelligenceCandidateStore(dataDir);
+    const [candidate] = await candidates.ingest({ domain: "finance", scan_id: "scan", member_id: "qwen_finance",
+      push_threshold: 0.7, history_hours: 72, evaluations: [{
+        event_key: "event", headline: "Official update", brief: "Evidence", url: "https://example.test/source",
+        source: "official", importance: 1, interest: 1, confidence: 1, novelty: 1,
+        push_worthy: true, rationale: "test", is_update: false,
+      }] });
+    let localSends = 0;
+    const calls: unknown[] = [];
+    const dispatcher = new IntelligenceDispatcher(dataDir, new MemberStateStore(dataDir, config),
+      (async () => { localSends += 1; throw new Error("legacy sender must be idle"); }) as unknown as typeof fetch,
+      { async listTargets() { return [{ id: "phone", channel: "bark" as const,
+        domains: ["finance" as const], enabled: true }]; }, async dispatch(input) {
+        calls.push(input);
+        return { envelope_id: candidate!.id, idempotency_key: candidate!.id, status: "completed" as const,
+          deliveries: [{ target_id: "phone", channel: "bark" as const, status: "completed" as const }] };
+      } });
+    expect(await dispatcher.pushNext("finance", 0, "finance.watch")).toMatchObject({ id: candidate!.id, status: "pushed" });
+    expect(calls).toHaveLength(1);
+    expect(localSends).toBe(0);
+  } finally { await rm(dataDir, { recursive: true, force: true }); }
+});
+
+test("remote candidate with an unknown delivery outcome is held for reconciliation, never automatically retried", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-dispatch-remote-unknown-"));
+  try {
+    const config = await loadLocalConfig({ configDir: resolve(import.meta.dir, "../../../configs/example") });
+    const candidates = new IntelligenceCandidateStore(dataDir);
+    const [candidate] = await candidates.ingest({ domain: "finance", scan_id: "scan", member_id: "qwen_finance",
+      push_threshold: 0.7, history_hours: 72, evaluations: [{
+        event_key: "event", headline: "Official update", brief: "Evidence", url: "https://example.test/source",
+        source: "official", importance: 1, interest: 1, confidence: 1, novelty: 1,
+        push_worthy: true, rationale: "test", is_update: false,
+      }] });
+    const notifier = { async listTargets() { return [{ id: "phone", channel: "bark" as const,
+      domains: ["finance" as const], enabled: true }]; }, async dispatch() {
+      return { envelope_id: "candidate", idempotency_key: "candidate", status: "uncertain" as const, deliveries: [] };
+    } };
+    const dispatcher = new IntelligenceDispatcher(dataDir, new MemberStateStore(dataDir, config), fetch, notifier);
+    await expect(dispatcher.pushNext("finance", 0, "finance.watch")).rejects.toThrow("uncertain");
+    expect(await candidates.get(candidate!.id)).toMatchObject({ status: "delivery_unknown", attempt_count: 1 });
+    expect(await dispatcher.pushNext("finance", 0, "finance.watch")).toBeUndefined();
+  } finally { await rm(dataDir, { recursive: true, force: true }); }
+});
+
 test("dispatcher attempts every Bark target and retries only incomplete deliveries", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "totemora-dispatch-isolation-"));
   await configureTargets(dataDir, [

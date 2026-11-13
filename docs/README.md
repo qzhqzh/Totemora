@@ -15,7 +15,7 @@
 
 | 问题 | 权威入口 | 生命周期 |
 | --- | --- | --- |
-| Totemora 是什么、成功标准是什么 | 本文档、[Core validation baseline](mvp.md) | Canonical |
+| Totemora 是什么、成功标准是什么 | 本文档、[服务重新定位与交付盘点](service-relaunch.md)、[ADR 0023](adr/0023-specialist-assistant-and-communication.md) | Canonical |
 | Member、Ember、Skill、Asset、Service 如何组成 | [Architecture v2](architecture-v2.md) | Canonical |
 | Gateway、Adapter 和持久状态如何分工 | [Gateway architecture](gateway-architecture.md) | Canonical |
 | 当前已完成什么、下一步是什么 | [Execution plan](execution-plan.md) | Canonical |
@@ -26,15 +26,17 @@
 
 ## 当前产品事实
 
-Totemora 是一个预算约束下的异构智能部落，不是通用聊天产品，也不是把多个模型串成固定流水线的编排框架。
+Totemora 面向用户提供常驻专业助手与多渠道消息沟通：围绕项目关注点筛选情报，给出可核实的行动建议，传递提醒和进展，并接收用户的反馈与决定。异构成员、Skill、预算与证据治理是支撑这些服务的内部能力。
+
+生态分工遵循 [ADR 0023](adr/0023-specialist-assistant-and-communication.md)：EchoMe 负责长期记忆与上下文，Lifeline 负责任务执行与验收，LogWood 沉淀可复用内容与评测资产。Totemora 负责信息与用户之间的沟通；采纳建议只形成决定与交接草稿，不代表已经创建或执行外部任务。
 
 - **火种与成员分离**：火种是可调用的基础模型；成员由火种、人格、Skill、资产授权、经验、信任和版本组成。
 - **按任务组队**：每次 Run 都应解释为何选这些成员、花费多少、谁验收以及是否通过。
 - **成长来自证据**：成长必须来自可追踪 Run，并经过提案、批准、版本化和可回滚边界。
 - **默认只读**：通用 Run 不从自然语言目标推导 Shell、文件写入、Git、通知或发布权限。
-- **单一真源**：Web、MCP、Telegram、Bark、ntfy 和 Cron 共用常驻 Gateway 与 SQLite 状态，不拥有第二套 Runtime。
+- **按领域单一真源**：Web、MCP、Telegram 与 Cron 共用 Gateway 业务状态；独立 Notifier 只拥有通知收件箱和发送账本，不复制 Gateway 的业务 Runtime。
 
-当前提供 CLI/TUI、本地 Web Gateway 和 MCP 三个主要入口，并以 Bark、Telegram、ntfy 三个并列通道承接受控通知。独立通知项目已停止且不做影子运行；reminder、deals、forwarded、AI/财经情报和显式启用的 scheduled content 已统一使用 Totemora 的 SQLite、Web、周期调度与逐目标派发证据。旧投递只以有界去重种子或只读归档保留，Codex reset worker 已退役。Codex 控制台还可为最多 3 个明确的 Scheduled task 创建 Telegram 定向投递订阅。`totemora run` 默认调用 Gateway，只有显式 `--offline` 与 `onboarding-exam` 保留直接创建本地 Runtime 的兼容入口。
+当前提供 CLI/TUI、Web Gateway、MCP 和 Telegram 入口。独立 Notifier 实现 Bark、Telegram、ntfy 与邮件通道；Gateway 保持 AI/财经、reminder、deals、forwarded 和内容等业务调度与决定权，通知发送账本归 Notifier。2026-10-25 本机只读核验确认 Gateway 已连接独立 Notifier，启用目标为 Bark 与 ntfy；Telegram、邮件的代码能力不等于已配置通道。Telegram 对话回复由 Gateway 的 Bot 接入处理，并共用业务决定状态。旧 `notice-ntfy` 项目已停止且不做影子运行；Codex reset worker 已退役。Codex 控制台还可为最多 3 个明确的 Scheduled task 创建 Telegram 定向投递订阅。`totemora run` 默认调用 Gateway，只有显式 `--offline` 与 `onboarding-exam` 保留直接创建本地 Runtime 的兼容入口。
 
 当前 npm 语义版本是 `0.12.0`，Gateway 和 MCP 对外暴露的产品发布标识是 `0.12.0-evidence-skill-core`。版本真源位于 `packages/core/src/version.ts`。
 
@@ -53,8 +55,10 @@ Totemora 是一个预算约束下的异构智能部落，不是通用聊天产�
 
 ### 专业服务与通道
 
+- [服务重新定位与交付盘点](service-relaunch.md)
 - [Skill governance](skill-governance.md)
 - [Finance intelligence](finance-intelligence.md)
+- [项目情报雷达与 Jev 评估](project-radar.md)
 - [Notification transports: Bark and ntfy](internal-bark.md)
 - [Telegram bot](telegram-bot.md)
 - [Unified notification platform](notification-platform.md)
@@ -63,6 +67,7 @@ Totemora 是一个预算约束下的异构智能部落，不是通用聊天产�
 - [Governed ntfy relay and legacy forwarded history migration](forwarded-relay.md)
 - [Notice project consolidation, retirement, and archive receipts](notice-consolidation.md)
 - [AI HOT source](aihot-source.md)
+- [Research radar directions](research-radar.md)
 - [Benchmark](benchmark.md)
 - [Stability drills](stability-drills.md)
 
@@ -82,7 +87,14 @@ Totemora 是一个预算约束下的异构智能部落，不是通用聊天产�
 
 ## 当前成功标准
 
-Totemora 的成功不是“多个模型成功回答了一次”，而是在多次可重复真实任务中证明以下任一结果：
+对外服务优先验证：
+
+1. 情报与实际项目相关，原文证据可以追溯，建议可以核实和验收。
+2. 用户能够从消息回到建议，采纳、暂不处理，并看到真实的交接状态。
+3. 减少无用推送、重复发送和持续失败；通道异常、未知投递结果与恢复时间可见。
+4. 以采纳与明确反馈衡量价值，保留“尚未获得反馈”的事实，不把发送量当作价值证明。
+
+多 Agent 内核继续依据 [Core validation baseline](mvp.md) 在可重复任务中验证：
 
 1. 在质量可接受时减少强模型 Token 或总成本。
 2. 在相同预算下提高验收通过率。

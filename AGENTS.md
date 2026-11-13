@@ -13,7 +13,8 @@
 
 ## 2. 不可破坏的产品与领域边界
 
-- Totemora 是受预算和证据约束的异构多 Agent 组织，不是任意 Prompt、Shell 或模型代理层。
+- Totemora 定位为常驻专业助手与多渠道消息沟通服务，优先交付项目情报、行动建议和采纳反馈；预算、成员与证据治理作为内部内核保留，见 ADR-0023。
+- EchoMe 拥有长期记忆与上下文，Lifeline 拥有正式项目排期与验收，LogWood 拥有内容与评测资产。Totemora 保存专业任务和消息决定，不复制这些项目的业务真源；采纳建议不等于创建或完成外部任务。
 - 保持 `TUI-first + Web Observatory`：TUI/CLI 是开发者控制入口；Web 优先承载观测、案卷和显式审批。
 - Provider、Agent/Member、Role、Skill、Asset 和 Specialist Service 必须分离：
   - Provider 只描述和适配模型调用。
@@ -118,10 +119,10 @@ integrations/                Git、Bark、Telegram、Provider、文件和外部 
 行数是拆分信号，不替代设计判断；生成文件、纯数据和必要的协议清单可说明例外。
 
 - 新生产代码文件目标不超过 300 行。
-- 新文件或本次变更使文件超过 400 行：PR/交接中必须说明单一职责为何仍成立，并给出拆分点。
-- 新文件或本次新增职责使文件超过 600 行：合并前必须拆分，除非 ADR 明确记录例外。现有 legacy hotspot 可做不增加职责的紧急小修，但新行为应优先局部提取。
+- 文件变大时检查是否引入多个独立职责；仅在本次任务需要时局部拆分。
+- 不为固定行数门槛顺手重构；保留兼容性，新增独立职责优先放到有明确领域归属的模块。
 - 测试文件目标不超过 500 行；超过 700 行应按领域或行为拆分。
-- 单个函数目标不超过 60 行；超过 100 行必须拆解状态阶段或提取具名策略。
+- 按函数职责和状态复杂度判断是否提取具名策略，不按固定行数强制拆分。
 - 一个 route 文件目标不超过 15 个 endpoint；新增领域应拥有自己的 route module。
 
 以下是当前 legacy hotspots，禁止继续加入新职责：
@@ -214,7 +215,7 @@ Risks / follow-ups: 剩余风险或无
 | Route/API | handler 测试覆盖 auth、无效输入、成功、领域冲突和状态码 |
 | SQLite/migration | pre-upgrade fixture、重复迁移、非法数据、回滚/隔离语义 + 相关服务测试 |
 | 外部副作用/并发 | 幂等、重试、未知结果、lease/fencing、部分失败测试 |
-| 跨包或高风险候选 | 上述针对性验证 + `bun test` + 独立 review |
+| 关键跨包行为或高风险边界 | 上述针对性验证；共享行为影响广时跑 `bun test`，具体风险需要时增加独立 review |
 
 当前 `bun run lint` 只是 workspace manifest smoke check，不是完整 ESLint/静态规则检查；不得把它单独描述为代码质量已验证。`tsconfig.json` 只覆盖 TypeScript，Web 必须单独 bundle check。
 

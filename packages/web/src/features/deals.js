@@ -54,12 +54,14 @@ function renderDeals() {
   const counts = health?.counts || {};
   const run = health?.latest_source_run;
   const window = health?.latest_delivery_window;
+  const sourceHealth = health?.source_health;
+  const sourceLabel = ({ blocked: "来源受阻", backoff: "等待重试", ready: "健康", not_started: "等待首轮" })[sourceHealth?.status];
   setSummary(
     `最新 ${deals.length} 条案卷 · ${counts.delivered || 0} 条已投递 · ${counts.skipped || 0} 条去重留档`,
     run?.status === "error" ? "error" : "ready",
   );
   $("deal-health").innerHTML = `
-    <div><small>采集器</small><strong>${escapeHtml(run?.status === "error" ? "异常" : run ? "健康" : "等待首轮")}</strong><span>${escapeHtml(run?.finished_at ? localTime(run.finished_at) : "尚无运行记录")}</span></div>
+    <div><small>采集器</small><strong>${escapeHtml(sourceLabel || (run?.status === "error" ? "异常" : run ? "健康" : "等待首轮"))}</strong><span>${escapeHtml(sourceHealth?.error || (run?.finished_at ? localTime(run.finished_at) : "尚无运行记录"))}${sourceHealth?.retry_after ? ` · 下次探测 ${escapeHtml(localTime(sourceHealth.retry_after))}` : ""}</span></div>
     <div><small>最近时间窗</small><strong>${escapeHtml(window?.status || "尚未建立")}</strong><span>${escapeHtml(window ? `${window.local_hour.replace("T", " ")}:00 · ${window.item_count} 条` : "整点建立幂等窗口")}</span></div>
     <div><small>待处理</small><strong>${Number(counts.pending || 0)}</strong><span>失败窗口复用原选择，不改换商品</span></div>`;
   $("deal-list").innerHTML = deals.map((item) => `

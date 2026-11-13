@@ -31,6 +31,22 @@ test("finance routes expose public evidence and isolate finance tasks", async ()
   })))?.status).toBe(404);
 });
 
+test("finance brief list validates explicit limits without changing the unlimited endpoint", async () => {
+  const calls: unknown[][] = [];
+  const handle = routeHandler(calls);
+  for (const [query, limit] of [["", undefined], ["?limit=1", 1], ["?limit=4", 4], ["?limit=100", 100]] as const) {
+    const response = await handle(new Request(`http://local/api/finance${query}`));
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toEqual({ briefs: [] });
+    expect(calls.at(-1)).toEqual(["list", limit]);
+  }
+  calls.length = 0;
+  for (const query of ["limit=0", "limit=101", "limit=1.5", "limit=", "limit=4&limit=4"]) {
+    await expect(handle(new Request(`http://local/api/finance?${query}`))).rejects.toMatchObject({ status: 400 });
+  }
+  expect(calls).toEqual([]);
+});
+
 test("finance routes reject invalid markets, watchlist, briefing, and health input", async () => {
   const handle = routeHandler([]);
   const authorizedPut = (body: unknown) => new Request("http://local/api/finance/preferences", {
@@ -52,7 +68,7 @@ test("finance routes reject invalid markets, watchlist, briefing, and health inp
 });
 
 function routeHandler(calls: unknown[][]) {
-  const service = financeService();
+  const service = financeService(calls);
   const tasks: Record<string, IntelligenceTaskView> = {
     ai: { domain: "ai" }, finance: { domain: "finance" },
   };
@@ -70,9 +86,9 @@ function routeHandler(calls: unknown[][]) {
   });
 }
 
-function financeService(): FinanceRouteService {
+function financeService(calls: unknown[][]): FinanceRouteService {
   return {
-    async list() { return [] as any; },
+    async list(limit) { calls.push(["list", limit]); return [] as any; },
     async listCandidates() { return [] as any; },
     async candidateCounts() { return {} as any; },
     async sourceStatus() { return [{ id: "source-1" }] as any; },

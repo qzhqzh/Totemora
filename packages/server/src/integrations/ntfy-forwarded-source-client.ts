@@ -2,6 +2,7 @@ import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 
 import { normalizeForwardedEvent, type ForwardedEventInput } from "../domains/forwarded/forwarded-event";
+import { classifyForwardedSourceError, ForwardedSourceError } from "../domains/forwarded/forwarded-retry-policy";
 import { readBoundedResponseText } from "./bounded-response";
 
 const MAX_CREDENTIAL_BYTES = 4_096;
@@ -25,15 +26,18 @@ export class NtfyForwardedSourceClient {
     try { await this.readCredentials(); return true; }
     catch (error) {
       if (isNodeError(error, "ENOENT")) return false;
-      throw error;
+      throw classifyForwardedSourceError(error, "configuration");
     }
   }
 
   async collect(sinceEpoch: number): Promise<ForwardedEventInput[]> {
     if (!Number.isSafeInteger(sinceEpoch) || sinceEpoch < 0) throw new Error("Forwarded source cursor is invalid");
-    const credentials = await this.readCredentials();
+    let credentials: SourceCredentials;
+    try { credentials = await this.readCredentials(); }
+    catch (error) { throw classifyForwardedSourceError(error, "configuration"); }
     const endpoint = subscriptionEndpoint(credentials.source_url, sinceEpoch);
-    const response = await (this.options.fetchImpl ?? fetch)(endpoint, {
+    let response: Response;
+    try { response = await (this.options.fetchImpl ?? fetch)(endpoint, {
       headers: {
         Accept: "application/x-ndjson, application/json",
         Authorization: credentials.authorization,
@@ -42,22 +46,26 @@ export class NtfyForwardedSourceClient {
       },
       redirect: "error",
       signal: AbortSignal.timeout(this.options.timeoutMs ?? 20_000),
-    });
-    if (!response.ok) throw new Error(`Forwarded ntfy source returned HTTP ${response.status}`);
-    const text = await readBoundedResponseText(response, MAX_RESPONSE_BYTES, "Forwarded ntfy response exceeds 2097152 bytes");
-    const events: ForwardedEventInput[] = [];
-    for (const line of text.split(/\r?\n/)) {
-      if (!line.trim()) continue;
-      let parsed: unknown;
-      try { parsed = JSON.parse(line); }
-      catch { throw new Error("Forwarded ntfy source returned invalid NDJSON"); }
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
-      const value = parsed as Record<string, unknown>;
-      if (value.event !== "message") continue;
-      events.push(ntfyEvent(value, this.source_id));
-      if (events.length > MAX_EVENTS) throw new Error(`Forwarded ntfy poll exceeds ${MAX_EVENTS} messages`);
+    }); } catch (error) { throw classifyForwardedSourceError(error); }
+    if (!response.ok) {
+      void response.body?.cancel().catch(() => undefined);
+      throw new ForwardedSourceError([401, 403].includes(response.status) ? "authentication"
+        : [404, 410].includes(response.status) ? "configuration" : "unavailable");
     }
-    return events;
+    try {
+      const text = await readBoundedResponseText(response, MAX_RESPONSE_BYTES, "Forwarded ntfy response exceeds 2097152 bytes");
+      const events: ForwardedEventInput[] = [];
+      for (const line of text.split(/\r?\n/)) {
+        if (!line.trim()) continue;
+        const parsed: unknown = JSON.parse(line);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
+        const value = parsed as Record<string, unknown>;
+        if (value.event !== "message") continue;
+        events.push(ntfyEvent(value, this.source_id));
+        if (events.length > MAX_EVENTS) throw new Error(`Forwarded ntfy poll exceeds ${MAX_EVENTS} messages`);
+      }
+      return events;
+    } catch (error) { throw classifyForwardedSourceError(error, "invalid_response"); }
   }
 
   private async readCredentials(): Promise<SourceCredentials> {

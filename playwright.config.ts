@@ -8,6 +8,8 @@ export default defineConfig({
   testDir: "./tests/e2e",
   testMatch: "**/*.pw.ts",
   fullyParallel: false,
+  // Browser projects share one Gateway and its persisted radar settings.
+  workers: 1,
   timeout: 30_000,
   expect: { timeout: 8_000 },
   retries: process.env.CI ? 1 : 0,

@@ -2,6 +2,8 @@
 
 ## 目标
 
+Gateway 承载常驻专业服务与用户沟通决定，Notifier 承载通道投递和发送账本。项目雷达、Web 和 Telegram 共用行动建议及采纳状态；向 Lifeline 的交接保留外部所有权，当前默认仅提供未提交草稿，不新增项目排期真源。
+
 Totemora 常驻服务器，成员按任务唤醒。Web、MCP、Telegram、Cron、Webhook、IDE 和 CLI 都是 Gateway Adapter，不拥有独立 Runtime、成员历史或 Skill 状态。显式 `--offline` 是不进入持久 Gateway 状态的本地兼容路径。
 
 ```text

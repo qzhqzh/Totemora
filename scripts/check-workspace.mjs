@@ -15,7 +15,7 @@ const packages = readdirSync(packagesDir, { withFileTypes: true })
   .map((entry) => entry.name)
   .sort();
 
-const expected = ["core", "providers", "server", "tui", "web"];
+const expected = ["core", "mcp", "notifier", "providers", "server", "tui", "web"];
 const missing = expected.filter((name) => !packages.includes(name));
 
 if (missing.length > 0) {

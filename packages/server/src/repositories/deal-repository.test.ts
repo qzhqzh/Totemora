@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { dealId, type CollectedDeal, type DealItem } from "../domains/deals/deal";
+import { DealSourceAccessBlockedError } from "../domains/deals/deal-retry";
 import { DealRepository } from "./deal-repository";
 
 function items(count: number): CollectedDeal[] {
@@ -62,5 +63,39 @@ test("legacy deals import is atomic, repeatable, and detects changed snapshots",
     expect(repository.importLegacy(bundle)).toEqual({ applied: false, items: 2, inserted_items: 0 });
     expect(() => repository.importLegacy({ ...bundle, source_sha256: "b".repeat(64) }))
       .toThrow("changed after import");
+  } finally { await rm(dataDir, { recursive: true, force: true }); }
+});
+
+test("deal source backoff survives restart, caps repeated failures, and resets after success", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-deals-source-backoff-"));
+  try {
+    const repository = new DealRepository(dataDir);
+    const record = (status: "success" | "error", hour: number) => repository.recordSourceRun({
+      status, started_at: `2026-08-30T${hour}:00:00Z`, finished_at: `2026-08-30T${hour}:00:01Z`,
+      fetched_count: 0, inserted_count: 0, selected_count: 0,
+      ...(status === "error" ? { error: "upstream requires access review" } : {}),
+    });
+    expect(repository.sourceHealth().status).toBe("not_started");
+    record("error", 10);
+    expect(repository.sourceHealth()).toEqual({
+      status: "backoff", retry_after: "2026-08-30T10:05:01.000Z", error: "upstream requires access review",
+    });
+    record("error", 11);
+    expect(new DealRepository(dataDir).sourceHealth()?.retry_after).toBe("2026-08-30T11:10:01.000Z");
+    for (const hour of [12, 13, 14, 15, 16, 17]) record("error", hour);
+    expect(repository.summary().source_health?.retry_after).toBe("2026-08-30T18:00:01.000Z");
+    record("success", 18);
+    expect(repository.sourceHealth().status).toBe("ready");
+    record("error", 19);
+    expect(repository.sourceHealth()?.retry_after).toBe("2026-08-30T19:05:01.000Z");
+    repository.recordSourceRun({
+      status: "error", started_at: "2026-08-30T20:00:00Z", finished_at: "2026-08-30T20:00:01Z",
+      fetched_count: 0, inserted_count: 0, selected_count: 0,
+      error: new DealSourceAccessBlockedError("redirected to an access verification page").message,
+    });
+    expect(new DealRepository(dataDir).summary().source_health).toEqual({
+      status: "blocked", retry_after: "2026-08-30T20:10:01.000Z",
+      error: "Deals source access blocked: redirected to an access verification page",
+    });
   } finally { await rm(dataDir, { recursive: true, force: true }); }
 });

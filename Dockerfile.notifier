@@ -1,0 +1,18 @@
+FROM oven/bun:1.3.14-slim AS dependencies
+WORKDIR /build
+COPY package.json bun.lock ./
+COPY packages ./packages
+RUN bun install --frozen-lockfile --production
+
+FROM oven/bun:1.3.14-slim
+WORKDIR /app
+COPY --from=dependencies /build/packages/notifier ./packages/notifier
+COPY --from=dependencies /build/node_modules ./node_modules
+USER bun
+ENV NOTIFIER_DATA_DIR=/data \
+    NOTIFIER_CONFIG_FILE=/run/notifier/notification-ingress.json \
+    NOTIFIER_TARGETS_FILE=/run/notifier/notification-targets.json \
+    NOTIFIER_HOST=0.0.0.0 \
+    NOTIFIER_PORT=4321
+EXPOSE 4321
+CMD ["bun", "run", "packages/notifier/src/index.ts"]

@@ -13,6 +13,7 @@ import {
   type DealWindowStatus,
 } from "../domains/deals/deal";
 import { StateDatabase } from "../state-database";
+import { dealRetryAfter, isDealSourceAccessBlocked } from "../domains/deals/deal-retry";
 
 interface ItemRow {
   id: string; source_id: string; title: string; deal_text: string; merchant: string;
@@ -39,6 +40,12 @@ export interface DealSummary {
   counts: Record<DealStatus, number>;
   latest_source_run?: DealSourceRun;
   latest_delivery_window?: DealDeliveryWindow;
+  source_health?: DealSourceHealth;
+}
+export interface DealSourceHealth {
+  status: "not_started" | "ready" | "backoff" | "blocked";
+  retry_after?: string;
+  error?: string;
 }
 
 const IMPORT_NAMESPACE = "legacy:notice-ntfy:deals";
@@ -171,6 +178,22 @@ export class DealRepository {
     return { id, ...input, ...(error ? { error } : {}) };
   }
 
+  sourceHealth(): DealSourceHealth {
+    // Five consecutive failures already reach the one-hour cap; do not scan an unbounded failure history.
+    const recent = this.state.db.query("SELECT * FROM deal_source_runs ORDER BY finished_at DESC,id DESC LIMIT 5")
+      .all() as SourceRunRow[];
+    const latest = recent[0];
+    if (!latest) return { status: "not_started" };
+    if (latest.status === "success") return { status: "ready" };
+    const firstSuccess = recent.findIndex((run) => run.status === "success");
+    const failures = firstSuccess === -1 ? recent.length : firstSuccess;
+    const error = latest.last_error ?? "Unknown deals source error";
+    return {
+      status: isDealSourceAccessBlocked(error) ? "blocked" : "backoff",
+      retry_after: dealRetryAfter(failures, latest.finished_at), error,
+    };
+  }
+
   summary(): DealSummary {
     const counts = Object.fromEntries(DEAL_STATUS_VALUES.map((status) => [status, 0])) as Record<DealStatus, number>;
     const countRows = this.state.db.query("SELECT status,COUNT(*) AS count FROM deal_items GROUP BY status").all() as Array<{
@@ -186,6 +209,7 @@ export class DealRepository {
     `).get() as WindowRow | null;
     return {
       counts,
+      source_health: this.sourceHealth(),
       ...(source ? { latest_source_run: sourceRunFromRow(source) } : {}),
       ...(window ? { latest_delivery_window: windowFromRow(window) } : {}),
     };

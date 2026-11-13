@@ -79,5 +79,5 @@ test("does not accept arbitrary target identifiers in the envelope", () => {
     priority: 3,
     tags: [],
     target_channels: ["private-device-id"],
-  })).toThrow("target_channels must be one of bark, telegram, ntfy");
+  })).toThrow("target_channels must be one of bark, telegram, ntfy, email");
 });

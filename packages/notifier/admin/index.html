@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Notifier · 管理控制台</title>
+  <link rel="icon" type="image/svg+xml" href="/admin/favicon.svg">
+  <link rel="stylesheet" href="/admin/styles.css">
+  <script type="module" src="/admin/app.js"></script>
+</head>
+<body>
+  <div class="window">
+    <aside class="sidebar" aria-label="Notifier 管理导航">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">N</span>Notifier</div>
+      <nav id="navigation" class="navigation" aria-label="管理分区"></nav>
+      <div class="sidebar-foot">独立通知服务<br><span id="sidebar-state">正在连接</span></div>
+    </aside>
+    <main class="main" id="main" tabindex="-1"></main>
+    <div class="overlay" id="overlay" hidden>
+      <div class="dialog" id="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title"></div>
+    </div>
+  </div>
+  <div id="announcer" class="sr-only" role="status" aria-live="polite"></div>
+</body>
+</html>

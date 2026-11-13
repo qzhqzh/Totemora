@@ -9,6 +9,7 @@ import {
   totemoraProductVersion,
   type LocalConfigSet,
   type ProviderRegistry,
+  type DecisionProvider,
   type RuntimeProgress,
   type TribeRun,
   type TaskAnalysis,
@@ -28,6 +29,7 @@ import { MemberConversationService } from "./member-conversation-service";
 import { MemberEvolutionService } from "./member-evolution-service";
 import { IntelligenceService } from "./intelligence-service";
 import { IntelligencePreferenceStore } from "./intelligence-preference-store";
+import { ResearchDirectionStore } from "./research-direction-store";
 import { FinanceIntelligenceService } from "./finance-intelligence-service";
 import { FinancePreferenceStore } from "./finance-preference-store";
 import { ActionJournal } from "./action-journal";
@@ -58,6 +60,7 @@ import { handleIntelligenceRoutes } from "./http/intelligence-routes";
 import { handleMemberRoutes } from "./http/member-routes";
 import { handleNotificationRoutes } from "./http/notification-routes";
 import { handleNotificationPlatformRoutes } from "./http/notification-platform-routes";
+import { NotifierClient, NotifierRequestError } from "@totemora/notifier/client";
 import { handleReminderRoutes } from "./http/reminder-routes";
 import { handleDealsRoutes } from "./http/deals-routes";
 import { handleForwardedRoutes } from "./http/forwarded-routes";
@@ -76,16 +79,16 @@ import {
   IntelligenceTaskConflictError,
   IntelligenceTaskRunner,
 } from "./application/intelligence-task-runner";
-import {
-  createNotificationPlatform,
-  type NotificationPlatformTargetConfiguration,
-} from "./bootstrap/notification-platform";
 import { ReminderService } from "./application/reminder-service";
 import { DealsService } from "./application/deals-service";
 import { DealsSourceClient } from "./integrations/deals-source-client";
 import { ForwardedRelayService } from "./application/forwarded-relay-service";
 import { NtfyForwardedSourceClient } from "./integrations/ntfy-forwarded-source-client";
 import { ContentNotificationService } from "./application/content-notification-service";
+import { createProjectRadar } from "./bootstrap/project-radar";
+import { recurringServiceHealth } from "./application/recurring-service-health";
+import { ProjectRadarTelegramController } from "./application/project-radar-telegram";
+import { handleProjectRadarRoutes } from "./http/project-radar-routes";
 
 export interface PlaygroundOptions {
   configDir: string;
@@ -98,9 +101,11 @@ export interface PlaygroundOptions {
   recurringServiceStatus?: () => RecurringServiceState[];
   codexSupervisor?: CodexRouteService;
   publicBaseUrl?: string;
-  notificationTargets?: NotificationPlatformTargetConfiguration;
+  notifier?: { baseUrl: string; operatorToken: string };
   dealsSourceUrl?: string;
   forwardedCredentialsFile?: string;
+  projectRadarProvider?: DecisionProvider;
+  projectRadarModel?: string;
 }
 
 interface RunJob {
@@ -126,14 +131,10 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
   const jobStore = new JobStore<RunJob, RunRouteInput>(options.dataDir);
   const specialistTasks = new SpecialistTaskRepository(options.dataDir);
   const barkManagement = new BarkNotificationService(options.dataDir, options.fetchImpl ?? fetch);
-  const notificationPlatform = createNotificationPlatform({
-    dataDir: options.dataDir,
-    bark: barkManagement,
-    telegram: new TelegramBotService(options.dataDir, options.fetchImpl ?? fetch),
-    telegramTargets: options.notificationTargets?.telegramTargets ?? [],
-    ntfyTargets: options.notificationTargets?.ntfyTargets ?? [],
-    ntfyFetch: options.fetchImpl,
+  const notifier = new NotifierClient({
+    baseUrl: options.notifier?.baseUrl, operatorToken: options.notifier?.operatorToken, fetchImpl: options.fetchImpl,
   });
+  const notificationPlatform = Promise.resolve({ dispatcher: notifier, listTargets: () => notifier.listTargets() });
   const reminderService = notificationPlatform.then((platform) => new ReminderService({
     dataDir: options.dataDir,
     dispatcher: platform.dispatcher,
@@ -158,6 +159,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
   const actionJournal = new ActionJournal(options.dataDir);
   const abilityTemplates = new AbilityTemplateStore(options.dataDir);
   const intelligencePreferences = new IntelligencePreferenceStore(options.dataDir);
+  const researchDirections = new ResearchDirectionStore(options.dataDir);
   const financePreferences = new FinancePreferenceStore(options.dataDir);
   const codexTelegram = options.codexSupervisor ? new CodexTelegramController({
     dataDir: options.dataDir, operations: options.codexSupervisor,
@@ -255,6 +257,13 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
     options.projectRoot ?? resolve(import.meta.dir, "../../.."),
     options.dataDir,
   );
+  const projectRadar = createProjectRadar({
+    dataDir: options.dataDir, provider: options.projectRadarProvider, model: options.projectRadarModel,
+    getConfig, getAssets: getAssetRegistry, notifier, publicBaseUrl: options.publicBaseUrl,
+  });
+  const radarTelegram = new ProjectRadarTelegramController({
+    dataDir: options.dataDir, actions: projectRadar.actions, fetchImpl: options.fetchImpl,
+  });
   const getMemberServices = async () => {
     memberServicesPromise ??= (async () => {
       const config = await getConfig();
@@ -277,11 +286,14 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
           config, providers, state, options.dataDir,
           options.projectRoot ?? resolve(import.meta.dir, "../../.."),
           options.fetchImpl ?? fetch,
+          notifier,
+          () => projectRadar.shouldDeferLegacyPush(),
         ),
         finance: new FinanceIntelligenceService(
           config, providers, state, options.dataDir,
           options.projectRoot ?? resolve(import.meta.dir, "../../.."),
           options.fetchImpl ?? fetch,
+          notifier,
         ),
         skills,
         skillTrials: new SkillTrialRunnerService(
@@ -420,6 +432,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
     jobs,
     codexScheduledDelivery,
     runScheduledIntelligence: () => intelligenceTaskRunner.runScheduled("ai"),
+    runScheduledProjectRadar: () => projectRadar.runDue(),
     runScheduledFinance: () => intelligenceTaskRunner.runScheduled("finance"),
     runScheduledContent: () => contentTaskRunner.runScheduled(),
     runScheduledCodexTelegram: async () => codexTelegram?.runScheduled(),
@@ -430,6 +443,10 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
       const url = new URL(request.url);
       try {
         await hydration;
+        const radarResponse = await handleProjectRadarRoutes(request, url, {
+          service: projectRadar, requireOperator: (candidate) => requireOperator(candidate, options.operatorToken),
+        });
+        if (radarResponse) return radarResponse;
         const codexScheduledResponse = await handleCodexScheduledRoutes(request, url, {
           service: codexScheduledDelivery,
           requireOperator: (candidate) => requireOperator(candidate, options.operatorToken),
@@ -486,6 +503,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
         const intelligenceResponse = await handleIntelligenceRoutes(request, url, {
           getIntelligence: async () => (await getMemberServices()).intelligence,
           preferences: intelligencePreferences,
+          researchDirections,
           credentialStatus: async () => ({
             x_trends: await hasLocalSecret(options.dataDir, "x-bearer-token", "TOTEMORA_X_BEARER_TOKEN"),
             weibo_hot: await hasLocalSecret(options.dataDir, "weibo-access-token", "TOTEMORA_WEIBO_ACCESS_TOKEN"),
@@ -494,7 +512,8 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
           getTask: (id) => intelligenceTaskRunner.get(id),
           handleTelegramUpdate: async (update) => codexTelegram?.accepts(update)
             ? codexTelegram.handleUpdate(update)
-            : (await getMemberServices()).intelligence.handleTelegramUpdate(update),
+            : radarTelegram.accepts(update) ? radarTelegram.handleUpdate(update)
+              : (await getMemberServices()).intelligence.handleTelegramUpdate(update),
           requireOperator: (candidate) => requireOperator(candidate, options.operatorToken),
         });
         if (intelligenceResponse) return intelligenceResponse;
@@ -540,12 +559,24 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
         });
         if (runResponse) return runResponse;
 
+        if (options.notifier && url.pathname.startsWith("/api/notifications/bark")) {
+          requireOperator(request, options.operatorToken);
+          throw new HttpError(409, "Bark target management has moved to the private Notifier configuration");
+        }
         const notificationResponse = await handleNotificationRoutes(request, url, {
           management: barkManagement,
           testTarget: testNotificationTarget,
           requireOperator: (candidate) => requireOperator(candidate, options.operatorToken),
         });
         if (notificationResponse) return notificationResponse;
+
+        if (url.pathname === "/api/integrations/notifications/events" && request.method === "POST") {
+          return await notifier.forward(request, false);
+        }
+        if (url.pathname.startsWith("/api/notifications/events")) {
+          requireOperator(request, options.operatorToken);
+          return await notifier.forward(request, true);
+        }
 
         const platform = await notificationPlatform;
         const notificationPlatformResponse = await handleNotificationPlatformRoutes(request, url, {
@@ -576,7 +607,8 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
         if (forwardedResponse) return forwardedResponse;
 
         const operationsResponse = await handleOperationsRoutes(request, url, {
-          recurringServiceStatus: () => options.recurringServiceStatus?.() ?? [],
+          recurringServiceStatus: async () => recurringServiceHealth({ states: options.recurringServiceStatus?.() ?? [],
+            deals: await dealsService, forwarded: await forwardedService }),
           listTasks: (limit) => specialistTasks.list(limit),
           getTask: (id) => specialistTasks.get(id),
           listActions: () => actionJournal.list(),
@@ -687,7 +719,7 @@ export function createPlaygroundApp(options: PlaygroundOptions) {
 
         return json({ error: "Not found" }, 404);
       } catch (error) {
-        const status = error instanceof HttpError ? error.status
+        const status = error instanceof HttpError || error instanceof NotifierRequestError ? error.status
           : error instanceof IntelligenceTaskConflictError ? 409
           : error instanceof SkillCommissionConflictError || error instanceof SkillTrialConflictError ? 409
             : error instanceof SkillTrialInputError ? 400 : undefined;

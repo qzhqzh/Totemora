@@ -1,6 +1,7 @@
 import type { NotificationDispatchResult } from "./notification-dispatcher";
 import { dealWindowKey, formatDealDigest, shanghaiHour, type CollectedDeal, type DealItem, type DealStatus } from "../domains/deals/deal";
 import { DealRepository, type DealSummary } from "../repositories/deal-repository";
+import { dealRetryAfter } from "../domains/deals/deal-retry";
 
 export interface DealsSource {
   collect(): Promise<CollectedDeal[]>;
@@ -13,8 +14,10 @@ export interface DealsRunReport {
   source_fetched: number;
   inserted_items: number;
   selected_items: number;
-  delivery_status: "completed" | "failed" | "uncertain" | "skipped_empty" | "skipped_existing";
+  delivery_status: "completed" | "failed" | "uncertain" | "skipped_empty" | "skipped_existing" | "skipped_backoff";
   retried_window: boolean;
+  retry_after?: string;
+  error?: string;
 }
 
 export class DealsService {
@@ -49,6 +52,16 @@ export class DealsService {
     let fetched = 0;
     let inserted = 0;
     const retried = Boolean(window);
+    const retry = window?.status === "failed"
+      ? { retry_after: dealRetryAfter(window.attempts, window.updated_at), error: window.last_error }
+      : !window ? this.repository.sourceHealth() : undefined;
+    if (retry?.retry_after && retry.retry_after > clock.now_iso) {
+      return {
+        local_hour: clock.local_hour, source_fetched: 0, inserted_items: 0,
+        selected_items: window?.item_count ?? 0, delivery_status: "skipped_backoff", retried_window: retried,
+        retry_after: retry.retry_after, ...(retry.error ? { error: retry.error } : {}),
+      };
+    }
     if (!window) {
       const startedAt = clock.now_iso;
       try {
@@ -89,6 +102,7 @@ export class DealsService {
         window_key: window.window_key,
         status: deliveryStatus,
         result,
+        now: clock.now_iso,
         ...(deliveryStatus === "failed" ? { error: dispatchFailure(result) } : {}),
       });
       return {
@@ -97,7 +111,7 @@ export class DealsService {
       };
     } catch (error) {
       this.repository.recordDelivery({
-        window_key: window.window_key, status: "failed", error: safeError(error),
+        window_key: window.window_key, status: "failed", error: safeError(error), now: clock.now_iso,
       });
       return {
         local_hour: clock.local_hour, source_fetched: fetched, inserted_items: inserted,

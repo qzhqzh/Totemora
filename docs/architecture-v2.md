@@ -1,6 +1,6 @@
 # Totemora Architecture v2
 
-Totemora 是预算约束下的异构智能组织系统。当前领域模型与下一阶段边界如下。
+Totemora 面向用户提供常驻专业助手和多渠道消息沟通，内部保留预算约束下的异构成员与证据治理内核。项目情报先形成可追溯的行动建议，采纳/忽略单独持久化；外部项目排期、长期记忆和内容资产分别归 Lifeline、EchoMe 和 LogWood。定位调整见 [ADR-0023](adr/0023-specialist-assistant-and-communication.md)。当前领域模型如下。
 
 ```text
 Tribe

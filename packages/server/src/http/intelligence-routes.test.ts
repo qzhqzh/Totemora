@@ -18,6 +18,8 @@ test("intelligence routes keep reads public and tasks operator-gated", async () 
   expect(await sources?.json()).toEqual({ sources: [{ id: "cisa-kev", status: "ready" }] });
   const preferences = await handle(new Request("http://local/api/intelligence/preferences"));
   expect(await preferences?.json()).toMatchObject({ credentials: { x_trends: true, weibo_hot: false } });
+  const researchDirections = await handle(new Request("http://local/api/intelligence/research-directions"));
+  expect(await researchDirections?.json()).toMatchObject({ directions: [] });
 
   await expect(handle(new Request("http://local/api/intelligence/tasks", {
     method: "POST", body: JSON.stringify({ message_count: 2 }),
@@ -38,6 +40,48 @@ test("intelligence routes keep reads public and tasks operator-gated", async () 
   expect((await handle(new Request("http://local/api/intelligence/tasks/finance", {
     headers: { authorization: "Bearer operator" },
   })))?.status).toBe(404);
+});
+
+test("intelligence brief list forwards explicit limits and leaves full-history reads opt-in compatible", async () => {
+  const calls: unknown[][] = [];
+  const handle = routeHandler(calls);
+  for (const [query, limit] of [["", undefined], ["?limit=1", 1], ["?limit=4", 4], ["?limit=100", 100]] as const) {
+    const response = await handle(new Request(`http://local/api/intelligence${query}`));
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toEqual({ briefs: [{ id: "brief-1" }] });
+    expect(calls.at(-1)).toEqual(["list", limit]);
+  }
+  calls.length = 0;
+  for (const query of ["limit=0", "limit=101", "limit=1.5", "limit=", "limit=4&limit=4"]) {
+    await expect(handle(new Request(`http://local/api/intelligence?${query}`))).rejects.toMatchObject({ status: 400 });
+  }
+  expect(calls).toEqual([]);
+});
+
+test("research direction interface accepts a variable direction set and remains operator-gated", async () => {
+  const calls: unknown[][] = [];
+  const handle = routeHandler(calls);
+  const body = { directions: [
+    { id: "citrus", name: "柑橘", keywords: ["citrus", "Citrus sinensis"] },
+    { id: "banana", name: "香蕉", keywords: ["banana", "Musa acuminata"], enabled: false },
+  ] };
+
+  await expect(handle(new Request("http://local/api/intelligence/research-directions", {
+    method: "PUT", body: JSON.stringify(body),
+  }))).rejects.toMatchObject({ status: 401 });
+  const response = await handle(new Request("http://local/api/intelligence/research-directions", {
+    method: "PUT", headers: { authorization: "Bearer operator" }, body: JSON.stringify(body),
+  }));
+  expect(response?.status).toBe(200);
+  expect(calls).toContainEqual(["research-directions", { directions: [
+    { id: "citrus", name: "柑橘", keywords: ["citrus", "Citrus sinensis"], enabled: true },
+    { id: "banana", name: "香蕉", keywords: ["banana", "Musa acuminata"], enabled: false },
+  ] }]);
+
+  await expect(handle(new Request("http://local/api/intelligence/research-directions", {
+    method: "PUT", headers: { authorization: "Bearer operator" },
+    body: JSON.stringify({ directions: [{ id: "citrus", name: "柑橘", keywords: [] }] }),
+  }))).rejects.toMatchObject({ status: 400 });
 });
 
 test("intelligence routes reject malformed preferences, task input, and feedback", async () => {
@@ -90,6 +134,13 @@ function routeHandler(calls: unknown[][]) {
       async get() { return { interests: [] } as any; },
       async save(input) { calls.push(["preferences", input]); return input as any; },
     },
+    researchDirections: {
+      async get() { return { directions: [], updated_at: new Date(0).toISOString() }; },
+      async save(input) {
+        calls.push(["research-directions", input]);
+        return { directions: (input as any).directions, updated_at: "2026-08-30T00:00:00.000Z" } as any;
+      },
+    },
     async credentialStatus() { return { x_trends: true, weibo_hot: false }; },
     async enqueueTask(input) { calls.push(["enqueue", input]); return { id: "task-1", domain: "ai" }; },
     getTask(id) { return tasks[id]; },
@@ -101,7 +152,7 @@ function routeHandler(calls: unknown[][]) {
 
 function intelligenceService(calls: unknown[][]): IntelligenceRouteService {
   return {
-    async list() { return [{ id: "brief-1" }] as any; },
+    async list(limit) { calls.push(["list", limit]); return [{ id: "brief-1" }] as any; },
     sourceHealth() { return [{ id: "cisa-kev", status: "ready" }] as any; },
     async listCandidates() { return [] as any; },
     async candidateCounts() { return {} as any; },

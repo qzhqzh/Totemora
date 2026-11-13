@@ -28,7 +28,7 @@ test("notification platform status is operator-only and exposes public target al
   expect(await response?.json()).toMatchObject({
     schema_version: 1,
     state: "configured",
-    supported_channels: ["bark", "telegram", "ntfy"],
+    supported_channels: ["bark", "telegram", "ntfy", "email"],
     targets: [{ id: "daily-news", channel: "telegram" }],
   });
 });

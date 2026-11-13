@@ -1,0 +1,35 @@
+name: totemora
+
+services:
+  notifier:
+    build:
+      context: .
+      dockerfile: Dockerfile.notifier
+    image: totemora/notifier:0.1.0
+    restart: unless-stopped
+    init: true
+    ports:
+      - "${NOTIFIER_BIND:-127.0.0.1}:${NOTIFIER_PORT:-4321}:4321"
+    volumes:
+      - ./.totemora/notifier-data:/data
+      - ./.totemora/secrets/notifier/notification-ingress.json:/run/notifier/notification-ingress.json:ro
+      - ./.totemora/secrets/notifier/notification-targets.json:/run/notifier/notification-targets.json:ro
+    environment:
+      NOTIFIER_DATA_DIR: /data
+      NOTIFIER_CONFIG_FILE: /run/notifier/notification-ingress.json
+      NOTIFIER_TARGETS_FILE: /run/notifier/notification-targets.json
+      NOTIFIER_HOST: 0.0.0.0
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:4321/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"

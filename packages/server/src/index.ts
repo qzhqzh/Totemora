@@ -8,7 +8,8 @@ import {
 } from "@totemora/mcp";
 import { createPlaygroundApp } from "./app";
 import { CodexSupervisorRunner } from "./application/codex-supervisor-runner";
-import { loadNotificationRuntimeTargets } from "./bootstrap/notification-runtime-config";
+import { loadNotifierClientConfig } from "./bootstrap/notifier-client-config";
+import { loadProjectRadarProvider } from "./bootstrap/project-radar-provider";
 import { RecurringServiceRunner } from "./recurring-service-runner";
 import { RecurringServiceStateRepository } from "./recurring-service-state-repository";
 import { resolveWebAsset } from "./web-assets";
@@ -29,20 +30,24 @@ const codexSupervisor = new CodexSupervisorRunner({
   enabled: codexSupervisorEnabled,
   agentMcpUrl: `http://127.0.0.1:${port}/mcp/codex-agent`,
 });
-const notificationTargets = await loadNotificationRuntimeTargets({
-  dataDir,
-  filePath: process.env.TOTEMORA_NOTIFICATION_TARGETS_FILE,
+const notifier = await loadNotifierClientConfig({
+  dataDir, baseUrl: process.env.TOTEMORA_NOTIFIER_URL,
+  tokenFile: process.env.TOTEMORA_NOTIFIER_TOKEN_FILE,
 });
 let scheduler: RecurringServiceRunner | undefined;
+const projectRadar = loadProjectRadarProvider();
 const app = createPlaygroundApp({
   configDir: process.env.TOTEMORA_CONFIG_DIR ?? resolve(root, "configs/example"),
   dataDir,
   operatorToken,
   projectRoot: root,
+  projectRadarProvider: projectRadar.provider,
+  projectRadarModel: projectRadar.model,
   recurringServiceStatus: () => scheduler?.status() ?? [],
   codexSupervisor: codexSupervisor.service,
   publicBaseUrl: process.env.TOTEMORA_PUBLIC_BASE_URL,
-  notificationTargets,
+  notifier: notifier.baseUrl && notifier.operatorToken
+    ? { baseUrl: notifier.baseUrl, operatorToken: notifier.operatorToken } : undefined,
   dealsSourceUrl: process.env.TOTEMORA_DEALS_SOURCE_URL,
   forwardedCredentialsFile: process.env.TOTEMORA_FORWARDED_SOURCE_CREDENTIALS,
 });
@@ -80,6 +85,7 @@ const server = Bun.serve({
 
 scheduler = new RecurringServiceRunner([
   { id: "intelligence.watch", interval_ms: 60_000, run: app.runScheduledIntelligence },
+  { id: "intelligence.radar", interval_ms: 60_000, run: app.runScheduledProjectRadar },
   { id: "finance.watch", interval_ms: 60_000, run: app.runScheduledFinance },
   { id: "content.studio", interval_ms: 60_000, run: app.runScheduledContent },
   { id: "codex.telegram", interval_ms: 60_000, run: app.runScheduledCodexTelegram },
