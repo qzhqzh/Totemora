@@ -5,3 +5,9 @@ enabled_tools = ["publish_scheduled_digest"]
 default_tools_approval_mode = "auto"
 enabled = true
 required = false
+
+[mcp_servers.firecrawl]
+url = "https://mcp.firecrawl.dev/v2/mcp-oauth"
+auth = "oauth"
+enabled = true
+required = false

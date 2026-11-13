@@ -308,9 +308,9 @@ test("AI watch includes recent CISA evidence and exposes an isolated USGS degrad
     const url = String(input);
     if (url.includes("known_exploited_vulnerabilities.json")) return Response.json({ vulnerabilities: [{
       cveID: "CVE-2026-12345", vendorProject: "Example", product: "Gateway",
-      vulnerabilityName: "Remote execution", dateAdded: "2026-08-29",
+      vulnerabilityName: "Remote execution", dateAdded: new Date().toISOString().slice(0, 10),
       shortDescription: "Observed exploitation.", requiredAction: "Apply mitigations.",
-      dueDate: "2026-09-01", knownRansomwareCampaignUse: "Unknown",
+      dueDate: new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10), knownRansomwareCampaignUse: "Unknown",
     }] });
     if (url.includes("significant_day.geojson")) return new Response("offline", { status: 503 });
     return new Response("<rss><channel></channel></rss>");
