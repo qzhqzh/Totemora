@@ -15,6 +15,7 @@
         <a href="/skills" data-primary-route="skills">能力</a>
         <a href="/codex">Codex 监控台</a>
         <a href="/#task-hall">任务大厅</a>
+        <a href="/#project-radar-panel">项目建议</a>
         <a href="/#intelligence-hall">情报台</a>
         <a href="/#reminders">事项</a>
         <a href="/#deals">优惠</a>
@@ -158,7 +159,7 @@
       <div class="observatory-head">
         <div>
           <h2 id="observatory-title">部落证据台</h2>
-          <p>看见谁在值守、专业服务走到哪一步，以及哪些 Skill 和部落资产真正留下了结果。</p>
+          <p>常驻专业助手与多渠道消息沟通：关注项目变化、查看行动建议、跟进消息和专业服务的实际结果。</p>
         </div>
         <div class="observatory-controls">
           <span id="observatory-live" class="observatory-live" aria-live="polite">正在汇总部落现场…</span>
@@ -183,7 +184,7 @@
         </aside>
       </div>
       <div class="feedback-principle" role="note">
-        <div><strong>情报反馈口径</strong><span>没空点击只是“未知”，不会降低兴趣判断；主动打开或标记“有价值”才作为高置信正向证据。</span></div>
+        <div><strong>情报反馈口径</strong><span>没空点击只是“未知”，不会降低兴趣判断；打开消息只表示阅读，主动标记“有价值”才表示认可。</span></div>
         <small id="feedback-evidence">正在读取最近反馈样本…</small>
       </div>
     </section>
@@ -360,6 +361,7 @@ secrets/</textarea></label>
         </div>
       </div>
     </section>
+    <section class="panel" id="project-radar-panel" aria-labelledby="project-radar-heading"></section>
     <section class="panel intelligence-panel" id="intelligence-hall">
       <div class="section-title"><h2>双域情报台</h2></div>
       <p class="section-note">听风追踪 AI 与技术变化；观潮独立追踪财经官方披露和宏观事件。两名成员各自积累经验、候选池和偏好，只共享通知基础设施。</p>
@@ -394,6 +396,11 @@ secrets/</textarea></label>
           <p class="domain-note">每 10 分钟巡查白名单来源；按兴趣、重要性、可信度和新颖度评估。</p>
           <form id="intelligence-preferences" class="intelligence-preferences">
             <label>我关注的方向<textarea id="intelligence-interests" placeholder="每行一个，例如：AI Agent&#10;生物信息学&#10;开发工具"></textarea></label>
+            <section class="research-radar" aria-labelledby="research-radar-title">
+              <div class="research-radar-head"><div><h4 id="research-radar-title">科研雷达</h4><p>按柑橘、香蕉等独立研究方向寻找最新成果，并生成可继续追踪的文章切口。</p></div><label class="research-toggle"><input id="channel-research" type="checkbox"><span>纳入巡查</span></label></div>
+              <small id="research-direction-status" class="research-direction-status" role="status" aria-live="polite">正在读取科研方向…</small>
+              <dl class="research-radar-method"><div><dt>方向接口</dt><dd>GET /api/intelligence/research-directions 读取；PUT 同一路径替换整组配置（需 Operator）。请求示例见 docs/research-radar.md。</dd></div><div><dt>定向检索</dt><dd>只用已启用方向查询 arXiv 与 Europe PMC；没有方向时不采集、不推送。</dd></div><div><dt>推送结果</dt><dd>每条给出所属方向、核心发现、热度信号、可写切口和证据状态。</dd></div></dl>
+            </section>
             <div class="inline-check"><label><input id="channel-rss" type="checkbox"> 新闻 / 技术 RSS</label><label><input id="channel-ai-hot" type="checkbox"> AI HOT 精选</label><label><input id="channel-x" type="checkbox"> X 热点</label><label><input id="channel-weibo" type="checkbox"> 微博热点</label></div>
             <label>X 地区 WOEID<input id="x-woeid" type="number" min="1" value="1"></label>
             <div class="domain-metrics"><label>扫描间隔（分钟）<input id="scan-interval" type="number" min="5" max="60" value="10"></label><label>推送间隔（秒）<input id="push-interval" type="number" min="60" max="3600" value="60"></label><label>推送阈值<input id="push-threshold" type="number" min="0.5" max="0.95" step="0.01" value="0.72"></label></div>
@@ -405,7 +412,10 @@ secrets/</textarea></label>
           <small id="intelligence-status" class="domain-status" role="status" aria-live="polite"></small>
           <div id="bark-status" class="channel-status" role="status" aria-live="polite">Bark 状态等待检查</div>
           <details class="source-ledger"><summary>查看听风来源健康</summary><div id="intelligence-source-ledger"></div></details>
-          <h4>候选消息池</h4>
+          <h4>科研雷达候选</h4>
+          <div id="research-candidate-summary" class="chips" role="status" aria-live="polite"></div>
+          <div id="research-candidates" class="intelligence-history"></div>
+          <h4>其他 AI 候选</h4>
           <div id="candidate-summary" class="chips" role="status" aria-live="polite"></div>
           <div id="intelligence-candidates" class="intelligence-history"></div>
           <h4>扫描记录</h4>

@@ -2,7 +2,7 @@ import { HttpError, json } from "./http-boundary";
 import { requiredString } from "./input-schema";
 
 export interface OperationsRouteDependencies {
-  recurringServiceStatus(): unknown[];
+  recurringServiceStatus(): unknown[] | Promise<unknown[]>;
   listTasks(limit: number): unknown[];
   getTask(id: string): unknown | undefined;
   listActions(): Promise<unknown[]>;
@@ -21,7 +21,7 @@ export async function handleOperationsRoutes(
     return json({ authenticated: true });
   }
   if (request.method === "GET" && url.pathname === "/api/operations/recurring-services") {
-    return json({ services: dependencies.recurringServiceStatus() });
+    return json({ services: await dependencies.recurringServiceStatus() });
   }
   if (request.method === "GET" && url.pathname === "/api/service-tasks") {
     return json({ tasks: dependencies.listTasks(readLimit(url)) });

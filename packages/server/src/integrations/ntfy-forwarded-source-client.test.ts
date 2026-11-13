@@ -50,6 +50,59 @@ test("forwarded source rejects broad permissions, insecure URLs, and malformed e
       credentialsFile,
       fetchImpl: async () => new Response(JSON.stringify({ event: "message", id: "m-1", time: "bad", message: "Body" })),
     });
-    await expect(malformed.collect(0)).rejects.toThrow("time is invalid");
+    await expect(malformed.collect(0)).rejects.toMatchObject({ kind: "invalid_response" });
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("invalid and oversized source responses are bounded and do not expose upstream content", async () => {
+  const root = await mkdtemp(join(tmpdir(), "totemora-forwarded-response-"));
+  const credentialsFile = join(root, "source");
+  try {
+    await writeFile(credentialsFile, "https://notify.example/topic\nuser\npassword\n", { mode: 0o600 });
+    const bodies = [
+      "private invalid NDJSON payload",
+      "x".repeat(2 * 1024 * 1024 + 1),
+      Array.from({ length: 101 }, (_, i) => JSON.stringify({ event: "message", id: `m-${i}`, time: 100, message: "Body" })).join("\n"),
+    ];
+    for (const body of bodies) {
+      const client = new NtfyForwardedSourceClient({ credentialsFile, fetchImpl: async () => new Response(body) });
+      await expect(client.collect(0)).rejects.toMatchObject({ kind: "invalid_response" });
+    }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("forwarded source reports TLS failures without leaking its private topic or credentials", async () => {
+  const root = await mkdtemp(join(tmpdir(), "totemora-forwarded-tls-"));
+  const credentialsFile = join(root, "source");
+  try {
+    await writeFile(credentialsFile, "https://notify.example/private-topic\nuser\nprivate-password\n", { mode: 0o600 });
+    const client = new NtfyForwardedSourceClient({
+      credentialsFile,
+      fetchImpl: async (_url, init) => {
+        expect(init?.redirect).toBe("error");
+        expect(init).not.toHaveProperty("tls");
+        throw new TypeError("fetch failed https://notify.example/private-topic", {
+          cause: Object.assign(new Error("certificate expired private-password"), { code: "CERT_HAS_EXPIRED" }),
+        });
+      },
+    });
+    await expect(client.collect(0)).rejects.toMatchObject({ kind: "certificate" });
+    try { await client.collect(0); } catch (error) {
+      expect(String(error)).toContain("certificate");
+      expect(String(error)).not.toContain("private-topic");
+      expect(String(error)).not.toContain("private-password");
+    }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("forwarded source distinguishes rejected credentials from transient upstream failure", async () => {
+  const root = await mkdtemp(join(tmpdir(), "totemora-forwarded-http-"));
+  const credentialsFile = join(root, "source");
+  try {
+    await writeFile(credentialsFile, "https://notify.example/topic\nuser\npassword\n", { mode: 0o600 });
+    for (const [status, kind] of [[401, "authentication"], [403, "authentication"], [429, "unavailable"], [503, "unavailable"]] as const) {
+      const client = new NtfyForwardedSourceClient({ credentialsFile, fetchImpl: async () => new Response("private body", { status }) });
+      await expect(client.collect(0)).rejects.toMatchObject({ kind });
+    }
   } finally { await rm(root, { recursive: true, force: true }); }
 });

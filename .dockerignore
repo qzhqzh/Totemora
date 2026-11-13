@@ -1,0 +1,14 @@
+.git
+.totemora
+node_modules
+packages/web/src
+**/*.test.ts
+docs
+tests
+benchmarks
+configs
+examples
+skills
+.agents
+.codex
+*.log

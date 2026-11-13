@@ -183,10 +183,11 @@ function renderEvidenceStream(services, tasks, actions, dossiers, protectedEvide
 
 function renderFeedbackEvidence(candidates) {
   const feedback = candidates.map((candidate) => candidate.feedback || {});
-  const positive = feedback.reduce((total, item) => total + (item.valuable || 0) + (item.opened || 0), 0);
+  const positive = feedback.reduce((total, item) => total + (item.valuable || 0), 0);
+  const opened = feedback.reduce((total, item) => total + (item.opened || 0), 0);
   const corrective = feedback.reduce((total, item) => total + (item.not_valuable || 0) + (item.duplicate || 0) + (item.too_late || 0), 0);
-  const unlabeled = feedback.filter((item) => !Object.values(item).some(Boolean)).length;
-  $("feedback-evidence").textContent = `最近 ${candidates.length} 条候选：${positive} 次明确正向 · ${corrective} 次纠偏 · ${unlabeled} 条未标注。未标注样本不参与负向学习。`;
+  const unlabeled = feedback.filter((item) => ![item.valuable, item.not_valuable, item.duplicate, item.too_late].some(Boolean)).length;
+  $("feedback-evidence").textContent = `最近 ${candidates.length} 条候选：${positive} 次明确正向 · ${corrective} 次纠偏 · ${opened} 次打开 · ${unlabeled} 条未标注。打开不等同于认可；未标注样本不参与负向学习。`;
 }
 
 function observatoryTone(value) {

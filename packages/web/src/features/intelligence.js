@@ -1,8 +1,10 @@
 import { $, escapeHtml, externalLink } from "../shared/dom.js";
 import { api, operatorApi, operatorSession } from "../shared/operator-session.js";
 import { membersFeature } from "./members.js";
+import { projectRadarFeature } from "./project-radar.js";
 
 $("intelligence-candidates").addEventListener("click", handleCandidateFeedback);
+$("research-candidates").addEventListener("click", handleCandidateFeedback);
 $("finance-candidates").addEventListener("click", handleCandidateFeedback);
 $("intelligence-preferences").addEventListener("submit", handleIntelligencePreferences);
 $("run-intelligence").addEventListener("click", runIntelligence);
@@ -20,6 +22,7 @@ export const intelligenceFeature = {
     void loadFinance();
   },
   lockProtected() {
+    projectRadarFeature.lockProtected();
     $("bark-status").textContent = "Bark 状态等待登录";
     $("finance-bark-status").textContent = "财经 Bark 路由等待登录";
     $("intelligence-preferences").reset();
@@ -28,10 +31,22 @@ export const intelligenceFeature = {
 };
 
 async function loadIntelligence() {
+  void projectRadarFeature.load();
   const [{ briefs }, pool, { sources }] = await Promise.all([
-    api("/api/intelligence"), api("/api/intelligence/candidates"), api("/api/intelligence/sources"),
+    api("/api/intelligence?limit=4"), api("/api/intelligence/candidates"), api("/api/intelligence/sources"),
   ]);
-  renderCandidatePool(pool, "candidate-summary", "intelligence-candidates");
+  const researchCandidates = pool.candidates.filter(isResearchCandidate);
+  const otherCandidates = pool.candidates.filter((candidate) => !isResearchCandidate(candidate));
+  renderResearchSummary(researchCandidates);
+  renderCandidateCards(
+    researchCandidates, "research-candidates",
+    "科研雷达尚无候选。启用并保存后运行一次扫描；来源异常会显示在健康账本中。",
+  );
+  renderCandidateSummary(candidateStatusCounts(otherCandidates), "candidate-summary");
+  renderCandidateCards(
+    otherCandidates, "intelligence-candidates",
+    "其他 AI 候选为空。可以立即扫描；失败原因会留在扫描记录中。",
+  );
   renderBriefs(briefs, "intelligence-history", "听风尚未带回情报。");
   $("intelligence-source-ledger").innerHTML = sources.map((source) => `<div class="source-row"><strong>${externalLink(source.url, source.name)}</strong><span class="source-state ${escapeHtml(source.status)}">${escapeHtml(source.kind)} · ${escapeHtml(source.status)}</span><p>${escapeHtml(source.summary)}</p><small>${source.last_success_at ? `上次成功 ${escapeHtml(source.last_success_at)} · ${source.last_item_count} 条` : escapeHtml(source.error || "等待首次扫描")}</small><small>${source.consecutive_failures ? `连续失败 ${source.consecutive_failures} 次` : "来源正常"}</small></div>`).join("") || '<p class="section-note">完成首次听风扫描后显示来源健康状态。</p>';
   if (operatorSession.authenticated) {
@@ -48,7 +63,7 @@ async function loadIntelligence() {
 
 async function loadFinance() {
   const [{ briefs }, pool, { sources }] = await Promise.all([
-    api("/api/finance"), api("/api/finance/candidates"), api("/api/finance/sources"),
+    api("/api/finance?limit=4"), api("/api/finance/candidates"), api("/api/finance/sources"),
   ]);
   renderCandidatePool(pool, "finance-candidate-summary", "finance-candidates");
   renderBriefs(briefs, "finance-history", "观潮尚未完成首次巡查。");
@@ -66,11 +81,45 @@ async function loadFinance() {
 }
 
 function renderCandidatePool(pool, summaryId, containerId) {
-  $(summaryId).textContent = `待推送 ${pool.counts.queued || 0} · 重试 ${pool.counts.retry_wait || 0} · 通道阻塞 ${pool.counts.channel_blocked || 0} · 投递未知 ${pool.counts.delivery_unknown || 0} · 抑制 ${pool.counts.held || 0} · 已推送 ${pool.counts.pushed || 0} · 失败 ${pool.counts.failed || 0}`;
-  $(containerId).innerHTML = pool.candidates.slice(0, 6).map((item) => {
-    const evidence = [item.evidence_tier, item.market, ...(item.symbols || []), item.event_type].filter(Boolean).map(escapeHtml).join(" · ");
-    return `<article class="brief ${escapeHtml(item.status)}" data-candidate="${escapeHtml(item.id)}"><h3>${externalLink(item.url, item.headline)}</h3><p>${escapeHtml(item.brief)}</p><div class="chips">${evidence ? `${evidence} · ` : ""}${escapeHtml(item.status)} · 总分 ${Math.round(item.scores.total * 100)}（模型 ${Math.round((item.scores.base_total ?? item.scores.total) * 100)} / 反馈 ${Math.round((item.scores.feedback_adjustment || 0) * 100)}） · 可信 ${Math.round(item.scores.confidence * 100)}</div><small>${escapeHtml(item.decision)} · ${escapeHtml(item.rationale)}</small><div class="candidate-feedback" role="group" aria-label="评价这条候选消息"><button type="button" data-feedback="valuable">有价值 ${item.feedback?.valuable || ""}</button><button type="button" data-feedback="not_valuable">没价值 ${item.feedback?.not_valuable || ""}</button><button type="button" data-feedback="duplicate">重复 ${item.feedback?.duplicate || ""}</button><button type="button" data-feedback="too_late">太晚 ${item.feedback?.too_late || ""}</button></div><small class="feedback-status" aria-live="polite">${item.feedback?.opened ? `Bark 已打开 ${item.feedback.opened} 次；这是高置信正向证据` : "未反馈不会扣分；主动反馈才会校正后续相似消息"}</small></article>`;
-  }).join("") || '<p class="section-note">候选池为空。可以立即扫描；失败原因会留在扫描记录中。</p>';
+  renderCandidateSummary(pool.counts, summaryId);
+  renderCandidateCards(pool.candidates, containerId, "候选池为空。可以立即扫描；失败原因会留在扫描记录中。");
+}
+
+function renderCandidateSummary(counts, summaryId) {
+  $(summaryId).textContent = `待推送 ${counts.queued || 0} · 重试 ${counts.retry_wait || 0} · 通道阻塞 ${counts.channel_blocked || 0} · 投递未知 ${counts.delivery_unknown || 0} · 抑制 ${counts.held || 0} · 已推送 ${counts.pushed || 0} · 失败 ${counts.failed || 0}`;
+}
+
+function renderResearchSummary(candidates) {
+  const preprints = candidates.filter((item) => item.event_type === "research_preprint").length;
+  const articles = candidates.filter((item) => item.event_type === "research_article").length;
+  const queued = candidates.filter((item) => item.status === "queued").length;
+  $("research-candidate-summary").textContent = `最近候选 ${candidates.length} · 预印本 ${preprints} · 文献记录 ${articles} · 待推送 ${queued}`;
+}
+
+function candidateStatusCounts(candidates) {
+  return candidates.reduce((counts, item) => {
+    counts[item.status] = (counts[item.status] || 0) + 1;
+    return counts;
+  }, {});
+}
+
+function renderCandidateCards(candidates, containerId, emptyText) {
+  $(containerId).innerHTML = candidates.slice(0, 6).map((item) => {
+    const evidence = [item.evidence_tier, item.market, ...(item.symbols || []), candidateTypeLabel(item.event_type)].filter(Boolean).map(escapeHtml).join(" · ");
+    const researchClass = isResearchCandidate(item) ? " research-candidate" : "";
+    const headline = isResearchCandidate(item) ? item.headline.replace(/^【科研前沿】/, "") : item.headline;
+    return `<article class="brief ${escapeHtml(item.status)}${researchClass}" data-candidate="${escapeHtml(item.id)}"><h3>${externalLink(item.url, headline)}</h3><p>${escapeHtml(item.brief)}</p><div class="chips">${evidence ? `${evidence} · ` : ""}${escapeHtml(item.status)} · 总分 ${Math.round(item.scores.total * 100)}（模型 ${Math.round((item.scores.base_total ?? item.scores.total) * 100)} / 反馈 ${Math.round((item.scores.feedback_adjustment || 0) * 100)}） · 可信 ${Math.round(item.scores.confidence * 100)}</div><small>${escapeHtml(item.decision)} · ${escapeHtml(item.rationale)}</small><div class="candidate-feedback" role="group" aria-label="评价这条候选消息"><button type="button" data-feedback="valuable">有价值 ${item.feedback?.valuable || ""}</button><button type="button" data-feedback="not_valuable">没价值 ${item.feedback?.not_valuable || ""}</button><button type="button" data-feedback="duplicate">重复 ${item.feedback?.duplicate || ""}</button><button type="button" data-feedback="too_late">太晚 ${item.feedback?.too_late || ""}</button></div><small class="feedback-status" aria-live="polite">${item.feedback?.opened ? `Bark 已打开 ${item.feedback.opened} 次；这是弱阅读信号，不等同于认可` : "未反馈不会扣分；主动反馈才会校正后续相似消息"}</small></article>`;
+  }).join("") || `<p class="section-note">${escapeHtml(emptyText)}</p>`;
+}
+
+function isResearchCandidate(candidate) {
+  return ["research_preprint", "research_article"].includes(candidate.event_type);
+}
+
+function candidateTypeLabel(eventType) {
+  if (eventType === "research_preprint") return "科研预印本";
+  if (eventType === "research_article") return "科研论文";
+  return eventType;
 }
 
 function renderBriefs(briefs, containerId, emptyText) {
@@ -109,10 +158,23 @@ async function handleCandidateFeedback(event) {
 }
 
 async function loadIntelligencePreferences() {
-  const value = await api("/api/intelligence/preferences");
+  const [value, researchDirectionSet] = await Promise.all([
+    api("/api/intelligence/preferences"),
+    api("/api/intelligence/research-directions"),
+  ]);
+  const directions = researchDirectionSet.directions || [];
+  const enabledDirections = directions.filter((direction) => direction.enabled);
+  const researchToggle = $("channel-research");
   $("intelligence-interests").value = value.interests.join("\n");
   $("channel-rss").checked = value.channels.rss;
   $("channel-ai-hot").checked = value.channels.ai_hot;
+  researchToggle.disabled = enabledDirections.length === 0;
+  researchToggle.checked = enabledDirections.length > 0 && value.channels.research;
+  $("research-direction-status").textContent = enabledDirections.length
+    ? `已启用 ${enabledDirections.length} 个方向：${enabledDirections.map((direction) => direction.name).join("、")}`
+    : directions.length
+      ? `已配置 ${directions.length} 个方向，但尚未启用；科研采集保持静默`
+      : "尚未配置方向；请通过 Operator PUT 方向接口配置，配置后才能纳入巡查";
   $("channel-x").checked = value.channels.x_trends;
   $("channel-weibo").checked = value.channels.weibo_hot;
   $("x-woeid").value = value.x_woeid;
@@ -134,6 +196,7 @@ async function handleIntelligencePreferences(event) {
         channels: {
           rss: $("channel-rss").checked,
           ai_hot: $("channel-ai-hot").checked,
+          research: !$("channel-research").disabled && $("channel-research").checked,
           x_trends: $("channel-x").checked,
           weibo_hot: $("channel-weibo").checked,
         },

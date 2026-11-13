@@ -2,8 +2,8 @@ import type { LocalConfigSet } from "@totemora/core";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 
-import type { IntelligenceBrief } from "./intelligence-service";
 import { MemberStateStore } from "./member-state-store";
+import { IntelligenceSourceGateRepository } from "./repositories/intelligence-source-gate-repository";
 import { StateDatabase } from "./state-database";
 
 export interface CandidateFunnel {
@@ -107,10 +107,12 @@ interface ServiceAggregateRow {
 export class EvidenceObservatory {
   private readonly state: StateDatabase;
   private readonly members: MemberStateStore;
+  private readonly sourceGates: IntelligenceSourceGateRepository;
 
   constructor(dataDir: string, config: LocalConfigSet) {
     this.state = StateDatabase.open(dataDir);
     this.members = new MemberStateStore(dataDir, config);
+    this.sourceGates = new IntelligenceSourceGateRepository(dataDir);
   }
 
   async overview(): Promise<EvidenceOverview> {
@@ -228,23 +230,14 @@ export class EvidenceObservatory {
     aggregate?: CandidateAggregateRow,
     feedback?: FeedbackAggregateRow,
   ): CandidateFunnel {
-    const namespace = domain === "ai" ? "intelligence_briefs" : "finance_intelligence_briefs";
-    const briefs = this.state.listRecords<IntelligenceBrief>(namespace);
-    const sourceGate = briefs.reduce((total, brief) => ({
-      collected: total.collected + (brief.source_gate?.collected ?? 0),
-      out_of_scope: total.out_of_scope + (brief.source_gate?.out_of_scope ?? 0),
-      history_suppressed: total.history_suppressed + (brief.source_gate?.history_suppressed ?? 0),
-      model_evaluated: total.model_evaluated + (brief.source_gate?.model_evaluated ?? 0),
-      avoided: total.avoided + (brief.source_gate && brief.source_gate.model_evaluated === 0
-        && brief.source_gate.history_suppressed > 0 ? 1 : 0),
-    }), { collected: 0, out_of_scope: 0, history_suppressed: 0, model_evaluated: 0, avoided: 0 });
+    const sourceGate = this.sourceGates.aggregate(domain);
     const evaluated = aggregate?.evaluated ?? 0;
     const pushed = aggregate?.pushed ?? 0;
     const failed = aggregate?.failed ?? 0;
     const deliveryUnknown = aggregate?.delivery_unknown ?? 0;
     return {
       domain,
-      scans: briefs.length,
+      scans: sourceGate.scans,
       sources_collected: sourceGate.collected,
       sources_out_of_scope: sourceGate.out_of_scope,
       sources_history_suppressed: sourceGate.history_suppressed,

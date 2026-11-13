@@ -49,6 +49,23 @@ test("protects development policy mutations with the operator token", async () =
     interests: ["AI Agent", "生物信息"], channels: { rss: true, ai_hot: true },
   });
 
+  const researchDirectionsBody = JSON.stringify({ directions: [
+    { id: "citrus", name: "柑橘", keywords: ["citrus", "Citrus sinensis"] },
+    { id: "banana", name: "香蕉", keywords: ["banana", "Musa acuminata"] },
+  ] });
+  expect((await app.fetch(new Request("http://local/api/intelligence/research-directions", {
+    method: "PUT", headers: { "content-type": "application/json" }, body: researchDirectionsBody,
+  }))).status).toBe(401);
+  expect(await (await app.fetch(new Request("http://local/api/intelligence/research-directions", {
+    method: "PUT", headers: authorized(), body: researchDirectionsBody,
+  }))).json()).toMatchObject({ directions: [
+    { id: "citrus", name: "柑橘", enabled: true },
+    { id: "banana", name: "香蕉", enabled: true },
+  ] });
+  expect(await (await createApp(dataDir).fetch(new Request(
+    "http://local/api/intelligence/research-directions",
+  ))).json()).toMatchObject({ directions: [{ id: "citrus" }, { id: "banana" }] });
+
   const taskBody = JSON.stringify({ workplace_id: workplace.id, goal: "按规范提交当前改动" });
   expect((await app.fetch(new Request("http://local/api/development/tasks", {
     method: "POST", headers: { "content-type": "application/json" }, body: taskBody,

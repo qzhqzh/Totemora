@@ -7,7 +7,9 @@ import { loadLocalConfig, type AgentProvider } from "@totemora/core";
 import { IntelligenceService } from "./intelligence-service";
 import { IntelligencePreferenceStore } from "./intelligence-preference-store";
 import { MemberStateStore } from "./member-state-store";
+import { ResearchDirectionStore } from "./research-direction-store";
 import { StateDatabase } from "./state-database";
+import { ProjectRadarRepository } from "./repositories/project-radar-repository";
 
 test("intelligence member collects allowlisted RSS and journals three Bark pushes", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "totemora-intelligence-"));
@@ -42,6 +44,56 @@ test("intelligence member collects allowlisted RSS and journals three Bark pushe
     operation_count: 1,
   });
   await rm(dataDir, { recursive: true, force: true });
+});
+
+test("RSS source descriptions survive brief persistence and radar evidence without using generated summaries", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-rss-radar-evidence-"));
+  try {
+    await new IntelligencePreferenceStore(dataDir).save({
+      interests: ["AI retrieval"], channels: { rss: true, ai_hot: false, research: false, x_trends: false, weibo_hot: false },
+    });
+    const config = await loadLocalConfig({ configDir: resolve(import.meta.dir, "../../../configs/example") });
+    const articleUrl = "https://example.com/retrieval?version=1&lang=en#original";
+    const emptyUrl = "https://example.com/headline-only";
+    const sourceText = "The release adds bounded retrieval evaluation & documents its limitations.";
+    const generated = "MODEL_ONLY_CLAIM: retrieval accuracy doubled without source evidence.";
+    let prompt = "";
+    const provider: AgentProvider = { async generate(input) {
+      prompt = input.messages.at(-1)?.content ?? "";
+      return { content: JSON.stringify({ title: "Generated briefing", summary: generated, items: [
+        { headline: "AI retrieval update", brief: generated, url: articleUrl },
+        { headline: "AI headline without source text", brief: generated, url: emptyUrl },
+      ] }) };
+    } };
+    const fakeFetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("technology")) return new Response(`<rss><channel>
+        <item><title>AI retrieval release</title><link>https://example.com/retrieval?version=1&amp;lang=en#original</link>
+        <description><![CDATA[<p>The release adds <b>bounded retrieval evaluation</b> &amp; documents its limitations.</p>]]></description></item>
+        <item><title>AI headline without source text</title><link>${emptyUrl}</link>
+        <description><![CDATA[<a href="https://example.com/comments">Comments</a>]]></description></item>
+      </channel></rss>`);
+      if (url.includes("known_exploited_vulnerabilities.json")) return Response.json({ vulnerabilities: [] });
+      if (url.includes("significant_day.geojson")) return Response.json({ features: [] });
+      return new Response("<rss><channel></channel></rss>");
+    }) as typeof fetch;
+    const service = new IntelligenceService(config, { get: () => provider }, new MemberStateStore(dataDir, config),
+      dataDir, resolve(import.meta.dir, "../../.."), fakeFetch);
+    const brief = await service.run({ defer_push: true });
+    expect(brief.sources.find((item) => item.link === articleUrl)?.summary).toBe(sourceText);
+    expect(brief.sources.find((item) => item.link === emptyUrl)?.summary).toBeUndefined();
+    expect(brief.summary).toBe(generated);
+    expect(prompt).toContain(sourceText);
+    const stored = (await service.list()).find((item) => item.id === brief.id)!;
+    expect(stored.sources).toEqual(brief.sources);
+    const candidates = await service.listCandidates();
+    const candidate = candidates.find((item) => item.url === articleUrl)!;
+    expect(candidate.scan_id).toBe(brief.id);
+    const evidence = new ProjectRadarRepository(dataDir).getEvidence(candidate);
+    expect(evidence).toEqual([{ title: "AI retrieval release", url: articleUrl, text: sourceText, source: "feeds.bbci.co.uk", published_at: undefined }]);
+    expect(JSON.stringify(evidence)).not.toContain("MODEL_ONLY_CLAIM");
+    expect(new ProjectRadarRepository(dataDir).getEvidence(candidates.find((item) => item.url === emptyUrl)!)).toEqual([]);
+  } finally { await rm(dataDir, { recursive: true, force: true }); }
 });
 
 test("intelligence member corrects an out-of-evidence URL once before pushing", async () => {
@@ -258,6 +310,100 @@ test("AI HOT uses fingerprint caching and preserves original plus aggregator att
   expect(userAgents.every((value) => value.startsWith("Totemora-Intelligence/"))).toBe(true);
   expect(prompt).toContain("https://aihot.virxact.com/items/item-1");
   expect(prompt).toContain("这是 AI 生成的聚合摘要");
+  await rm(dataDir, { recursive: true, force: true });
+});
+
+test("research radar turns official literature metadata into explicit evidence and story angles", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-intelligence-research-"));
+  await new IntelligencePreferenceStore(dataDir).save({
+    interests: ["柑橘", "香蕉"],
+    channels: { rss: false, ai_hot: false, research: true, x_trends: false, weibo_hot: false },
+    x_woeid: 1,
+  });
+  await new ResearchDirectionStore(dataDir).save({ directions: [
+    { id: "citrus", name: "柑橘", keywords: ["citrus", "Citrus sinensis"], enabled: true },
+    { id: "banana", name: "香蕉", keywords: ["banana", "Musa acuminata"], enabled: true },
+  ] });
+  const config = await loadLocalConfig({ configDir: resolve(import.meta.dir, "../../../configs/example") });
+  let prompt = "";
+  const articleUrl = "https://arxiv.org/abs/2608.12345v1";
+  const provider: AgentProvider = { async generate(input) {
+    prompt = input.messages.map((message) => message.content).join("\n");
+    return { content: JSON.stringify({
+      title: "科研前沿", summary: "发现一项值得继续核对的新研究。",
+      items: [{
+        evidence_id: 1, headline: "柑橘抗病研究出现新结果", brief: "论文报告了一个有界实验结果。",
+        url: articleUrl, event_key: "citrus-disease-resistance", importance: 0.8, interest: 0.9,
+        confidence: 0.7, novelty: 0.9, push_worthy: true, rationale: "方法与用户关注方向相关",
+        is_update: false, research_signal: "新近发布并提供了开放材料", story_angle: "比较抗病机制与田间适用边界",
+      }],
+    }) };
+  } };
+  const fakeFetch = (async (input: string | URL | Request) => {
+    const url = String(input);
+    if (url.includes("export.arxiv.org")) return new Response(`
+      <feed><entry><id>http://arxiv.org/abs/2608.12345v1</id><title>Citrus disease resistance</title>
+      <summary>A bounded citrus experiment with open data.</summary><published>2026-08-29T12:00:00Z</published>
+      <author><name>Researcher A</name></author><category term="q-bio.QM" /></entry></feed>`);
+    if (url.includes("europepmc")) return Response.json({ resultList: { result: [{
+      id: "123456", source: "MED", doi: "10.1000/life.paper", title: "Banana disease response",
+      firstPublicationDate: "2026-08-28", journalTitle: "Test Biology", isPreprint: "N",
+      abstractText: "A banana field study.",
+      pubTypeList: { publicationType: ["Journal Article"] },
+    }] } });
+    throw new Error(`Unexpected request: ${url}`);
+  }) as typeof fetch;
+  const service = new IntelligenceService(
+    config, { get: () => provider }, new MemberStateStore(dataDir, config), dataDir,
+    resolve(import.meta.dir, "../../.."), fakeFetch,
+  );
+
+  const brief = await service.run({ defer_push: true });
+  const candidate = (await service.listCandidates()).find((item) => item.url === articleUrl);
+  expect(brief.sources.map((item) => item.category)).toEqual(["research_preprint", "research_article"]);
+  expect(brief.sources[0]).toMatchObject({ research_direction_ids: ["citrus"], research_direction_names: ["柑橘"] });
+  expect(brief.items[0]).toMatchObject({ headline: "【科研前沿】柑橘抗病研究出现新结果" });
+  expect(brief.items[0]?.brief).toContain("研究方向：柑橘");
+  expect(brief.items[0]?.brief).toContain("热度信号：新近发布并提供了开放材料");
+  expect(brief.items[0]?.brief).toContain("可写切口：比较抗病机制与田间适用边界");
+  expect(brief.items[0]?.brief).toContain("预印本，尚未同行评审");
+  expect(candidate).toMatchObject({ event_type: "research_preprint", status: "queued" });
+  expect(prompt).toContain("research_signal 与 story_angle");
+  expect(prompt).toContain('"research_direction_names":["柑橘"]');
+  expect(service.sourceHealth()).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: "arxiv-research", status: "ready", last_item_count: 1 }),
+    expect.objectContaining({ id: "europe-pmc-research", status: "ready", last_item_count: 1 }),
+  ]));
+  await rm(dataDir, { recursive: true, force: true });
+});
+
+test("research radar does not collect or invoke a model before directions are configured", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-intelligence-research-empty-"));
+  await new IntelligencePreferenceStore(dataDir).save({
+    interests: ["科研进展"],
+    channels: { rss: false, ai_hot: false, research: true, x_trends: false, weibo_hot: false },
+    x_woeid: 1,
+  });
+  const config = await loadLocalConfig({ configDir: resolve(import.meta.dir, "../../../configs/example") });
+  let generations = 0;
+  let requests = 0;
+  const provider: AgentProvider = { async generate() {
+    generations += 1;
+    throw new Error("model should not run");
+  } };
+  const service = new IntelligenceService(
+    config, { get: () => provider }, new MemberStateStore(dataDir, config), dataDir,
+    resolve(import.meta.dir, "../../.."), (async (_input: string | URL | Request) => {
+      requests += 1;
+      throw new Error("fetch should not run");
+    }) as unknown as typeof fetch,
+  );
+
+  const brief = await service.run({ defer_push: true });
+  expect(brief).toMatchObject({ status: "completed", sources: [], items: [], queued_messages: 0 });
+  expect(brief.warnings).toContain("科研雷达尚未配置启用方向；本轮未采集科研来源");
+  expect(generations).toBe(0);
+  expect(requests).toBe(0);
   await rm(dataDir, { recursive: true, force: true });
 });
 

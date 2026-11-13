@@ -1,6 +1,7 @@
 import type { NotificationDispatchResult } from "./notification-dispatcher";
 import { forwardedDeliveryKey, type ForwardedEvent, type ForwardedEventInput, type ForwardedStatus } from "../domains/forwarded/forwarded-event";
 import { ForwardedRepository, type ForwardedSummary } from "../repositories/forwarded-repository";
+import { classifyForwardedSourceError, type ForwardedSourceError } from "../domains/forwarded/forwarded-retry-policy";
 
 export interface ForwardedRelaySource {
   readonly source_id: string;
@@ -11,7 +12,7 @@ export interface ForwardedRelayDispatcher {
   dispatch(input: { envelope: unknown; member_id: string }): Promise<NotificationDispatchResult>;
 }
 export interface ForwardedRelayRunReport {
-  state: "disabled" | "completed";
+  state: "disabled" | "completed" | "backoff";
   fetched: number;
   inserted: number;
   deduped: number;
@@ -19,6 +20,7 @@ export interface ForwardedRelayRunReport {
   failed: number;
   uncertain: number;
   pending_after_run: number;
+  next_poll_at?: string;
 }
 
 export class ForwardedRelayService {
@@ -37,40 +39,51 @@ export class ForwardedRelayService {
   }
 
   async status(): Promise<ForwardedSummary & { configured: boolean }> {
-    return { ...this.repository.summary(this.input.source.source_id), configured: await this.input.source.configured() };
+    let configured = false;
+    try { configured = await this.input.source.configured(); } catch { /* Failure details remain available in polling state. */ }
+    return { ...this.repository.summary(this.input.source.source_id), configured };
   }
 
   async runDue(now = new Date()): Promise<ForwardedRelayRunReport> {
-    if (!(await this.input.source.configured())) return emptyReport("disabled");
+    const timestamp = now.toISOString();
+    const polling = this.repository.pollingBackoff(this.input.source.source_id);
+    if (polling && Date.parse(polling.next_poll_at) > now.getTime()) {
+      const report = { ...emptyReport("backoff"), next_poll_at: polling.next_poll_at };
+      await this.drain(report, timestamp);
+      return report;
+    }
     const current = this.repository.sourceState(this.input.source.source_id);
     const nowEpoch = Math.floor(now.getTime() / 1_000);
     const since = current?.cursor_time ? Math.max(0, current.cursor_time - 1) : Math.max(0, nowEpoch - 600);
-    let events: ForwardedEventInput[];
-    let ingested: ReturnType<ForwardedRepository["ingestPoll"]>;
+    let failure: ForwardedSourceError | undefined;
+    const report = emptyReport("completed");
+    let stage: "configuration" | "unavailable" = "configuration";
     try {
-      events = await this.input.source.collect(since);
-      ingested = this.repository.ingestPoll({
+      if (!(await this.input.source.configured())) return emptyReport("disabled");
+      stage = "unavailable";
+      const events = await this.input.source.collect(since);
+      const ingested = this.repository.ingestPoll({
         source_id: this.input.source.source_id,
         events,
         cursor_time: current?.cursor_time ?? 0,
+        finished_at: timestamp,
       });
+      Object.assign(report, { fetched: events.length, inserted: ingested.inserted, deduped: ingested.deduped });
     } catch (error) {
-      this.repository.recordPollFailure(this.input.source.source_id, safeError(error));
-      throw error;
+      failure = classifyForwardedSourceError(error, stage);
+      this.repository.recordPollFailure(this.input.source.source_id, failure.message, timestamp, failure.kind);
     }
-
-    const report: ForwardedRelayRunReport = {
-      state: "completed", fetched: events.length, inserted: ingested.inserted,
-      deduped: ingested.deduped, delivered: 0, failed: 0, uncertain: 0, pending_after_run: 0,
-    };
-    for (const event of this.repository.pending(20)) {
-      await this.dispatch(event, report);
-    }
-    report.pending_after_run = this.repository.pending(100).length;
+    await this.drain(report, timestamp);
+    if (failure) throw failure;
     return report;
   }
 
-  private async dispatch(event: ForwardedEvent, report: ForwardedRelayRunReport): Promise<void> {
+  private async drain(report: ForwardedRelayRunReport, timestamp: string): Promise<void> {
+    for (const event of this.repository.pending(20, timestamp)) await this.dispatch(event, report, timestamp);
+    report.pending_after_run = this.repository.pending(100).length;
+  }
+
+  private async dispatch(event: ForwardedEvent, report: ForwardedRelayRunReport, timestamp: string): Promise<void> {
     try {
       const result = await this.input.dispatcher.dispatch({
         member_id: "forwarded.relay",
@@ -79,14 +92,17 @@ export class ForwardedRelayService {
       const status = result.status === "completed" ? "completed"
         : result.status === "uncertain" ? "uncertain" : "failed";
       this.repository.recordDelivery({
-        id: event.id, status, result,
+        id: event.id, status, result, now: timestamp,
         ...(status === "failed" ? { error: dispatchFailure(result) } : {}),
       });
       if (status === "completed") report.delivered += 1;
       else report[status] += 1;
-    } catch (error) {
-      this.repository.recordDelivery({ id: event.id, status: "failed", error: safeError(error) });
-      report.failed += 1;
+    } catch {
+      this.repository.recordDelivery({
+        id: event.id, status: "uncertain", now: timestamp,
+        error: "Forwarded notification delivery outcome is unknown; automatic replay is blocked",
+      });
+      report.uncertain += 1;
     }
   }
 }
@@ -118,10 +134,6 @@ function dispatchFailure(result: NotificationDispatchResult): string {
     .map((item) => `${item.channel}:${item.target_id}:${item.status}`).join(", ")
     || `Forwarded notification dispatch ${result.status}`;
 }
-function emptyReport(state: "disabled"): ForwardedRelayRunReport {
+function emptyReport(state: ForwardedRelayRunReport["state"]): ForwardedRelayRunReport {
   return { state, fetched: 0, inserted: 0, deduped: 0, delivered: 0, failed: 0, uncertain: 0, pending_after_run: 0 };
-}
-function safeError(error: unknown): string {
-  return (error instanceof Error ? error.message : String(error)).replace(/[\u0000-\u001F\u007F]/g, " ").trim().slice(0, 500)
-    || "Unknown forwarded relay error";
 }

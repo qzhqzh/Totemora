@@ -46,9 +46,9 @@ http://127.0.0.1:4310
 5. 在 Run 现场观察 planning、executing、reviewing 等阶段，并查看派工理由、报告、验收、Token 和 Trace。
 6. 专业任务使用对应入口：已有代码改动走 Git Flow 门禁，AI / 技术与财经情报走“双域情报台”，个人事项在“事项提醒”维护，协作写作与配图走“创作工坊”；不要把这些副作用隐含在通用 Run 文本里。
 
-第二台 Bark 手机不需要再手改 JSON：在“双域情报台”的“通知设备”中填写设备
-信息、选择 AI / 财经路由并发送测试。完整 device key 只写入服务器 Secret，保存后
-即时生效；详细步骤见 [内部 Bark 通知通道](internal-bark.md)。
+启用独立 Notifier 后，Bark 手机及其 AI / 财经路由在 Notifier 私有配置中维护；
+原“双域情报台 → 通知设备”只适用于未切换的旧 Gateway，切换后相关写入接口返回 `409`，
+不能用于修改 Notifier 目标。配置和切换步骤见[统一通知平台](notification-platform.md)。
 
 事项提醒按北京时间运行，重要度 `1 / 3 / 5` 决定截止前三天的提醒频率。Web 只对已登录 Operator 显示标题和生命周期；CLI、旧 memo 一致性快照与可重复导入步骤见[事项提醒](reminders.md)。
 
@@ -56,7 +56,7 @@ http://127.0.0.1:4310
 
 指定消息转发由 `forwarded.relay` 每分钟轮询唯一获准的上游 ntfy Topic；真实地址和凭据只从 owner-only Secret 读取，Web 只显示脱敏健康和投递案卷。配置、状态语义与旧 history 快照导入步骤见[指定 ntfy 消息转发](forwarded-relay.md)。
 
-听风来源健康在“双域情报台”单独展示。CISA、USGS、中新网与其他 RSS/官方来源各自降级，单源失败不会阻断整轮。内容工坊只有在 Operator 显式启用创作节律后才生成 scheduled 作品；通过审校的新作品按 `content` 领域通知，手动/Web 作品和切流前历史作品不会自动外发。通知项目完整归宿见[整合与退役报告](notice-consolidation.md)。
+听风来源健康在“双域情报台”单独展示。CISA、USGS、中新网与其他 RSS/官方来源各自降级，单源失败不会阻断整轮。科研雷达默认关闭，且只有在配置至少一个启用方向后才访问 arXiv 与 Europe PMC；方向接口和示例见[科研雷达方向接口](research-radar.md)。内容工坊只有在 Operator 显式启用创作节律后才生成 scheduled 作品；通过审校的新作品按 `content` 领域通知，手动/Web 作品和切流前历史作品不会自动外发。通知项目完整归宿见[整合与退役报告](notice-consolidation.md)。
 
 任务大厅会在提交前显示 Task Analyzer 判断的模式。通用 Run 当前执行 `inspect` 和绑定工作地的 `continue`；`change`、`operate` 和无工作地 `answer` 不会伪装成只读执行。受控变更、通知和内容生产由强类型专业服务承接。运行中的模型请求可以点击“取消 Run”中止。
 

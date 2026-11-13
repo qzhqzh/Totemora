@@ -171,11 +171,14 @@ export class IntelligenceCandidateStore {
             decision='服务在外发确认前中断；为避免重复打扰，不自动重推',
             claim_token=NULL, updated_at=?
         WHERE status='pushing' AND (claimed_at IS NULL OR claimed_at <= ?)
+          AND NOT EXISTS (SELECT 1 FROM project_radar_digest_items r WHERE r.candidate_id=intelligence_candidates.id)
           AND (? IS NULL OR domain = ?)
       `).run(now.toISOString(), staleCutoff, domain ?? null, domain ?? null);
       const inFlight = this.state.db.query(`
         SELECT 1 active FROM intelligence_candidates
-        WHERE status='pushing' AND (? IS NULL OR domain = ?) LIMIT 1
+        WHERE status='pushing' AND (? IS NULL OR domain = ?)
+          AND NOT EXISTS (SELECT 1 FROM project_radar_digest_items r WHERE r.candidate_id=intelligence_candidates.id)
+        LIMIT 1
       `).get(domain ?? null, domain ?? null) as { active: number } | null;
       if (inFlight) return undefined;
       const last = this.state.db.query(`
@@ -186,6 +189,7 @@ export class IntelligenceCandidateStore {
       const row = this.state.db.query(`
         SELECT * FROM intelligence_candidates
         WHERE status IN ('queued','retry_wait')
+          AND NOT EXISTS (SELECT 1 FROM project_radar_digest_items r WHERE r.candidate_id=intelligence_candidates.id)
           AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
           AND (? IS NULL OR domain = ?)
         ORDER BY total DESC, created_at ASC LIMIT 1
@@ -233,6 +237,10 @@ export class IntelligenceCandidateStore {
 
   async fail(id: string, error: string, now = new Date(), claimToken?: string): Promise<void> {
     this.finishFailure(id, claimToken, "failed", error, null, now);
+  }
+
+  async markDeliveryUnknown(id: string, claimToken: string | undefined, error: string, now = new Date()): Promise<void> {
+    this.finishFailure(id, claimToken, "delivery_unknown", error, null, now);
   }
 
   async releaseBlocked(now = new Date()): Promise<number> {

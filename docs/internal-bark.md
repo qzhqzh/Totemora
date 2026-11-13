@@ -1,6 +1,8 @@
 # 通知传输服务：Bark 与 ntfy
 
-Totemora 默认通过本机 `BarkNotificationService` 调用自建 Bark 的 V2 `POST /push`。
+以下 Gateway Bark 设备管理操作是**旧部署的迁移参考**：启用独立 Notifier 后，业务通知改由 Notifier 的私有配置目标发送，Gateway 的 `/api/notifications/bark` 管理接口返回 `409`；不要在旧 Web 页面添加设备并误以为它会被 Notifier 使用。新配置、镜像与切换见[统一通知平台](notification-platform.md)。Bark 与 ntfy 传输容器本身仍可继续使用。
+
+旧 Gateway 通过本机 `BarkNotificationService` 调用自建 Bark 的 V2 `POST /push`。
 device key 与 Basic Auth 不进入仓库、成员提示词或动作证据。
 
 同一份 `compose.bark.yaml` 也托管兼容 iOS 订阅的 ntfy 传输服务。文件名为历史兼容入口，
@@ -34,7 +36,7 @@ cache 位于 `.totemora/ntfy-data/`，不进入 Git。旧项目退役时只迁�
 ## 2. 让 Bark App 注册设备
 
 在 Bark App 中添加管理员确认、可从手机访问的 HTTPS 服务地址。注册成功后，优先
-通过 Web 的“双域情报台 → 通知设备”接入：
+在尚未切换 Notifier 的旧 Gateway 中，可通过 Web 的“双域情报台 → 通知设备”接入：
 
 1. 打开 Totemora Web，在页头输入 `.totemora/operator-token` 的内容。
 2. 在“通知设备”填写稳定的设备 ID、名称和 Bark 返回的 device key。

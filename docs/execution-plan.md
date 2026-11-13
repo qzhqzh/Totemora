@@ -1,6 +1,15 @@
 # Totemora 推进计划
 
-本计划描述当前代码之后的交付顺序。历史节点的具体回归步骤保留在 `v0.x-*-test-guide.md`；产品定位以 [ADR-0001](adr/0001-product-positioning-and-delivery-order.md) 为准，当前持久内核以 [ADR-0011](adr/0011-durable-specialist-service-kernel.md) 为准。
+本计划描述当前代码之后的交付顺序。历史节点的具体回归步骤保留在 `v0.x-*-test-guide.md`；产品定位以 [ADR-0023](adr/0023-specialist-assistant-and-communication.md) 为准，当前持久内核以 [ADR-0011](adr/0011-durable-specialist-service-kernel.md) 为准。
+
+## 当前交付重点（2026-10-25）
+
+1. 梳理现有能力与未提交改动，修复优惠/转发来源失败后的重复轮询，明确上游受阻与本地任务完成的区别。
+2. 跑通项目情报、可核实行动建议、采纳反馈和未提交交接草稿；无 Jev 密钥时使用显式规则匹配，模型信心保持空值。
+3. 统一多渠道消息传递与受控回复。Notifier 提供投递账本，Web 与 Telegram 共用行动决定；每种通道的实际配置和交付证据分别验收。
+4. 围绕少量项目观察两周的采纳、遗漏、重复和成本；真实模型收益对比仍待授权执行，不把已有自动化测试当作有用性证据。
+
+功能库存与运行边界见[服务重启清单](service-relaunch.md)，使用方法见[项目雷达](project-radar.md)。以下 E1–E5 保留为内核能力及验证台账，不代表继续并行扩张所有产品面。
 
 ## 已形成的骨架
 

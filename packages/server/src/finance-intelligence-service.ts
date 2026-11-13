@@ -15,9 +15,11 @@ import {
   type IntelligenceCandidate,
 } from "./intelligence-candidate-store";
 import { IntelligenceDispatcher } from "./intelligence-dispatcher";
+import type { NotifierClient } from "@totemora/notifier/client";
 import { MemberStateStore } from "./member-state-store";
 import { groundEvidenceUrls, optionalEvidenceId } from "./model-evidence-grounding";
 import { StateDatabase } from "./state-database";
+import { IntelligenceBriefRepository } from "./repositories/intelligence-brief-repository";
 import { ToolAssetRegistry } from "./tool-asset-registry";
 
 interface FinanceItem {
@@ -80,11 +82,12 @@ export class FinanceIntelligenceService {
     private readonly dataDir: string,
     projectRoot: string,
     private readonly fetchImpl: typeof fetch = fetch,
+    notifier?: Pick<NotifierClient, "dispatch" | "listTargets">,
   ) {
     this.preferences = new FinancePreferenceStore(dataDir);
     this.sources = new FinanceSourceRegistry(dataDir, fetchImpl);
     this.candidates = new IntelligenceCandidateStore(dataDir);
-    this.dispatcher = new IntelligenceDispatcher(dataDir, memberState, fetchImpl);
+    this.dispatcher = new IntelligenceDispatcher(dataDir, memberState, fetchImpl, notifier);
     this.marketSnapshots = new FinanceMarketSnapshotService(dataDir, fetchImpl);
     this.assets = new ToolAssetRegistry(projectRoot, dataDir);
     this.state = StateDatabase.open(dataDir);
@@ -293,7 +296,8 @@ export class FinanceIntelligenceService {
     return { scan, pushed, push_error: pushError };
   }
 
-  async list(): Promise<FinanceIntelligenceBrief[]> {
+  async list(limit?: number): Promise<FinanceIntelligenceBrief[]> {
+    if (limit !== undefined) return new IntelligenceBriefRepository(this.state).listLatest<FinanceIntelligenceBrief>("finance", limit);
     return this.state.listRecords<FinanceIntelligenceBrief>("finance_intelligence_briefs")
       .sort((left, right) => right.created_at.localeCompare(left.created_at));
   }

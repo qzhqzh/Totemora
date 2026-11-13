@@ -12,7 +12,7 @@ test("app renders, opens the operator gate, and navigates to Skills", async ({ p
   await expect(page.getByRole("heading", { name: "部落证据台" })).toBeVisible();
   await expect(page.locator("#tribe-status")).toContainText("0.12.0");
 
-  await page.getByRole("button", { name: /操作员登录/ }).click();
+  await page.locator("#operator-login-open").click();
   await expect(page.getByRole("dialog", { name: "操作员登录" })).toBeVisible();
   await expect(page.locator("#operator-login-status")).toContainText("当前浏览器标签页");
   await page.getByRole("button", { name: "关闭登录窗口" }).click();
@@ -28,7 +28,7 @@ test("app renders, opens the operator gate, and navigates to Skills", async ({ p
 
 test("operator can explicitly remember this device and revoke the stored token", async ({ page, context }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: /操作员登录/ }).click();
+  await page.locator("#operator-login-open").click();
   await page.locator("#operator-token").fill("totemora-e2e-operator-token");
   await page.getByRole("checkbox", { name: /记住此设备/ }).check();
   await page.getByRole("button", { name: "验证并登录" }).click();
@@ -59,7 +59,7 @@ test("operator can inspect the governed forwarded relay without source secrets",
   page.on("pageerror", (error) => runtimeErrors.push(error.message));
 
   await page.goto("/#forwarded");
-  await page.getByRole("button", { name: /操作员登录/ }).click();
+  await page.locator("#operator-login-open").click();
   await page.locator("#operator-token").fill("totemora-e2e-operator-token");
   await page.getByRole("button", { name: "验证并登录" }).click();
 
@@ -79,7 +79,7 @@ test("operator deals dossier requests only the latest five records", async ({ pa
   page.on("pageerror", (error) => runtimeErrors.push(error.message));
 
   await page.goto("/#deals");
-  await page.getByRole("button", { name: /操作员登录/ }).click();
+  await page.locator("#operator-login-open").click();
   await page.locator("#operator-token").fill("totemora-e2e-operator-token");
   const initialRequest = page.waitForRequest((request) => {
     const url = new URL(request.url());

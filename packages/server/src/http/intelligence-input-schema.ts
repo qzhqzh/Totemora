@@ -1,6 +1,12 @@
 import type { FinanceBriefingType } from "../finance-market-snapshot-service";
 import type { FinanceMarket, FinanceWatchItem } from "../finance-preference-store";
 import type { TelegramUpdate } from "../telegram-bot-service";
+import {
+  MAX_RESEARCH_DIRECTIONS,
+  MAX_RESEARCH_KEYWORD_CHARACTERS,
+  MAX_RESEARCH_KEYWORDS_PER_DIRECTION,
+  type ResearchDirection,
+} from "../research-direction-store";
 import { HttpError } from "./http-boundary";
 import {
   inputObject,
@@ -31,7 +37,7 @@ export interface ManualIntelligenceRunInput {
 
 export interface IntelligencePreferencesInput {
   interests?: string[];
-  channels?: { rss?: boolean; ai_hot?: boolean; x_trends?: boolean; weibo_hot?: boolean };
+  channels?: { rss?: boolean; ai_hot?: boolean; research?: boolean; x_trends?: boolean; weibo_hot?: boolean };
   x_woeid?: number;
   scan_interval_minutes?: number;
   push_interval_seconds?: number;
@@ -58,6 +64,10 @@ export interface FinancePreferencesInput {
   };
 }
 
+export interface ResearchDirectionsInput {
+  directions: ResearchDirection[];
+}
+
 export function intelligenceTaskInput(value: unknown): IntelligenceTaskRouteInput {
   return baseTaskInput(value, false);
 }
@@ -82,6 +92,7 @@ export function intelligencePreferencesInput(value: unknown): IntelligencePrefer
     channels: channels ? {
       rss: optionalBoolean(channels.rss, "channels.rss"),
       ai_hot: optionalBoolean(channels.ai_hot, "channels.ai_hot"),
+      research: optionalBoolean(channels.research, "channels.research"),
       x_trends: optionalBoolean(channels.x_trends, "channels.x_trends"),
       weibo_hot: optionalBoolean(channels.weibo_hot, "channels.weibo_hot"),
     } : undefined,
@@ -117,6 +128,41 @@ export function financePreferencesInput(value: unknown): FinancePreferencesInput
     novelty_history_hours: optionalNumber(input.novelty_history_hours, "novelty_history_hours", { minimum: 24, maximum: 720, integer: true }),
     morning_briefings: morningBriefings(input.morning_briefings),
   };
+}
+
+export function researchDirectionsInput(value: unknown): ResearchDirectionsInput {
+  const input = inputObject(value);
+  if (!Array.isArray(input.directions) || input.directions.length > MAX_RESEARCH_DIRECTIONS) {
+    throw new HttpError(400, `directions must contain at most ${MAX_RESEARCH_DIRECTIONS} entries`);
+  }
+  const ids = new Set<string>();
+  let keywordCharacters = 0;
+  const directions = input.directions.map((raw, index): ResearchDirection => {
+    const direction = inputObject(raw, `directions[${index}]`);
+    const id = requiredString(direction.id, `directions[${index}].id`, 64).toLowerCase();
+    if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(id)) {
+      throw new HttpError(400, `directions[${index}].id must use lowercase letters, numbers, and hyphens`);
+    }
+    if (ids.has(id)) throw new HttpError(400, `direction id is duplicated: ${id}`);
+    ids.add(id);
+    const keywords = optionalStringArray(
+      direction.keywords, `directions[${index}].keywords`, MAX_RESEARCH_KEYWORDS_PER_DIRECTION, 100,
+    );
+    if (!keywords?.length) {
+      throw new HttpError(400, `directions[${index}].keywords must contain at least one keyword`);
+    }
+    keywordCharacters += keywords.reduce((total, keyword) => total + keyword.length, 0);
+    return {
+      id,
+      name: requiredString(direction.name, `directions[${index}].name`, 80),
+      keywords,
+      enabled: optionalBoolean(direction.enabled, `directions[${index}].enabled`) !== false,
+    };
+  });
+  if (keywordCharacters > MAX_RESEARCH_KEYWORD_CHARACTERS) {
+    throw new HttpError(400, `direction keywords must contain at most ${MAX_RESEARCH_KEYWORD_CHARACTERS} characters in total`);
+  }
+  return { directions };
 }
 
 export function telegramUpdateInput(value: unknown): TelegramUpdate {

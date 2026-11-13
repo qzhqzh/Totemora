@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -68,4 +68,37 @@ test("evidence overview separates operations, outcomes, system failures and cand
     strategies: [{ id: "tribe", structural_pass_rate: 0.8, pricing_gap_cases: 2 }],
   });
   await rm(dataDir, { recursive: true, force: true });
+});
+
+test("candidate funnels aggregate complete source history without loading full brief records", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-source-gate-overview-"));
+  const config = await loadLocalConfig({ configDir: resolve(import.meta.dir, "../../../configs/example") });
+  const state = StateDatabase.open(dataDir);
+  const observatory = new EvidenceObservatory(dataDir, config);
+  const historical = "2020-01-01T00:00:00.000Z";
+  state.putRecord("intelligence_briefs", "large-old-scan", {
+    sources: [{ summary: "historical evidence ".repeat(60_000) }],
+    source_gate: { collected: 4, out_of_scope: 0, history_suppressed: 4, model_evaluated: 0 },
+  }, historical, historical);
+  state.putRecord("intelligence_briefs", "current-scan", {
+    source_gate: { collected: 8, out_of_scope: 3, history_suppressed: 2, model_evaluated: 3 },
+  });
+  state.putRecord("intelligence_briefs", "legacy-without-gate", {});
+  state.putRecord("finance_intelligence_briefs", "finance-scan", {
+    source_gate: { collected: 5, out_of_scope: 1, history_suppressed: 1, model_evaluated: 3, capacity_suppressed: 99 },
+  });
+  state.putRecord("other_briefs", "unrelated-scan", { source_gate: { collected: 1000, history_suppressed: 1000, model_evaluated: 0 } });
+  const listRecords = spyOn(state, "listRecords").mockImplementation(() => { throw new Error("full brief loading is forbidden"); });
+  try {
+    const overview = await observatory.overview();
+    expect(overview.candidate_funnels.find((item) => item.domain === "ai")).toMatchObject({
+      scans: 3, sources_collected: 12, sources_out_of_scope: 3, sources_history_suppressed: 6,
+      sources_sent_to_model: 3, model_calls_avoided: 1, candidates_evaluated: 0,
+    });
+    expect(overview.candidate_funnels.find((item) => item.domain === "finance")).toMatchObject({
+      scans: 1, sources_collected: 5, sources_out_of_scope: 1, sources_history_suppressed: 1,
+      sources_sent_to_model: 3, model_calls_avoided: 0, candidates_evaluated: 0,
+    });
+    expect(listRecords).not.toHaveBeenCalled();
+  } finally { listRecords.mockRestore(); await rm(dataDir, { recursive: true, force: true }); }
 });

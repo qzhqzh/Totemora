@@ -1,4 +1,6 @@
 import { ActionJournal } from "./action-journal";
+import type { NotifierClient } from "@totemora/notifier/client";
+import { StateDatabase } from "./state-database";
 import { BarkDeliveryError, BarkNotificationService } from "./bark-notification-service";
 import {
   IntelligenceCandidateStore,
@@ -19,6 +21,8 @@ class IntelligenceDispatchError extends Error {
   }
 }
 
+class NotificationOutcomeUnknownError extends Error {}
+
 export class IntelligenceDispatcher {
   private readonly candidates: IntelligenceCandidateStore;
   private readonly bark: BarkNotificationService;
@@ -30,6 +34,8 @@ export class IntelligenceDispatcher {
     private readonly dataDir: string,
     private readonly memberState: MemberStateStore,
     private readonly fetchImpl: typeof fetch = fetch,
+    private readonly notifier?: Pick<NotifierClient, "dispatch" | "listTargets">,
+    private readonly deferCandidatePush: () => boolean = () => false,
   ) {
     this.candidates = new IntelligenceCandidateStore(dataDir);
     this.bark = new BarkNotificationService(dataDir, fetchImpl);
@@ -39,14 +45,26 @@ export class IntelligenceDispatcher {
   }
 
   async notificationConfigured(domain: IntelligenceDomain): Promise<boolean> {
+    if (this.notifier) return (await this.notifier.listTargets()).some((target) => target.enabled && target.domains.includes(domain));
     return (await this.bark.targetIds(domain)).length > 0 || (await this.telegram.configured());
   }
 
   async barkStatus(domain: IntelligenceDomain, checkHealth = false) {
+    if (this.notifier) {
+      const configured = (await this.notifier.listTargets()).some((target) => target.enabled
+        && target.channel === "bark" && target.domains.includes(domain));
+      return { configured, channel_status: configured ? "ready" as const : "unconfigured" as const,
+        consecutive_failures: 0, targets: [], ...(checkHealth ? { healthy: undefined } : {}) };
+    }
     return this.bark.status(checkHealth, domain);
   }
 
   async telegramStatus(checkHealth = false) {
+    if (this.notifier) {
+      const targets = (await this.notifier.listTargets()).filter((target) => target.enabled && target.channel === "telegram");
+      return { configured: targets.length > 0, chat_count: targets.length, webhook_secret_configured: false,
+        channel_status: targets.length ? "ready" : "unconfigured", consecutive_failures: 0 };
+    }
     return this.telegram.status(checkHealth);
   }
 
@@ -55,13 +73,15 @@ export class IntelligenceDispatcher {
     minimumIntervalMs: number,
     serviceId: SpecialistServiceDefinition["id"],
   ): Promise<IntelligenceCandidate | undefined> {
+    if (domain === "ai" && this.deferCandidatePush()) return undefined;
     if (!(await this.notificationConfigured(domain))) return undefined;
     await this.candidates.releaseBlocked();
     const candidate = await this.candidates.claimNext(minimumIntervalMs, new Date(), domain);
     if (!candidate) return undefined;
     try {
-      const failures = await this.pushBark(candidate, domain);
-      failures.push(...await settleDeliveries((await this.telegram.chatIds()).map((chatId) => async () => {
+      const failures = this.notifier ? await this.dispatchViaNotifier(domain, candidate.member_id, `candidate:${candidate.id}`,
+        candidate.headline, candidate.brief, candidate.url, this.callbackUrl(candidate)) : await this.pushBark(candidate, domain);
+      if (!this.notifier) failures.push(...await settleDeliveries((await this.telegram.chatIds()).map((chatId) => async () => {
         await this.journal.executeEffectOnce({
           idempotency_key: `candidate:${candidate.id}:telegram:${chatId}`, asset_id: "telegram-bot",
           member_id: candidate.member_id, action: "push_notification",
@@ -81,11 +101,13 @@ export class IntelligenceDispatcher {
         summary: `已配置通知目标均接受 ${domain} 候选 ${candidate.id}；这不等同于用户已阅读`,
       });
       return { ...candidate, status: "pushed", pushed_at: new Date().toISOString() };
-    } catch (error) {
+      } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const deliveryError = deliveryMetadata(error);
       const delays = [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000];
-      if (deliveryError?.retryAfter && deliveryError.retryAfter.getTime() > Date.now()) {
+      if (error instanceof NotificationOutcomeUnknownError) {
+        await this.candidates.markDeliveryUnknown(candidate.id, candidate.claim_token, message);
+      } else if (deliveryError?.retryAfter && deliveryError.retryAfter.getTime() > Date.now()) {
         await this.candidates.block(candidate.id, candidate.claim_token, message, deliveryError.retryAfter);
       } else if (deliveryError?.retryable && candidate.attempt_count < delays.length) {
         const retryAt = new Date(Date.now() + delays[Math.max(0, candidate.attempt_count - 1)]!);
@@ -108,6 +130,12 @@ export class IntelligenceDispatcher {
     memberId: string,
     message: { title: string; body: string; url?: string; id?: string },
   ): Promise<void> {
+    if (this.notifier) {
+      const failures = await this.dispatchViaNotifier(domain, memberId, `${workflowId}:${domain}:${index}`,
+        message.title, message.body, message.url, message.url);
+      if (failures.length) throw aggregateFailures(failures);
+      return;
+    }
     const failures = await settleDeliveries((await this.bark.targetIds(domain)).map((targetId) => async () => {
       await this.journal.executeEffectOnce({
         idempotency_key: `${workflowId}:bark:${domain}:${targetId}:${index}`, asset_id: "internal-bark",
@@ -134,6 +162,24 @@ export class IntelligenceDispatcher {
     if (failures.length) throw aggregateFailures(failures);
   }
 
+  private async dispatchViaNotifier(domain: IntelligenceDomain, memberId: string, key: string,
+    title: string, body: string, sourceUrl?: string, clickUrl?: string): Promise<Error[]> {
+    const safeSource = sourceUrl && isSafeExternalUrl(sourceUrl) ? sourceUrl : undefined;
+    const safeClick = clickUrl && isSafeExternalUrl(clickUrl) ? clickUrl : undefined;
+    const receipt = await this.notifier!.dispatch({ member_id: memberId, envelope: {
+      schema_version: 1, id: key, idempotency_key: key,
+      domain, kind: "immediate", title, body, priority: 3, tags: [domain],
+      source: { source_id: key, ...(safeSource ? { url: safeSource } : {}) },
+      ...(safeClick ? { click_url: safeClick } : {}),
+    } });
+    if (receipt.status === "uncertain") throw new NotificationOutcomeUnknownError("Notifier delivery outcome is uncertain; manual reconciliation required");
+    if (receipt.status === "completed") return [];
+    return [Object.assign(new Error(`Notifier delivery ${receipt.status}; ${receipt.deliveries
+      .filter((delivery) => delivery.status !== "completed")
+      .map((delivery) => `${delivery.channel}:${delivery.target_id}:${delivery.status}`).join(", ")}`),
+      { retryable: receipt.status !== "unconfigured" })];
+  }
+
   private async pushBark(candidate: IntelligenceCandidate, domain: IntelligenceDomain): Promise<Error[]> {
     return settleDeliveries((await this.bark.targetIds(domain)).map((targetId) => async () => {
       await this.journal.executeEffectOnce({
@@ -153,9 +199,15 @@ export class IntelligenceDispatcher {
   private callbackUrl(candidate: IntelligenceCandidate): string | undefined {
     if (!isSafeExternalUrl(candidate.url)) return undefined;
     const base = process.env.TOTEMORA_PUBLIC_BASE_URL?.trim();
-    if (!base) return candidate.url;
+    if (!base || !isSafeExternalUrl(base)) return candidate.url;
+    const state = StateDatabase.open(this.dataDir);
+    const previous = state.db.query("SELECT payload_json FROM records WHERE namespace=? AND id=?")
+      .get("notification:callback", candidate.id) as { payload_json: string } | null;
+    if (previous) return JSON.parse(previous.payload_json) as string;
     const token = this.candidates.createOpenCallback(candidate.id, candidate.url);
-    return new URL(`/r/${encodeURIComponent(token)}`, base).toString();
+    const url = new URL(`/r/${encodeURIComponent(token)}`, base).toString();
+    state.putRecord("notification:callback", candidate.id, url);
+    return url;
   }
 }
 
@@ -177,6 +229,9 @@ function deliveryMetadata(error: unknown): { retryable: boolean; retryAfter?: Da
   if (error instanceof IntelligenceDispatchError) return error;
   if (error instanceof BarkDeliveryError) return { retryable: error.retryable, retryAfter: error.retryAfter };
   if (error instanceof TelegramDeliveryError) return { retryable: error.retryable, retryAfter: error.retryAfter };
+  if (error instanceof Error && "retryable" in error && typeof error.retryable === "boolean") {
+    return { retryable: error.retryable };
+  }
   return undefined;
 }
 

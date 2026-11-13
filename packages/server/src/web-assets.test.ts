@@ -15,6 +15,8 @@ describe("resolveWebAsset", () => {
     expect(resolveWebAsset(root, "/features/codex-scheduled-subscriptions.js"))
       .toBe(resolve(root, "features/codex-scheduled-subscriptions.js"));
     expect(resolveWebAsset(root, "/features/skills.js")).toBe(resolve(root, "features/skills.js"));
+    expect(resolveWebAsset(root, "/features/project-radar.js")).toBe(resolve(root, "features/project-radar.js"));
+    expect(resolveWebAsset(root, "/features/project-radar-actions.js")).toBe(resolve(root, "features/project-radar-actions.js"));
     expect(resolveWebAsset(root, "/shared/dom.js")).toBe(resolve(root, "shared/dom.js"));
   });
 

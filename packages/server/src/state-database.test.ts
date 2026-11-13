@@ -70,6 +70,10 @@ test("state migrations register every version and remain idempotent", () => {
       { version: 13, name: "durable deals collection and delivery ledger" },
       { version: 14, name: "governed forwarded ntfy relay" },
       { version: 15, name: "legacy intelligence delivery evidence" },
+      { version: 16, name: "authenticated external notification inbox" },
+      { version: 17, name: "project intelligence radar evaluation and budgets" },
+      { version: 18, name: "project radar digest snapshots and delivery leases" },
+      { version: 19, name: "project radar action suggestions and idempotent decisions" },
     ]);
   } finally {
     db.close();

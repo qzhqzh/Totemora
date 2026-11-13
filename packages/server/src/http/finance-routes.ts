@@ -1,6 +1,7 @@
 import type { FinanceIntelligenceService } from "../finance-intelligence-service";
 import type { FinancePreferenceStore } from "../finance-preference-store";
 import { HttpError, json, readJson, readOptionalJson } from "./http-boundary";
+import { intelligenceBriefLimit } from "./intelligence-brief-query";
 import {
   financePreferencesInput,
   financeTaskInput,
@@ -29,7 +30,8 @@ export async function handleFinanceRoutes(
   if (!url.pathname.startsWith("/api/finance")) return undefined;
 
   if (request.method === "GET" && url.pathname === "/api/finance") {
-    return json({ briefs: await (await dependencies.getFinance()).list() });
+    const limit = intelligenceBriefLimit(url);
+    return json({ briefs: await (await dependencies.getFinance()).list(limit) });
   }
   if (request.method === "GET" && url.pathname === "/api/finance/candidates") {
     const finance = await dependencies.getFinance();

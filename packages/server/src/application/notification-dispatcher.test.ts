@@ -39,6 +39,24 @@ test("dispatches once per target and replays completed receipts", async () => {
   await rm(dataDir, { recursive: true, force: true });
 });
 
+test("an internal allowed-target set restricts recipients without exposing target IDs in the envelope", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "totemora-notification-scoped-"));
+  const delivered: string[] = [];
+  try {
+    const dispatcher = new NotificationDispatcher(dataDir, policy(), [
+      adapter("bark", async () => { delivered.push("phone"); return "Bark accepted"; }),
+      adapter("telegram", async () => { delivered.push("group"); return "Telegram accepted"; }),
+      adapter("ntfy", async () => { delivered.push("hotspot"); return "ntfy accepted"; }),
+    ]);
+    expect((await dispatcher.dispatch({ envelope, member_id: "notification-ingress", allowed_targets: ["bark:phone"] }))
+      .deliveries.map((item) => item.target_id)).toEqual(["phone"]);
+    expect(delivered).toEqual(["phone"]);
+    expect(JSON.stringify(envelope)).not.toContain("phone");
+    await expect(dispatcher.dispatch({ envelope, member_id: "notification-ingress",
+      allowed_targets: ["bark:../../secret"] })).rejects.toThrow("allowed_targets");
+  } finally { await rm(dataDir, { recursive: true, force: true }); }
+});
+
 test("retries only a target with a known failure", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "totemora-notification-partial-"));
   let barkCalls = 0;

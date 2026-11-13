@@ -15,6 +15,10 @@ import { applyReminderDomainMigration } from "./012-reminder-domain";
 import { applyDealsDomainMigration } from "./013-deals-domain";
 import { applyForwardedRelayMigration } from "./014-forwarded-relay";
 import { applyLegacyIntelligenceEvidenceMigration } from "./015-legacy-intelligence-evidence";
+import { applyNotificationIngressMigration } from "./016-notification-ingress";
+import { applyProjectRadarMigration } from "./017-project-radar";
+import { applyProjectRadarDigestsMigration } from "./018-project-radar-digests";
+import { applyProjectRadarActionsMigration } from "./019-project-radar-actions";
 import type { StateMigration } from "./migration";
 
 const migrations: readonly StateMigration[] = [
@@ -33,6 +37,10 @@ const migrations: readonly StateMigration[] = [
   applyDealsDomainMigration,
   applyForwardedRelayMigration,
   applyLegacyIntelligenceEvidenceMigration,
+  applyNotificationIngressMigration,
+  applyProjectRadarMigration,
+  applyProjectRadarDigestsMigration,
+  applyProjectRadarActionsMigration,
 ];
 
 export function runStateMigrations(db: Database): void {

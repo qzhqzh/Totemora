@@ -8,6 +8,10 @@ import {
   type ForwardedStatus,
 } from "../domains/forwarded/forwarded-event";
 import { StateDatabase } from "../state-database";
+import {
+  classifyForwardedSourceError, FORWARDED_SOURCE_FAILURE_KINDS, forwardedPollingBackoff,
+  type ForwardedPollingBackoff, type ForwardedSourceFailureKind,
+} from "../domains/forwarded/forwarded-retry-policy";
 
 interface EventRow {
   id: string; source_id: string; source_message_id: string; content_hash: string; occurred_at: string;
@@ -29,9 +33,11 @@ export interface LegacyForwardedImportBundle {
 export interface ForwardedSummary {
   counts: Record<ForwardedStatus, number>;
   source?: ForwardedSourceState;
+  polling?: ForwardedPollingBackoff;
 }
 
 const IMPORT_NAMESPACE = "legacy:notice-ntfy:forwarded";
+const POLLING_NAMESPACE = "forwarded:polling-backoff";
 const TERMINAL = new Set<ForwardedStatus>(["completed", "uncertain", "deduped"]);
 
 export class ForwardedRepository {
@@ -48,18 +54,40 @@ export class ForwardedRepository {
     return (rows as EventRow[]).map(eventFromRow);
   }
 
-  pending(limit = 20): ForwardedEvent[] {
+  pending(limit = 20, dueAt?: string): ForwardedEvent[] {
     boundedInteger(limit, "Forwarded pending limit", 1, 100);
+    const due = dueAt === undefined ? null : validIso(dueAt, "Forwarded delivery due timestamp");
     return (this.state.db.query(`
       SELECT * FROM forwarded_events WHERE status IN ('pending','failed')
+      AND (? IS NULL OR status='pending' OR
+        julianday(updated_at) + MIN(21600, 300 * (1 << MIN(MAX(attempts-1,0),10))) / 86400.0 <= julianday(?))
       ORDER BY occurred_at,id LIMIT ?
-    `).all(limit) as EventRow[]).map(eventFromRow);
+    `).all(due, due, limit) as EventRow[]).map(eventFromRow);
   }
 
   sourceState(sourceId: string): ForwardedSourceState | undefined {
     const row = this.state.db.query("SELECT * FROM forwarded_source_state WHERE source_id=?")
       .get(stableKey(sourceId, "Forwarded source id", 64)) as StateRow | null;
     return row ? stateFromRow(row) : undefined;
+  }
+
+  pollingBackoff(sourceId: string): ForwardedPollingBackoff | undefined {
+    const id = stableKey(sourceId, "Forwarded source id", 64);
+    const row = this.state.db.query("SELECT payload_json FROM records WHERE namespace=? AND id=?")
+      .get(POLLING_NAMESPACE, id) as { payload_json: string } | null;
+    if (row) {
+      const value = JSON.parse(row.payload_json) as ForwardedPollingBackoff;
+      if (!Number.isSafeInteger(value.consecutive_failures) || value.consecutive_failures < 1
+        || !FORWARDED_SOURCE_FAILURE_KINDS.includes(value.failure_kind)
+        || !Number.isFinite(Date.parse(value.last_failure_at)) || !Number.isFinite(Date.parse(value.next_poll_at))) {
+        throw new Error("Forwarded polling backoff state is invalid");
+      }
+      return value;
+    }
+    const source = this.sourceState(id);
+    return source?.last_error
+      ? forwardedPollingBackoff(undefined, classifyForwardedSourceError(new Error(source.last_error)).kind, source.updated_at)
+      : undefined;
   }
 
   ingestPoll(input: {
@@ -105,18 +133,26 @@ export class ForwardedRepository {
           last_success_at=excluded.last_success_at,last_error=NULL,
           last_added=excluded.last_added,updated_at=excluded.updated_at
       `).run(sourceId, cursor, finished, inserted, finished);
+      this.state.db.query("DELETE FROM records WHERE namespace=? AND id=?").run(POLLING_NAMESPACE, sourceId);
     })();
     return { inserted, pending, deduped, cursor_time: cursor };
   }
 
-  recordPollFailure(sourceId: string, error: string, now = new Date().toISOString()): ForwardedSourceState {
+  recordPollFailure(
+    sourceId: string, error: string, now = new Date().toISOString(), kind: ForwardedSourceFailureKind = "unavailable",
+  ): ForwardedSourceState {
     const id = stableKey(sourceId, "Forwarded source id", 64);
     const timestamp = validIso(now, "Forwarded poll failure timestamp");
-    this.state.db.query(`
-      INSERT INTO forwarded_source_state(source_id,cursor_time,last_error,last_added,updated_at)
-      VALUES(?,0,?,0,?)
-      ON CONFLICT(source_id) DO UPDATE SET last_error=excluded.last_error,last_added=0,updated_at=excluded.updated_at
-    `).run(id, safeError(error), timestamp);
+    if (!FORWARDED_SOURCE_FAILURE_KINDS.includes(kind)) throw new Error("Forwarded failure kind is invalid");
+    this.state.db.transaction(() => {
+      const backoff = forwardedPollingBackoff(this.pollingBackoff(id), kind, timestamp);
+      this.state.db.query(`
+        INSERT INTO forwarded_source_state(source_id,cursor_time,last_error,last_added,updated_at)
+        VALUES(?,0,?,0,?)
+        ON CONFLICT(source_id) DO UPDATE SET last_error=excluded.last_error,last_added=0,updated_at=excluded.updated_at
+      `).run(id, safeError(error), timestamp);
+      this.state.putRecord(POLLING_NAMESPACE, id, backoff, undefined, timestamp);
+    })();
     return this.sourceState(id)!;
   }
 
@@ -146,7 +182,8 @@ export class ForwardedRepository {
     }>;
     for (const row of rows) counts[row.status] = row.count;
     const source = this.sourceState(sourceId);
-    return { counts, ...(source ? { source } : {}) };
+    const polling = this.pollingBackoff(sourceId);
+    return { counts, ...(source ? { source } : {}), ...(polling ? { polling } : {}) };
   }
 
   importLegacy(bundle: LegacyForwardedImportBundle): { applied: boolean; events: number; inserted_events: number } {

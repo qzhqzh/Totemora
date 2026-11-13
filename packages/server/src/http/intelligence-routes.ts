@@ -1,10 +1,13 @@
 import type { IntelligencePreferenceStore } from "../intelligence-preference-store";
 import type { IntelligenceService } from "../intelligence-service";
+import type { ResearchDirectionStore } from "../research-direction-store";
 import { HttpError, json, readJson, readOptionalJson } from "./http-boundary";
+import { intelligenceBriefLimit } from "./intelligence-brief-query";
 import {
   intelligencePreferencesInput,
   intelligenceTaskInput,
   manualIntelligenceRunInput,
+  researchDirectionsInput,
   telegramUpdateInput,
   type IntelligenceTaskRouteInput,
 } from "./intelligence-input-schema";
@@ -24,6 +27,7 @@ export interface IntelligenceTaskView {
 export interface IntelligenceRouteDependencies {
   getIntelligence(): Promise<IntelligenceRouteService>;
   preferences: Pick<IntelligencePreferenceStore, "get" | "save">;
+  researchDirections: Pick<ResearchDirectionStore, "get" | "save">;
   credentialStatus(): Promise<{ x_trends: boolean; weibo_hot: boolean }>;
   enqueueTask(input: IntelligenceTaskRouteInput & { domain: "ai" }): Promise<unknown>;
   getTask(id: string): IntelligenceTaskView | undefined;
@@ -39,7 +43,8 @@ export async function handleIntelligenceRoutes(
   if (!isIntelligencePath(url.pathname)) return undefined;
 
   if (request.method === "GET" && url.pathname === "/api/intelligence") {
-    return json({ briefs: await (await dependencies.getIntelligence()).list() });
+    const limit = intelligenceBriefLimit(url);
+    return json({ briefs: await (await dependencies.getIntelligence()).list(limit) });
   }
   if (request.method === "GET" && url.pathname === "/api/intelligence/sources") {
     return json({ sources: (await dependencies.getIntelligence()).sourceHealth() });
@@ -94,6 +99,15 @@ export async function handleIntelligenceRoutes(
 
   if (request.method === "GET" && url.pathname === "/api/intelligence/preferences") {
     return json({ ...await dependencies.preferences.get(), credentials: await dependencies.credentialStatus() });
+  }
+  if (request.method === "GET" && url.pathname === "/api/intelligence/research-directions") {
+    return json(await dependencies.researchDirections.get());
+  }
+  if (request.method === "PUT" && url.pathname === "/api/intelligence/research-directions") {
+    dependencies.requireOperator(request);
+    return json(await dependencies.researchDirections.save(
+      researchDirectionsInput(await readJson(request, 32_000)),
+    ));
   }
   if (request.method === "PUT" && url.pathname === "/api/intelligence/preferences") {
     dependencies.requireOperator(request);

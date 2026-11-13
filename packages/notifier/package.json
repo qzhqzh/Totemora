@@ -1,0 +1,18 @@
+{
+  "name": "@totemora/notifier",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./domains/notification/*": "./src/domains/notification/*.ts",
+    "./application/*": "./src/application/*.ts",
+    "./repositories/*": "./src/repositories/*.ts",
+    "./bootstrap/*": "./src/bootstrap/*.ts",
+    "./integrations/*": "./src/integrations/*.ts",
+    "./http/*": "./src/http/*.ts",
+    "./client": "./src/client.ts"
+  },
+  "dependencies": {
+    "nodemailer": "^10.0.8"
+  }
+}

@@ -60,7 +60,7 @@ function renderForwarded() {
   );
   $("forwarded-health").innerHTML = `
     <div><small>上游订阅</small><strong>${health?.configured ? "已配置" : "未配置"}</strong><span>${escapeHtml(source?.last_success_at ? formatObservatoryTime(source.last_success_at) : "尚无成功轮询")}</span></div>
-    <div><small>最近轮询</small><strong>${source?.last_error ? "异常" : source ? "健康" : "等待首轮"}</strong><span>${escapeHtml(source?.last_error || (source ? `新增 ${source.last_added} 条` : "仅从受限 Secret 读取配置"))}</span></div>
+    <div><small>最近轮询</small><strong>${health?.polling ? "等待重试" : source?.last_error ? "上游受阻" : source ? "健康" : "等待首轮"}</strong><span>${escapeHtml(source?.last_error || (source ? `新增 ${source.last_added} 条` : "仅从受限 Secret 读取配置"))}${health?.polling ? ` · 下次探测 ${escapeHtml(formatObservatoryTime(health.polling.next_poll_at))}` : ""}</span></div>
     <div><small>需要处理</small><strong>${Number(counts.pending || 0) + Number(counts.failed || 0) + Number(counts.uncertain || 0)}</strong><span>未知结果保持终态，不自动重发</span></div>`;
   $("forwarded-list").innerHTML = events.map((item) => `
     <article class="forwarded-card ${escapeHtml(item.status)}">
