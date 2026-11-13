@@ -22,8 +22,7 @@ export class NotifierBarkSender implements BarkTargetSender {
     } catch {
       throw Object.assign(new Error("Bark network result is unknown"), { outcomeUncertain: true });
     }
-    // A definite rejection is safe to retry; an unreadable success is not.
-    if (!response.ok) throw new Error(`Bark rejected delivery (HTTP ${response.status})`);
+    if (!response.ok) throw deliveryHttpError("Bark", response.status);
     return { target_id: target.id, status: response.status, accepted: true as const };
   }
 
@@ -48,7 +47,7 @@ export class NotifierTelegramSender implements TelegramTextSender {
     } catch {
       throw Object.assign(new Error("Telegram network result is unknown"), { outcomeUncertain: true });
     }
-    if (!response.ok) throw new Error(`Telegram rejected delivery (HTTP ${response.status})`);
+    if (!response.ok) throw deliveryHttpError("Telegram", response.status);
     try {
       const raw = await readBoundedResponseText(response, 8192, "Telegram response too large");
       const receipt = JSON.parse(raw) as { ok?: boolean; result?: { message_id?: number; chat?: { id?: number } } };
@@ -59,4 +58,13 @@ export class NotifierTelegramSender implements TelegramTextSender {
     } catch {}
     throw Object.assign(new Error("Telegram acceptance receipt is unknown"), { outcomeUncertain: true });
   }
+}
+
+function deliveryHttpError(channel: string, status: number): Error {
+  // A proxy timeout or server error can arrive after downstream acceptance.
+  // Only definite rejection permits replay of the same notification.
+  if (status === 408 || status >= 500) {
+    return Object.assign(new Error(`${channel} delivery outcome is unknown (HTTP ${status})`), { outcomeUncertain: true });
+  }
+  return new Error(`${channel} rejected delivery (HTTP ${status})`);
 }
